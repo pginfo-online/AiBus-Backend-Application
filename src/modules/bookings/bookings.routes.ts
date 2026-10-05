@@ -1,0 +1,19 @@
+import { Router } from 'express';
+import { BookingsController } from './bookings.controller';
+import { validate, optionalAuth, authenticate } from '../../app/middleware';
+import { createBookingSchema } from './bookings.validation';
+
+const bookingsRouter = Router();
+const controller = new BookingsController();
+
+// Create booking (allows guest or authenticated user)
+bookingsRouter.post('/', optionalAuth, validate({ body: createBookingSchema }), controller.createBooking);
+
+// Get current user's bookings (authenticated)
+bookingsRouter.get('/my-bookings', authenticate, controller.getUserBookings);
+
+// Get single booking by ID
+bookingsRouter.get('/:id', optionalAuth, controller.getBooking);
+
+export { bookingsRouter };
+export default bookingsRouter;

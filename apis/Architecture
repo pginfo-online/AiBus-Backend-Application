@@ -1,0 +1,586 @@
+# AiBus Backend — Architecture Document
+
+> **Phase 2 Deliverable** — produced after complete discovery of the existing repository, GDS provider API documentation, industry research, and requirements analysis.
+
+---
+
+## 1. GDS Provider API Analysis (Source of Truth)
+
+### Two Servers
+| Server | Base URL | Purpose |
+|--------|----------|---------|
+| Partner API | `https://partnerapi.iamgds.com/` | Auth, cities, search, chart, single-bus search |
+| Transaction API | `https://partnertranapi.iamgds.com/` | Hold, book, booking status, cancel, booking details, balance |
+
+### 12 Documented Endpoints
+
+| # | Method | Path | Server | Purpose |
+|---|--------|------|--------|---------|
+| 1 | POST | `/ota/v1/Auth` | Partner | Get access token (90 min TTL) |
+| 2 | GET | `/ota/CityList` | Partner | List all cities |
+| 3 | GET | `/ota/Search` | Partner | Search buses by from/to/date |
+| 4 | GET | `/ota/Chart` | Partner | Seat chart for a specific bus |
+| 5 | GET | `/ota/SearchBus` | Partner | Single bus details |
+| 6 | POST | `/ota/HoldSeats` | Transaction | Hold seats for user |
+| 7 | POST | `/ota/BookSeats` | Transaction | Confirm booking after hold |
+| 8 | POST | `/ota/bookingstatusv2` | Transaction | Check booking status by HoldId |
+| 9 | GET | `/ota/IsCancellable` | Transaction | Check cancellation eligibility |
+| 10 | POST | `/ota/CancelSeats` | Transaction | Cancel seats |
+| 11 | GET | `/ota/BookingDetails` | Transaction | Get booking details by PNR+TicketNo |
+| 12 | GET | `/ota/balance` | Transaction | Agent balance |
+
+### Authentication
+- **Credentials**: `ClientId` (int) + `ClientSecret` (string)
+- **Response**: Raw string token (not JSON object)
+- **TTL**: 90 minutes (doc says cache for 24h, but token valid 90 min)
+- **Header**: Access token passed in headers for subsequent calls
+- **Security**: ClientSecret must never leave server
+
+### Key Provider Identifiers
+| Identifier | Source | Usage |
+|------------|--------|-------|
+| `CityId` | CityList | Search from/to |
+| `TripId` | Search | Format: `"{ProvId}:{RouteId}"` or `"{RouteId}"` |
+| `RouteBusId` / `BusId` | Search/Chart | Identifies bus on a route |
+| `ChartCode` | Search/Chart | Opaque chart identifier |
+| `PickupCode` | Chart | Boarding point identifier |
+| `DropoffCode` | Chart | Alighting point identifier |
+| `HoldId` | HoldSeats | Links hold → book → status |
+| `TicketNo` | BookSeats | Booking reference |
+| `PNRNo` | BookSeats | Operator PNR for ticket |
+| `seq_no` | Chart Layout | Maps to seat_no, fare, status via array index |
+
+### Seat Status Codes (from Chart)
+| Code | Meaning |
+|------|---------|
+| 0 | Not Available |
+| 1 | Available for all |
+| 2 | Available only for male |
+| 3 | Available only for female |
+| -2 | Booked by male |
+| -3 | Booked by female |
+
+### Seat Type IDs
+| ID | Type |
+|----|------|
+| 1 | Seating |
+| 2 | Sleeper |
+| 4 | Semi Sleeper |
+
+### Fare Array Structure
+`[total_fare, base_fare, 0, 0, 0, 0]`
+- `total_fare - base_fare` = applicable charges including service tax
+
+### Cancellation Policy Structure
+```json
+{ "Amt": 0, "Pct": 10, "Mins": 600 }
+```
+- `Pct`: Cancellation charge percentage
+- `Mins`: Minutes before departure when this policy applies
+- `Amt`: Fixed cancellation amount (0 in examples)
+
+### BookingStatus Response Codes
+| Status | Meaning |
+|--------|---------|
+| 1 | Hold ID found, booking successful |
+| 0 | Hold ID found, booking in progress |
+| -1 | Hold ID found, booking unsuccessful/cancelled |
+| -2 | Hold ID not found |
+
+### CancelSeats Response
+Returns `NewHoldId`, `NewTicketNo`, `NewPNRNo` — indicating the provider creates a new booking record for the post-cancellation state.
+
+> [!IMPORTANT]
+> The GDS documentation does **not** specify: rate limits, error response format for failures (only success examples shown), webhook callbacks, hold TTL duration, maximum passengers per hold, or timeout behavior. These are marked as **unresolved integration points**.
+
+---
+
+## 2. Module Dependency Graph
+
+```mermaid
+graph TD
+    AUTH[auth] --> USERS[users]
+    SEARCH[search] --> CITIES[cities]
+    SEARCH --> PROVIDERS[providers]
+    SEATS[seats] --> PROVIDERS
+    HOLDS[holds] --> SEATS
+    HOLDS --> PROVIDERS
+    BOOKINGS[bookings] --> HOLDS
+    BOOKINGS --> PAYMENTS[payments]
+    BOOKINGS --> PASSENGERS[passengers]
+    BOOKINGS --> PROVIDERS
+    CANCELLATIONS[cancellations] --> BOOKINGS
+    CANCELLATIONS --> REFUNDS[refunds]
+    CANCELLATIONS --> PROVIDERS
+    REFUNDS --> PAYMENTS
+    TICKETS[tickets] --> BOOKINGS
+    NOTIFICATIONS[notifications] --> BOOKINGS
+    NOTIFICATIONS --> PAYMENTS
+    NOTIFICATIONS --> TICKETS
+    WALLET[wallet] --> USERS
+    RECONCILIATION[reconciliation] --> BOOKINGS
+    RECONCILIATION --> PAYMENTS
+    RECONCILIATION --> PROVIDERS
+    ADMIN[admin] --> BOOKINGS
+    ADMIN --> USERS
+    ADMIN --> PAYMENTS
+    AUDIT[audit]
+```
+
+---
+
+## 3. Booking State Machine
+
+```mermaid
+stateDiagram-v2
+    [*] --> INITIATED: User starts booking
+    INITIATED --> HOLD_REQUESTED: Seats selected
+    HOLD_REQUESTED --> HELD: Provider hold success
+    HOLD_REQUESTED --> HOLD_FAILED: Provider hold failed
+    HELD --> PAYMENT_PENDING: Payment intent created
+    HELD --> HOLD_EXPIRED: TTL expired
+    PAYMENT_PENDING --> PAYMENT_SUCCESS: Gateway confirms
+    PAYMENT_PENDING --> PAYMENT_FAILED: Gateway rejects
+    PAYMENT_PENDING --> HOLD_EXPIRED: TTL expired during payment
+    PAYMENT_SUCCESS --> BOOKING_REQUESTED: BookSeats called
+    BOOKING_REQUESTED --> CONFIRMED: Provider confirms
+    BOOKING_REQUESTED --> BOOKING_UNKNOWN: Timeout/network error
+    BOOKING_REQUESTED --> BOOKING_FAILED: Provider rejects
+    BOOKING_UNKNOWN --> CONFIRMED: Reconciliation confirms
+    BOOKING_UNKNOWN --> BOOKING_FAILED: Reconciliation rejects
+    BOOKING_FAILED --> REFUND_PENDING: Auto-refund initiated
+    REFUND_PENDING --> REFUNDED: Refund completed
+    CONFIRMED --> CANCELLATION_REQUESTED: User cancels
+    CANCELLATION_REQUESTED --> CANCELLED: Provider cancels
+    CANCELLATION_REQUESTED --> CANCELLATION_FAILED: Provider rejects
+    CANCELLED --> REFUND_PENDING: Refund initiated
+    HOLD_FAILED --> [*]
+    HOLD_EXPIRED --> [*]
+    PAYMENT_FAILED --> [*]
+    REFUNDED --> [*]
+```
+
+### Valid State Transitions Table
+
+| From | To | Trigger | Side Effects |
+|------|----|---------|-------------|
+| INITIATED | HOLD_REQUESTED | User selects seats | Redis lock acquired |
+| HOLD_REQUESTED | HELD | Provider HoldSeats success | Store HoldId, snapshot fares |
+| HOLD_REQUESTED | HOLD_FAILED | Provider HoldSeats failure | Release Redis lock |
+| HELD | PAYMENT_PENDING | Payment intent created | Payment record created |
+| HELD | HOLD_EXPIRED | TTL elapsed | Release Redis lock, cleanup |
+| PAYMENT_PENDING | PAYMENT_SUCCESS | Webhook/verification | Payment record updated |
+| PAYMENT_PENDING | PAYMENT_FAILED | Webhook/verification | Release hold, cleanup |
+| PAYMENT_SUCCESS | BOOKING_REQUESTED | BookSeats called | Provider transaction record |
+| BOOKING_REQUESTED | CONFIRMED | Provider success | Store TicketNo, PNRNo, generate ticket |
+| BOOKING_REQUESTED | BOOKING_UNKNOWN | Timeout | Queue reconciliation job |
+| BOOKING_REQUESTED | BOOKING_FAILED | Provider failure | Queue refund |
+| BOOKING_FAILED | REFUND_PENDING | Auto-triggered | Refund record created |
+| REFUND_PENDING | REFUNDED | Refund confirmed | Wallet/gateway credited |
+| CONFIRMED | CANCELLATION_REQUESTED | User/admin action | IsCancellable check |
+| CANCELLATION_REQUESTED | CANCELLED | Provider CancelSeats success | Refund initiated |
+| CANCELLATION_REQUESTED | CANCELLATION_FAILED | Provider rejects | Booking stays confirmed |
+| CANCELLED | REFUND_PENDING | Auto-triggered | Refund record created |
+
+---
+
+## 4. Database Entity-Relationship Design
+
+### Core Entities
+
+```
+┌──────────────────┐    ┌──────────────────┐    ┌──────────────────┐
+│     users         │    │  refresh_tokens   │    │   audit_logs     │
+├──────────────────┤    ├──────────────────┤    ├──────────────────┤
+│ id (UUID PK)     │←──┐│ id (UUID PK)     │    │ id (UUID PK)     │
+│ email (UNIQUE)   │   ││ user_id (FK)     │    │ actor_id         │
+│ password_hash    │   ││ token_hash       │    │ actor_type       │
+│ first_name       │   ││ family_id        │    │ action           │
+│ last_name        │   ││ expires_at       │    │ resource_type    │
+│ phone            │   ││ revoked_at       │    │ resource_id      │
+│ role             │   ││ device_info      │    │ before_state     │
+│ status           │   ││ ip_address       │    │ after_state      │
+│ email_verified   │   │└──────────────────┘    │ ip_address       │
+│ created_at       │   │                         │ request_id       │
+│ updated_at       │   │                         │ created_at       │
+└──────────────────┘   │                         └──────────────────┘
+         │              │
+         │              │    ┌──────────────────┐
+         │              │    │    cities         │
+         │              │    ├──────────────────┤
+         │              │    │ id (UUID PK)     │
+         │              │    │ name             │
+         │              │    │ state            │
+         │              │    │ provider_city_id │
+         │              │    │ provider_name    │
+         │              │    │ aliases (JSON)   │
+         │              │    │ active           │
+         │              │    │ created_at       │
+         │              │    │ updated_at       │
+         │              │    └──────────────────┘
+         │              │
+         ▼              │
+┌──────────────────┐   │    ┌──────────────────┐
+│    bookings       │   │    │  booking_seats    │
+├──────────────────┤   │    ├──────────────────┤
+│ id (UUID PK)     │   │    │ id (UUID PK)     │
+│ user_id (FK)     │───┘    │ booking_id (FK)  │
+│ booking_number   │←──────┐│ seat_no          │
+│ status           │       ││ seat_type_id     │
+│ provider_name    │       ││ fare_total       │
+│ provider_hold_id │       ││ fare_base        │
+│ provider_ticket  │       ││ fare_tax         │
+│ provider_pnr     │       │└──────────────────┘
+│ from_city_id     │       │
+│ to_city_id       │       │┌──────────────────┐
+│ journey_date     │       ││booking_passengers│
+│ bus_id           │       │├──────────────────┤
+│ trip_id          │       ││ id (UUID PK)     │
+│ pickup_code      │       ││ booking_id (FK)  │
+│ dropoff_code     │       ││ name             │
+│ departure_time   │       ││ age              │
+│ arrival_time     │       ││ gender           │
+│ operator_name    │       ││ seat_no          │
+│ bus_type         │       ││ fare             │
+│ total_fare       │       ││ seat_type_id     │
+│ total_base_fare  │       ││ is_ac_seat       │
+│ total_tax        │       │└──────────────────┘
+│ commission_pct   │       │
+│ contact_name     │       │┌──────────────────┐
+│ contact_email    │       ││   payments        │
+│ contact_phone    │       │├──────────────────┤
+│ cancellation_pol │       ││ id (UUID PK)     │
+│ pickup_snapshot  │       ││ booking_id (FK)  │
+│ dropoff_snapshot │       ││ user_id (FK)     │
+│ version          │       ││ amount           │
+│ idempotency_key  │       ││ currency         │
+│ created_at       │       ││ status           │
+│ updated_at       │       ││ gateway          │
+│ confirmed_at     │       ││ gateway_order_id │
+│ cancelled_at     │       ││ gateway_payment_id│
+└──────────────────┘       ││ gateway_signature│
+                           ││ merchant_txn_id  │
+┌──────────────────┐       ││ webhook_verified │
+│   seat_holds      │       ││ idempotency_key  │
+├──────────────────┤       ││ attempts (int)   │
+│ id (UUID PK)     │       ││ metadata (JSON)  │
+│ booking_id (FK)  │───────┘│ created_at       │
+│ user_id (FK)     │        │ updated_at       │
+│ provider_hold_id │        └──────────────────┘
+│ provider_name    │
+│ status           │        ┌──────────────────┐
+│ from_city_id     │        │   cancellations   │
+│ to_city_id       │        ├──────────────────┤
+│ journey_date     │        │ id (UUID PK)     │
+│ bus_id           │        │ booking_id (FK)  │
+│ seats (JSON)     │        │ user_id (FK)     │
+│ expires_at       │        │ status           │
+│ released_at      │        │ seat_nos         │
+│ created_at       │        │ provider_new_hold│
+│ updated_at       │        │ provider_new_tkt │
+└──────────────────┘        │ provider_new_pnr │
+                            │ charge_pct       │
+┌──────────────────┐        │ charge_amt       │
+│    refunds        │        │ refund_amount    │
+├──────────────────┤        │ total_fare       │
+│ id (UUID PK)     │        │ reason           │
+│ booking_id (FK)  │        │ idempotency_key  │
+│ payment_id (FK)  │        │ created_at       │
+│ cancellation_id  │        │ updated_at       │
+│ user_id (FK)     │        └──────────────────┘
+│ amount           │
+│ status           │        ┌──────────────────┐
+│ reason           │        │    tickets        │
+│ gateway_refund_id│        ├──────────────────┤
+│ provider_refund  │        │ id (UUID PK)     │
+│ retry_count      │        │ booking_id (FK)  │
+│ idempotency_key  │        │ ticket_number    │
+│ created_at       │        │ pnr_number       │
+│ updated_at       │        │ status           │
+│ completed_at     │        │ pdf_url          │
+└──────────────────┘        │ storage_key      │
+                            │ booking_snapshot  │
+┌──────────────────┐        │ generated_at     │
+│ idempotency_keys  │        │ created_at       │
+├──────────────────┤        └──────────────────┘
+│ id (UUID PK)     │
+│ key (UNIQUE)     │        ┌──────────────────┐
+│ user_id          │        │ webhook_events    │
+│ method           │        ├──────────────────┤
+│ path             │        │ id (UUID PK)     │
+│ request_hash     │        │ event_id (UNIQUE)│
+│ response_code    │        │ gateway          │
+│ response_body    │        │ event_type       │
+│ status           │        │ payload          │
+│ expires_at       │        │ signature        │
+│ created_at       │        │ verified         │
+└──────────────────┘        │ processed        │
+                            │ processing_error │
+┌──────────────────┐        │ created_at       │
+│provider_transactions│     │ processed_at     │
+├──────────────────┤        └──────────────────┘
+│ id (UUID PK)     │
+│ booking_id (FK)  │        ┌──────────────────┐
+│ provider_name    │        │ notifications     │
+│ operation        │        ├──────────────────┤
+│ request_payload  │        │ id (UUID PK)     │
+│ response_payload │        │ user_id (FK)     │
+│ response_status  │        │ booking_id       │
+│ duration_ms      │        │ channel          │
+│ error_message    │        │ type             │
+│ request_id       │        │ status           │
+│ created_at       │        │ recipient        │
+└──────────────────┘        │ payload          │
+                            │ retry_count      │
+┌──────────────────┐        │ sent_at          │
+│ wallet_transactions│      │ created_at       │
+├──────────────────┤        └──────────────────┘
+│ id (UUID PK)     │
+│ wallet_id (FK)   │
+│ type (CREDIT/DEBIT/REFUND/REVERSAL)│
+│ amount           │
+│ balance_after    │
+│ reference_type   │
+│ reference_id     │
+│ description      │
+│ idempotency_key  │
+│ created_at       │
+└──────────────────┘
+```
+
+---
+
+## 5. Concurrency Strategy — Seat Booking
+
+### Multi-Layer Protection
+
+```
+Layer 1: Redis Distributed Lock
+    Key: lock:seat:gds:{busId}:{journeyDate}:{seatNo}
+    TTL: 30 seconds (short, advisory)
+    Ownership: requestId
+
+Layer 2: PostgreSQL booking record
+    UNIQUE constraint on (provider_name, provider_hold_id)
+    Optimistic concurrency via version column
+    Status must be validated before transitions
+
+Layer 3: Provider HoldSeats
+    Provider is authoritative — if hold fails, seat is taken
+    HoldId uniquely identifies the hold
+
+Layer 4: Idempotency
+    Idempotency-Key header prevents duplicate mutations
+    Stored with response, replayed on duplicate
+```
+
+### Race Condition Flow
+```
+User A selects Seat 7    User B selects Seat 7
+        │                        │
+   Redis SETNX ────────── Redis SETNX
+   (succeeds)              (fails → immediate rejection)
+        │
+   Provider HoldSeats
+   (succeeds → HoldId)
+        │
+   PostgreSQL INSERT
+   (booking + hold records)
+        │
+   Release Redis lock
+```
+
+If Redis is unavailable, fallback to PostgreSQL UNIQUE constraints + provider hold as the authoritative check. The system degrades gracefully — more users may hit the provider, but correctness is maintained.
+
+---
+
+## 6. Payment Flow
+
+```
+Client selects seats
+        │
+Backend creates booking (INITIATED)
+        │
+Backend calls HoldSeats → HELD
+        │
+Backend creates payment intent (PhonePe order)
+        │ → Booking status: PAYMENT_PENDING
+        │
+Client redirected to PhonePe checkout
+        │
+PhonePe processes payment
+        │
+    ┌───┴───┐
+    │       │
+Webhook  Client returns
+    │       │
+Backend verifies payment via:
+  1. Webhook signature validation
+  2. Server-side status check API
+        │
+PAYMENT_SUCCESS
+        │
+Backend calls BookSeats(HoldId)
+        │
+    ┌───┴───┐
+    │       │
+ Success  Timeout/Error
+    │       │
+CONFIRMED  BOOKING_UNKNOWN
+    │       │
+Generate  Queue reconciliation
+ticket    (BookingStatus check)
+```
+
+> [!CAUTION]
+> Never trust the client-side payment redirect as proof of payment. Always verify via webhook + server-side status API.
+
+---
+
+## 7. Queue Architecture
+
+| Queue | Purpose | Retry | DLQ |
+|-------|---------|-------|-----|
+| `booking-reconciliation` | Check BOOKING_UNKNOWN via BookingStatus | 5x, exponential | Yes |
+| `payment-reconciliation` | Verify pending payments | 3x, exponential | Yes |
+| `refund-processing` | Process refunds to gateway | 5x, exponential | Yes |
+| `ticket-generation` | Generate PDF, upload to storage | 3x | Yes |
+| `notification-email` | Send emails | 3x | Yes |
+| `notification-sms` | Send SMS | 3x | Yes |
+| `notification-push` | Push notifications | 3x | Yes |
+| `provider-health` | Periodic provider health checks | N/A | No |
+| `hold-expiry-cleanup` | Release expired holds | 1x | Yes |
+| `audit-log` | Async audit event persistence | 3x | Yes |
+
+---
+
+## 8. Redis Namespace Design
+
+```
+cache:cities:{provider}              → city list (TTL: 24h)
+cache:search:{provider}:{hash}       → search results (TTL: 5 min)
+cache:chart:{provider}:{hash}        → seat chart (TTL: 2 min)
+
+lock:seat:{provider}:{busId}:{date}:{seatNo} → distributed lock (TTL: 30s)
+lock:provider-auth:{provider}        → auth token refresh lock
+lock:booking:{bookingId}             → booking mutation lock
+
+session:refresh:{tokenFamily}        → refresh token metadata
+
+rate:api:{ip}                        → API rate limit counter
+rate:auth:{email}                    → Auth attempt rate limit
+rate:booking:{userId}                → Booking rate limit
+
+idem:{key}                           → idempotency record (TTL: 24h)
+
+provider:token:{provider}            → cached access token (TTL: 80 min)
+provider:health:{provider}           → circuit breaker state
+
+queue:*                              → BullMQ managed
+```
+
+---
+
+## 9. Circuit Breaker Design
+
+```
+Provider: GDS
+States: CLOSED → OPEN → HALF_OPEN → CLOSED
+
+Thresholds:
+  - Failure count window: 60 seconds
+  - Failure threshold: 5 failures in window → OPEN
+  - Open duration: 30 seconds → HALF_OPEN
+  - Half-open probe: 1 request allowed
+  - Success in half-open → CLOSED
+  - Failure in half-open → OPEN (reset timer)
+
+Tracked failures:
+  - Connection timeout
+  - HTTP 5xx
+  - HTTP 429
+  - Network errors
+
+NOT tracked as failures:
+  - HTTP 4xx (business errors)
+  - Seat unavailable
+  - Invalid parameters
+  - Auth failures (handled separately)
+```
+
+---
+
+## 10. Implementation Phases
+
+### Phase 3 — Foundation (Current Target)
+- [ ] TypeScript + Express app scaffold
+- [ ] Environment config with Zod validation
+- [ ] Pino structured logging
+- [ ] Request ID middleware
+- [ ] Error handling middleware
+- [ ] Security middleware (Helmet, CORS, rate limiting)
+- [ ] PostgreSQL + Prisma setup
+- [ ] Redis client setup
+- [ ] BullMQ infrastructure
+- [ ] Health check endpoints
+- [ ] API response envelope
+- [ ] Graceful shutdown
+
+### Phase 4 — Core Domain
+- [ ] Auth module (signup, login, refresh, logout)
+- [ ] Users module
+- [ ] Cities module
+- [ ] Search module
+- [ ] Seats/Chart module
+- [ ] Holds module
+- [ ] Bookings module
+- [ ] Passengers module
+
+### Phase 5 — Provider Integration
+- [ ] GDS provider adapter
+- [ ] GDS auth client (token caching)
+- [ ] GDS API client (timeouts, retries)
+- [ ] GDS mapper (normalize responses)
+- [ ] Circuit breaker
+- [ ] Provider health monitoring
+
+### Phase 6 — Payments
+- [ ] Payment module
+- [ ] PhonePe integration
+- [ ] Webhook endpoint
+- [ ] Payment verification
+- [ ] Idempotency middleware
+- [ ] Payment reconciliation
+
+### Phase 7 — Post-Booking
+- [ ] Ticket generation
+- [ ] Notifications
+- [ ] Cancellations
+- [ ] Refunds
+- [ ] Audit logging
+- [ ] Reconciliation workers
+
+### Phase 8 — Hardening
+- [ ] Unit tests
+- [ ] Integration tests
+- [ ] Concurrency tests
+- [ ] Load tests
+- [ ] Security review
+
+---
+
+## 11. Unresolved Integration Points
+
+> [!WARNING]
+> The following are NOT documented in the GDS API specs and must be confirmed with the provider or handled defensively:
+
+1. **Hold TTL duration** — How long does the provider hold last? (Assumption: 10-15 minutes)
+2. **Rate limits** — No rate limit documentation provided
+3. **Error response format** — Only success examples shown; error payloads need runtime discovery
+4. **Maximum passengers per hold** — Not specified
+5. **Hold expiry behavior** — Does the provider send a callback or is polling required?
+6. **Idempotency on BookSeats** — Can BookSeats be safely retried with the same HoldId?
+7. **Partial cancellation** — CancelSeats accepts comma-separated seatNos; behavior for partial cancellation of multi-seat bookings needs testing
+8. **Access token header name** — Documented as "passed in headers" but exact header name not specified (Assumption: `Authorization` or `access-token`)
+9. **TripId format inconsistency** — Search returns `"15:46754"` while SearchBus returns `"46754"` (the `ProvId:RouteId` vs just `RouteId`)
+10. **BusId vs RouteBusId** — Chart/Hold use `BusId` but search response has `RouteBusId`; these appear to be the same value

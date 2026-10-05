@@ -1,0 +1,1 @@
+{"version":3,"file":"gdsAuthClient.d.ts","sourceRoot":"","sources":["../../../src/providers/gds/gdsAuthClient.ts"],"names":[],"mappings":"AAOA,qBAAa,aAAa;IACxB,OAAO,CAAC,MAAM,CAAC,QAAQ,CAAgB;IACvC,OAAO,CAAC,QAAQ,CAAC,UAAU,CAAwC;IACnE,OAAO,CAAC,WAAW,CAAuB;IAC1C,OAAO,CAAC,oBAAoB,CAAa;IAEzC,OAAO;WAEO,WAAW,IAAI,aAAa;IAO7B,cAAc,IAAI,OAAO,CAAC,MAAM,CAAC;YAyEhC,sBAAsB;CAiDrC"}

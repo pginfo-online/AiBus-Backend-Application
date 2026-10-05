@@ -1,0 +1,168 @@
+export declare class TicketsService {
+    private static instance;
+    private constructor();
+    static getInstance(): TicketsService;
+    getTicketByBookingId(bookingId: string): Promise<{
+        booking: {
+            seats: {
+                id: string;
+                bookingId: string;
+                seatNo: string;
+                seatTypeId: number;
+                fareTotal: import("@prisma/client/runtime/library").Decimal;
+                fareBase: import("@prisma/client/runtime/library").Decimal;
+                fareTax: import("@prisma/client/runtime/library").Decimal;
+                deck: number;
+                row: number;
+                column: number;
+            }[];
+            passengers: {
+                name: string;
+                id: string;
+                bookingId: string;
+                seatNo: string;
+                seatTypeId: number;
+                age: number;
+                gender: string;
+                fare: import("@prisma/client/runtime/library").Decimal;
+                isAcSeat: boolean;
+            }[];
+        } & {
+            version: number;
+            userId: string | null;
+            id: string;
+            status: import(".prisma/client").$Enums.BookingStatus;
+            createdAt: Date;
+            updatedAt: Date;
+            bookingNumber: string;
+            providerName: string;
+            providerHoldId: string | null;
+            providerTicketNo: string | null;
+            providerPnrNo: string | null;
+            fromCityId: number;
+            toCityId: number;
+            fromCityName: string;
+            toCityName: string;
+            journeyDate: string;
+            busId: number;
+            tripId: string;
+            pickupCode: string;
+            pickupLocation: string;
+            pickupTime: string;
+            dropoffCode: string;
+            dropoffLocation: string;
+            dropoffTime: string;
+            operatorName: string;
+            busType: string;
+            totalFare: import("@prisma/client/runtime/library").Decimal;
+            baseFare: import("@prisma/client/runtime/library").Decimal;
+            serviceTax: import("@prisma/client/runtime/library").Decimal;
+            operatorGst: import("@prisma/client/runtime/library").Decimal;
+            convenienceFee: import("@prisma/client/runtime/library").Decimal;
+            discountAmount: import("@prisma/client/runtime/library").Decimal;
+            contactName: string;
+            contactEmail: string;
+            contactPhone: string;
+            cancellationPolicy: import("@prisma/client/runtime/library").JsonValue | null;
+            pickupSnapshot: import("@prisma/client/runtime/library").JsonValue | null;
+            dropoffSnapshot: import("@prisma/client/runtime/library").JsonValue | null;
+            idempotencyKey: string | null;
+            confirmedAt: Date | null;
+            cancelledAt: Date | null;
+        };
+    } & {
+        id: string;
+        status: import(".prisma/client").$Enums.TicketStatus;
+        createdAt: Date;
+        updatedAt: Date;
+        bookingId: string;
+        ticketNumber: string;
+        pnrNumber: string;
+        pdfUrl: string | null;
+        storageKey: string | null;
+        bookingSnapshot: import("@prisma/client/runtime/library").JsonValue;
+        generatedAt: Date;
+    }>;
+    getTicketByTicketNumber(ticketNumber: string): Promise<{
+        booking: {
+            seats: {
+                id: string;
+                bookingId: string;
+                seatNo: string;
+                seatTypeId: number;
+                fareTotal: import("@prisma/client/runtime/library").Decimal;
+                fareBase: import("@prisma/client/runtime/library").Decimal;
+                fareTax: import("@prisma/client/runtime/library").Decimal;
+                deck: number;
+                row: number;
+                column: number;
+            }[];
+            passengers: {
+                name: string;
+                id: string;
+                bookingId: string;
+                seatNo: string;
+                seatTypeId: number;
+                age: number;
+                gender: string;
+                fare: import("@prisma/client/runtime/library").Decimal;
+                isAcSeat: boolean;
+            }[];
+        } & {
+            version: number;
+            userId: string | null;
+            id: string;
+            status: import(".prisma/client").$Enums.BookingStatus;
+            createdAt: Date;
+            updatedAt: Date;
+            bookingNumber: string;
+            providerName: string;
+            providerHoldId: string | null;
+            providerTicketNo: string | null;
+            providerPnrNo: string | null;
+            fromCityId: number;
+            toCityId: number;
+            fromCityName: string;
+            toCityName: string;
+            journeyDate: string;
+            busId: number;
+            tripId: string;
+            pickupCode: string;
+            pickupLocation: string;
+            pickupTime: string;
+            dropoffCode: string;
+            dropoffLocation: string;
+            dropoffTime: string;
+            operatorName: string;
+            busType: string;
+            totalFare: import("@prisma/client/runtime/library").Decimal;
+            baseFare: import("@prisma/client/runtime/library").Decimal;
+            serviceTax: import("@prisma/client/runtime/library").Decimal;
+            operatorGst: import("@prisma/client/runtime/library").Decimal;
+            convenienceFee: import("@prisma/client/runtime/library").Decimal;
+            discountAmount: import("@prisma/client/runtime/library").Decimal;
+            contactName: string;
+            contactEmail: string;
+            contactPhone: string;
+            cancellationPolicy: import("@prisma/client/runtime/library").JsonValue | null;
+            pickupSnapshot: import("@prisma/client/runtime/library").JsonValue | null;
+            dropoffSnapshot: import("@prisma/client/runtime/library").JsonValue | null;
+            idempotencyKey: string | null;
+            confirmedAt: Date | null;
+            cancelledAt: Date | null;
+        };
+    } & {
+        id: string;
+        status: import(".prisma/client").$Enums.TicketStatus;
+        createdAt: Date;
+        updatedAt: Date;
+        bookingId: string;
+        ticketNumber: string;
+        pnrNumber: string;
+        pdfUrl: string | null;
+        storageKey: string | null;
+        bookingSnapshot: import("@prisma/client/runtime/library").JsonValue;
+        generatedAt: Date;
+    }>;
+}
+//# sourceMappingURL=tickets.service.d.ts.map

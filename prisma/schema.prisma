@@ -1,0 +1,535 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ---------------------------------------------------------------------------
+// Enums
+// ---------------------------------------------------------------------------
+
+enum UserRole {
+  CUSTOMER
+  OPERATOR_AGENT
+  SUPPORT_AGENT
+  ADMIN
+  SUPER_ADMIN
+}
+
+enum UserStatus {
+  ACTIVE
+  SUSPENDED
+  DEACTIVATED
+}
+
+enum BookingStatus {
+  INITIATED
+  HOLD_REQUESTED
+  HELD
+  HOLD_FAILED
+  HOLD_EXPIRED
+  PAYMENT_PENDING
+  PAYMENT_SUCCESS
+  PAYMENT_FAILED
+  BOOKING_REQUESTED
+  CONFIRMED
+  BOOKING_UNKNOWN
+  BOOKING_FAILED
+  CANCELLATION_REQUESTED
+  CANCELLED
+  CANCELLATION_FAILED
+  REFUND_PENDING
+  REFUNDED
+}
+
+enum HoldStatus {
+  ACTIVE
+  CONVERTED
+  RELEASED
+  EXPIRED
+}
+
+enum PaymentStatus {
+  PENDING
+  PROCESSING
+  SUCCESS
+  FAILED
+  TIMED_OUT
+  REFUNDED
+  PARTIALLY_REFUNDED
+}
+
+enum CancellationStatus {
+  REQUESTED
+  COMPLETED
+  FAILED
+  REJECTED
+}
+
+enum RefundStatus {
+  PENDING
+  PROCESSING
+  COMPLETED
+  FAILED
+  REVERSED
+}
+
+enum RefundDestination {
+  ORIGINAL_PAYMENT_METHOD
+  WALLET
+}
+
+enum TicketStatus {
+  ISSUED
+  CANCELLED
+  EXPIRED
+}
+
+enum NotificationChannel {
+  EMAIL
+  SMS
+  PUSH
+  WHATSAPP
+}
+
+enum NotificationType {
+  BOOKING_CONFIRMATION
+  BOOKING_CANCELLATION
+  REFUND_PROCESSED
+  PAYMENT_REMINDER
+  TRIP_REMINDER
+}
+
+enum NotificationStatus {
+  PENDING
+  SENT
+  FAILED
+}
+
+enum WalletTransactionType {
+  CREDIT
+  DEBIT
+  REFUND
+  REVERSAL
+}
+
+enum IdempotencyStatus {
+  PROCESSING
+  RESOLVED
+  FAILED
+}
+
+// ---------------------------------------------------------------------------
+// Models
+// ---------------------------------------------------------------------------
+
+model User {
+  id                 String             @id @default(uuid()) @db.Uuid
+  email              String             @unique
+  passwordHash       String             @map("password_hash")
+  firstName          String             @map("first_name")
+  lastName           String             @map("last_name")
+  phone              String?
+  role               UserRole           @default(CUSTOMER)
+  status             UserStatus         @default(ACTIVE)
+  emailVerified      Boolean            @default(false) @map("email_verified")
+  phoneVerified      Boolean            @default(false) @map("phone_verified")
+  walletBalance      Decimal            @default(0.00) @map("wallet_balance") @db.Decimal(10, 2)
+  createdAt          DateTime           @default(now()) @map("created_at")
+  updatedAt          DateTime           @updatedAt @map("updated_at")
+
+  refreshTokens      RefreshToken[]
+  bookings           Booking[]
+  seatHolds          SeatHold[]
+  payments           Payment[]
+  cancellations      Cancellation[]
+  refunds            Refund[]
+  walletTransactions WalletTransaction[]
+
+  @@map("users")
+}
+
+model RefreshToken {
+  id         String    @id @default(uuid()) @db.Uuid
+  userId     String    @map("user_id") @db.Uuid
+  tokenHash  String    @unique @map("token_hash")
+  familyId   String    @map("family_id")
+  expiresAt  DateTime  @map("expires_at")
+  revokedAt  DateTime? @map("revoked_at")
+  deviceInfo String?   @map("device_info")
+  ipAddress  String?   @map("ip_address")
+  createdAt  DateTime  @default(now()) @map("created_at")
+  updatedAt  DateTime  @updatedAt @map("updated_at")
+
+  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([familyId])
+  @@map("refresh_tokens")
+}
+
+model City {
+  id             String   @id @default(uuid()) @db.Uuid
+  name           String
+  state          String?
+  providerCityId Int?     @map("provider_city_id")
+  providerName   String   @default("GDS") @map("provider_name")
+  aliases        Json?
+  active         Boolean  @default(true)
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+
+  @@unique([providerName, providerCityId])
+  @@index([name])
+  @@map("cities")
+}
+
+model Booking {
+  id                 String                @id @default(uuid()) @db.Uuid
+  userId             String?               @map("user_id") @db.Uuid
+  bookingNumber      String                @unique @map("booking_number")
+  status             BookingStatus         @default(INITIATED)
+  providerName       String                @default("GDS") @map("provider_name")
+  providerHoldId     String?               @map("provider_hold_id")
+  providerTicketNo   String?               @map("provider_ticket_no")
+  providerPnrNo      String?               @map("provider_pnr_no")
+  fromCityId         Int                   @map("from_city_id")
+  toCityId           Int                   @map("to_city_id")
+  fromCityName       String                @map("from_city_name")
+  toCityName         String                @map("to_city_name")
+  journeyDate        String                @map("journey_date") // yyyy-mm-dd
+  busId              Int                   @map("bus_id")
+  tripId             String                @map("trip_id")
+  pickupCode         String                @map("pickup_code")
+  pickupLocation     String                @map("pickup_location")
+  pickupTime         String                @map("pickup_time")
+  dropoffCode        String                @map("dropoff_code")
+  dropoffLocation    String                @map("dropoff_location")
+  dropoffTime        String                @map("dropoff_time")
+  operatorName       String                @map("operator_name")
+  busType            String                @map("bus_type")
+  totalFare          Decimal               @map("total_fare") @db.Decimal(10, 2)
+  baseFare           Decimal               @map("base_fare") @db.Decimal(10, 2)
+  serviceTax         Decimal               @map("service_tax") @db.Decimal(10, 2)
+  operatorGst        Decimal               @default(0.00) @map("operator_gst") @db.Decimal(10, 2)
+  convenienceFee     Decimal               @default(0.00) @map("convenience_fee") @db.Decimal(10, 2)
+  discountAmount     Decimal               @default(0.00) @map("discount_amount") @db.Decimal(10, 2)
+  contactName        String                @map("contact_name")
+  contactEmail       String                @map("contact_email")
+  contactPhone       String                @map("contact_phone")
+  cancellationPolicy Json?                 @map("cancellation_policy")
+  pickupSnapshot     Json?                 @map("pickup_snapshot")
+  dropoffSnapshot    Json?                 @map("dropoff_snapshot")
+  version            Int                   @default(1)
+  idempotencyKey     String?               @unique @map("idempotency_key")
+  confirmedAt        DateTime?             @map("confirmed_at")
+  cancelledAt        DateTime?             @map("cancelled_at")
+  createdAt          DateTime              @default(now()) @map("created_at")
+  updatedAt          DateTime              @updatedAt @map("updated_at")
+
+  user                 User?                 @relation(fields: [userId], references: [id], onDelete: SetNull)
+  seats                BookingSeat[]
+  passengers           BookingPassenger[]
+  payments             Payment[]
+  holds                SeatHold[]
+  cancellations        Cancellation[]
+  refunds              Refund[]
+  ticket               Ticket?
+  providerTransactions ProviderTransaction[]
+  notifications        Notification[]
+
+  @@index([userId])
+  @@index([status])
+  @@index([providerHoldId])
+  @@index([providerTicketNo])
+  @@index([journeyDate])
+  @@map("bookings")
+}
+
+model BookingSeat {
+  id          String   @id @default(uuid()) @db.Uuid
+  bookingId   String   @map("booking_id") @db.Uuid
+  seatNo      String   @map("seat_no")
+  seatTypeId  Int      @map("seat_type_id")
+  fareTotal   Decimal  @map("fare_total") @db.Decimal(10, 2)
+  fareBase    Decimal  @map("fare_base") @db.Decimal(10, 2)
+  fareTax     Decimal  @map("fare_tax") @db.Decimal(10, 2)
+  deck        Int      @default(1)
+  row         Int      @default(0)
+  column      Int      @default(0)
+
+  booking     Booking  @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+
+  @@unique([bookingId, seatNo])
+  @@index([bookingId])
+  @@map("booking_seats")
+}
+
+model BookingPassenger {
+  id         String   @id @default(uuid()) @db.Uuid
+  bookingId  String   @map("booking_id") @db.Uuid
+  name       String
+  age        Int
+  gender     String   // M or F
+  seatNo     String   @map("seat_no")
+  fare       Decimal  @db.Decimal(10, 2)
+  seatTypeId Int      @map("seat_type_id")
+  isAcSeat   Boolean  @default(false) @map("is_ac_seat")
+
+  booking    Booking  @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+
+  @@unique([bookingId, seatNo])
+  @@index([bookingId])
+  @@map("booking_passengers")
+}
+
+model SeatHold {
+  id             String     @id @default(uuid()) @db.Uuid
+  bookingId      String?    @map("booking_id") @db.Uuid
+  userId         String?    @map("user_id") @db.Uuid
+  providerHoldId String     @map("provider_hold_id")
+  providerName   String     @default("GDS") @map("provider_name")
+  status         HoldStatus @default(ACTIVE)
+  fromCityId     Int        @map("from_city_id")
+  toCityId       Int        @map("to_city_id")
+  journeyDate    String     @map("journey_date")
+  busId          Int        @map("bus_id")
+  seats          Json
+  expiresAt      DateTime   @map("expires_at")
+  releasedAt     DateTime?  @map("released_at")
+  createdAt      DateTime   @default(now()) @map("created_at")
+  updatedAt      DateTime   @updatedAt @map("updated_at")
+
+  booking        Booking?   @relation(fields: [bookingId], references: [id], onDelete: SetNull)
+  user           User?      @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@unique([providerName, providerHoldId])
+  @@index([expiresAt, status])
+  @@index([bookingId])
+  @@map("seat_holds")
+}
+
+model Payment {
+  id                String        @id @default(uuid()) @db.Uuid
+  bookingId         String        @map("booking_id") @db.Uuid
+  userId            String?       @map("user_id") @db.Uuid
+  amount            Decimal       @db.Decimal(10, 2)
+  currency          String        @default("INR")
+  status            PaymentStatus @default(PENDING)
+  gateway           String        @default("PHONEPE")
+  gatewayOrderId    String?       @map("gateway_order_id")
+  gatewayPaymentId  String?       @map("gateway_payment_id")
+  gatewaySignature  String?       @map("gateway_signature")
+  merchantTxnId     String        @unique @map("merchant_txn_id")
+  webhookVerified   Boolean       @default(false) @map("webhook_verified")
+  idempotencyKey    String?       @unique @map("idempotency_key")
+  attempts          Int           @default(1)
+  metadata          Json?
+  createdAt         DateTime      @default(now()) @map("created_at")
+  updatedAt         DateTime      @updatedAt @map("updated_at")
+
+  booking           Booking       @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  user              User?         @relation(fields: [userId], references: [id], onDelete: SetNull)
+  refunds           Refund[]
+
+  @@index([bookingId])
+  @@index([status])
+  @@index([gatewayOrderId])
+  @@map("payments")
+}
+
+model Cancellation {
+  id                 String             @id @default(uuid()) @db.Uuid
+  bookingId          String             @map("booking_id") @db.Uuid
+  userId             String?            @map("user_id") @db.Uuid
+  status             CancellationStatus @default(REQUESTED)
+  seatNos            String[]           @map("seat_nos")
+  providerNewHoldId  String?            @map("provider_new_hold_id")
+  providerNewTicketNo String?           @map("provider_new_ticket_no")
+  providerNewPnrNo   String?            @map("provider_new_pnr_no")
+  chargePct          Decimal            @map("charge_pct") @db.Decimal(5, 2)
+  chargeAmt          Decimal            @map("charge_amt") @db.Decimal(10, 2)
+  refundAmount       Decimal            @map("refund_amount") @db.Decimal(10, 2)
+  totalFare          Decimal            @map("total_fare") @db.Decimal(10, 2)
+  reason             String?
+  idempotencyKey     String?            @unique @map("idempotency_key")
+  createdAt          DateTime           @default(now()) @map("created_at")
+  updatedAt          DateTime           @updatedAt @map("updated_at")
+
+  booking            Booking            @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  user               User?              @relation(fields: [userId], references: [id], onDelete: SetNull)
+  refunds            Refund[]
+
+  @@index([bookingId])
+  @@map("cancellations")
+}
+
+model Refund {
+  id               String            @id @default(uuid()) @db.Uuid
+  bookingId        String            @map("booking_id") @db.Uuid
+  paymentId        String?           @map("payment_id") @db.Uuid
+  cancellationId   String?           @map("cancellation_id") @db.Uuid
+  userId           String?           @map("user_id") @db.Uuid
+  amount           Decimal           @db.Decimal(10, 2)
+  status           RefundStatus      @default(PENDING)
+  destination      RefundDestination @default(ORIGINAL_PAYMENT_METHOD)
+  reason           String
+  gatewayRefundId  String?           @map("gateway_refund_id")
+  providerRefundRef String?          @map("provider_refund_ref")
+  retryCount       Int               @default(0) @map("retry_count")
+  idempotencyKey   String?           @unique @map("idempotency_key")
+  completedAt      DateTime?         @map("completed_at")
+  createdAt        DateTime          @default(now()) @map("created_at")
+  updatedAt        DateTime          @updatedAt @map("updated_at")
+
+  booking          Booking           @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  payment          Payment?          @relation(fields: [paymentId], references: [id], onDelete: SetNull)
+  cancellation     Cancellation?     @relation(fields: [cancellationId], references: [id], onDelete: SetNull)
+  user             User?             @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([bookingId])
+  @@index([paymentId])
+  @@index([status])
+  @@map("refunds")
+}
+
+model Ticket {
+  id              String       @id @default(uuid()) @db.Uuid
+  bookingId       String       @unique @map("booking_id") @db.Uuid
+  ticketNumber    String       @unique @map("ticket_number")
+  pnrNumber       String       @map("pnr_number")
+  status          TicketStatus @default(ISSUED)
+  pdfUrl          String?      @map("pdf_url")
+  storageKey      String?      @map("storage_key")
+  bookingSnapshot Json         @map("booking_snapshot")
+  generatedAt     DateTime     @default(now()) @map("generated_at")
+  createdAt       DateTime     @default(now()) @map("created_at")
+  updatedAt       DateTime     @updatedAt @map("updated_at")
+
+  booking         Booking      @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+
+  @@index([ticketNumber])
+  @@index([pnrNumber])
+  @@map("tickets")
+}
+
+model WebhookEvent {
+  id              String    @id @default(uuid()) @db.Uuid
+  eventId         String    @unique @map("event_id")
+  gateway         String
+  eventType       String    @map("event_type")
+  payload         Json
+  signature       String?
+  verified        Boolean   @default(false)
+  processed       Boolean   @default(false)
+  processingError String?   @map("processing_error")
+  processedAt     DateTime? @map("processed_at")
+  createdAt       DateTime  @default(now()) @map("created_at")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
+
+  @@index([gateway, eventType])
+  @@index([processed])
+  @@map("webhook_events")
+}
+
+model ProviderTransaction {
+  id              String    @id @default(uuid()) @db.Uuid
+  bookingId       String?   @map("booking_id") @db.Uuid
+  providerName    String    @default("GDS") @map("provider_name")
+  operation       String
+  requestPayload  Json?     @map("request_payload")
+  responsePayload Json?     @map("response_payload")
+  responseStatus  Int?      @map("response_status")
+  durationMs      Int       @map("duration_ms")
+  errorMessage    String?   @map("error_message")
+  requestId       String    @map("request_id")
+  createdAt       DateTime  @default(now()) @map("created_at")
+
+  booking         Booking?  @relation(fields: [bookingId], references: [id], onDelete: SetNull)
+
+  @@index([bookingId])
+  @@index([providerName, operation])
+  @@index([requestId])
+  @@map("provider_transactions")
+}
+
+model WalletTransaction {
+  id             String                @id @default(uuid()) @db.Uuid
+  userId         String                @map("user_id") @db.Uuid
+  type           WalletTransactionType
+  amount         Decimal               @db.Decimal(10, 2)
+  balanceAfter   Decimal               @map("balance_after") @db.Decimal(10, 2)
+  referenceType  String                @map("reference_type")
+  referenceId    String?               @map("reference_id")
+  description    String?
+  idempotencyKey String?               @unique @map("idempotency_key")
+  createdAt      DateTime              @default(now()) @map("created_at")
+
+  user           User                  @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("wallet_transactions")
+}
+
+model Notification {
+  id         String             @id @default(uuid()) @db.Uuid
+  userId     String?            @map("user_id") @db.Uuid
+  bookingId  String?            @map("booking_id") @db.Uuid
+  channel    NotificationChannel
+  type       NotificationType
+  status     NotificationStatus @default(PENDING)
+  recipient  String
+  payload    Json
+  retryCount Int                @default(0) @map("retry_count")
+  sentAt     DateTime?          @map("sent_at")
+  createdAt  DateTime           @default(now()) @map("created_at")
+  updatedAt  DateTime           @updatedAt @map("updated_at")
+
+  booking    Booking?           @relation(fields: [bookingId], references: [id], onDelete: SetNull)
+
+  @@index([userId])
+  @@index([bookingId])
+  @@index([status])
+  @@map("notifications")
+}
+
+model AuditLog {
+  id           String   @id @default(uuid()) @db.Uuid
+  actorId      String?  @map("actor_id")
+  actorType    String   @default("SYSTEM") @map("actor_type")
+  action       String
+  resourceType String   @map("resource_type")
+  resourceId   String   @map("resource_id")
+  beforeState  Json?    @map("before_state")
+  afterState   Json?    @map("after_state")
+  ipAddress    String?  @map("ip_address")
+  requestId    String?  @map("request_id")
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  @@index([resourceType, resourceId])
+  @@index([actorId])
+  @@index([action])
+  @@map("audit_logs")
+}
+
+model IdempotencyRecord {
+  id           String            @id @default(uuid()) @db.Uuid
+  key          String            @unique
+  userId       String?           @map("user_id")
+  method       String
+  path         String
+  requestHash  String            @map("request_hash")
+  responseCode Int?              @map("response_code")
+  responseBody Json?             @map("response_body")
+  status       IdempotencyStatus @default(PROCESSING)
+  expiresAt    DateTime          @map("expires_at")
+  createdAt    DateTime          @default(now()) @map("created_at")
+  updatedAt    DateTime          @updatedAt @map("updated_at")
+
+  @@index([key, status])
+  @@index([expiresAt])
+  @@map("idempotency_records")
+}
