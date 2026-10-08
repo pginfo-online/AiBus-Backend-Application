@@ -111,6 +111,13 @@ export function createApp(): Express {
   app.use(`${apiPrefix}/cancellations`, cancellationsRoutes);
   app.use(`${apiPrefix}/tickets`, ticketsRoutes);
 
+  // Frontend aliases (/api/bus/* & /api/cities etc.)
+  app.use('/api/bus/cities', citiesRoutes);
+  app.use('/api/cities', citiesRoutes);
+  app.use('/api/bus/search', searchRoutes);
+  app.use('/api/search', searchRoutes);
+  app.use('/api/bus', seatsRoutes);
+
   // 13. Central 404 & Error handlers
   app.use(notFoundHandler);
   app.use(errorHandler);

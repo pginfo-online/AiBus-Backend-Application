@@ -20,8 +20,11 @@ export class SeatsService {
     return SeatsService.instance;
   }
 
-  public async getSeatChart(busId: number): Promise<GdsChartResponse> {
-    const cacheKey = `${RedisPrefix.CACHE_CHART}gds:${busId}`;
+  public async getSeatChart(
+    busId: number,
+    params?: { fromCityId?: number; toCityId?: number; journeyDate?: string }
+  ): Promise<GdsChartResponse> {
+    const cacheKey = `${RedisPrefix.CACHE_CHART}gds:${busId}:${params?.fromCityId || ''}:${params?.toCityId || ''}:${params?.journeyDate || ''}`;
 
     // 1. Try Redis cache (2 min TTL)
     try {
@@ -35,7 +38,7 @@ export class SeatsService {
     }
 
     // 2. Fetch from GDS upstream
-    const chart = await this.gdsAdapter.getSeatChart(busId);
+    const chart = await this.gdsAdapter.getSeatChart(busId, params);
 
     // 3. Cache for 2 minutes (TTL 120 seconds)
     try {

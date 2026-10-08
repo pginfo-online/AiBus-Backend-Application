@@ -18,8 +18,8 @@ class SeatsService {
         }
         return SeatsService.instance;
     }
-    async getSeatChart(busId) {
-        const cacheKey = `${constants_1.RedisPrefix.CACHE_CHART}gds:${busId}`;
+    async getSeatChart(busId, params) {
+        const cacheKey = `${constants_1.RedisPrefix.CACHE_CHART}gds:${busId}:${params?.fromCityId || ''}:${params?.toCityId || ''}:${params?.journeyDate || ''}`;
         // 1. Try Redis cache (2 min TTL)
         try {
             const redis = (0, redis_1.getRedisClient)();
@@ -32,7 +32,7 @@ class SeatsService {
             this.seatsLogger.warn({ err }, 'Redis error reading seat chart cache');
         }
         // 2. Fetch from GDS upstream
-        const chart = await this.gdsAdapter.getSeatChart(busId);
+        const chart = await this.gdsAdapter.getSeatChart(busId, params);
         // 3. Cache for 2 minutes (TTL 120 seconds)
         try {
             const redis = (0, redis_1.getRedisClient)();

@@ -3,6 +3,7 @@ import { env, isDevelopment } from '../../config/env';
 import { logger } from '../../infrastructure/logger';
 import { GdsAuthClient } from './gdsAuthClient';
 import { CircuitBreaker } from '../circuitBreaker';
+import { ProviderError } from '../../shared/errors';
 import {
   GdsHoldRequest,
   GdsHoldResponse,
@@ -51,45 +52,116 @@ export class GdsTransactionClient {
   }
 
   public async holdSeats(request: GdsHoldRequest): Promise<GdsHoldResponse> {
-    const totalFare = request.Passenger.reduce((sum, p) => sum + p.Fare, 0);
-
-    if (env.GDS_CLIENT_SECRET.includes('sandbox') || env.GDS_CLIENT_SECRET.includes('test')) {
-      return getMockHoldResponse(totalFare);
-    }
-
     return this.circuitBreaker.execute(async () => {
       try {
-        const response = await this.client.post<GdsHoldResponse>('/ota/HoldSeats', request);
-        return response.data;
-      } catch (err: any) {
-        this.txLogger.error({ err: err.message, request }, 'GDS HoldSeats failed');
-        if (isDevelopment) {
-          this.txLogger.warn('Falling back to mock hold in development');
-          return getMockHoldResponse(totalFare);
+        const passengers = (request.Passengers || request.Passenger || []).map((p) => ({
+          Name: p.Name,
+          Age: Number(p.Age),
+          Gender: p.Gender,
+          SeatNo: String(p.SeatNo),
+          Fare: Number(p.Fare),
+          SeatTypeId: Number(p.SeatTypeId || 1),
+          IsAcSeat: Boolean(p.IsAcSeat),
+        }));
+
+        const payload = {
+          FromCityId: Number(request.FromCityId),
+          ToCityId: Number(request.ToCityId),
+          JourneyDate: request.JourneyDate,
+          BusId: Number(request.BusId),
+          PickUpID: String(request.PickUpID),
+          DropOffID: String(request.DropOffID),
+          ContactInfo: {
+            CustomerName: request.ContactInfo.CustomerName,
+            Email: request.ContactInfo.Email,
+            Phone: request.ContactInfo.Phone,
+            Mobile: request.ContactInfo.Mobile,
+          },
+          ...(request.GSTDetails && { GSTDetails: request.GSTDetails }),
+          Passengers: passengers,
+          Passenger: passengers,
+        };
+
+        this.txLogger.info({ payload }, 'Calling Mantis GDS POST /ota/HoldSeats');
+        const response = await this.client.post<any>('/ota/HoldSeats', payload);
+        const raw = response.data;
+        const data = raw?.data || raw;
+
+        this.txLogger.info({ response: data }, 'Mantis GDS HoldSeats Response');
+
+        const holdId = data?.HoldId ?? data?.holdId;
+        if (holdId) {
+          return {
+            HoldId: holdId,
+            Status: data?.Status ?? 1,
+            Message: data?.Message || 'Seats held successfully',
+            TotalFare: Number(data?.TotalFare || passengers.reduce((sum, p) => sum + p.Fare, 0)),
+            ExpiryMinutes: data?.ExpiryMinutes || 10,
+          };
         }
-        throw err;
+
+        const msg = data?.Message || data?.Error?.Msg || 'Failed to hold seats with provider';
+        throw new ProviderError('GDS', msg);
+      } catch (err: any) {
+        if (err instanceof ProviderError) throw err;
+        const errorData = err.response?.data;
+        const gdsMsg =
+          errorData?.Error?.Msg ||
+          errorData?.Message ||
+          errorData?.message ||
+          errorData?.data?.Message ||
+          (typeof errorData === 'string' ? errorData : null) ||
+          err.message ||
+          'Failed to hold seats with provider';
+
+        this.txLogger.error({ err: err.message, status: err.response?.status, errorData, request }, 'GDS HoldSeats failed');
+        throw new ProviderError('GDS', gdsMsg);
       }
     });
   }
 
-  public async bookSeats(holdId: string, totalFare = 1050): Promise<GdsBookResponse> {
-    if (env.GDS_CLIENT_SECRET.includes('sandbox') || env.GDS_CLIENT_SECRET.includes('test')) {
-      return getMockBookResponse(holdId, totalFare);
-    }
-
+  public async bookSeats(holdId: string | number, totalFare?: number): Promise<GdsBookResponse> {
     return this.circuitBreaker.execute(async () => {
       try {
-        const response = await this.client.post<GdsBookResponse>('/ota/BookSeats', {
-          HoldId: holdId,
-        });
-        return response.data;
-      } catch (err: any) {
-        this.txLogger.error({ err: err.message, holdId }, 'GDS BookSeats failed');
-        if (isDevelopment) {
-          this.txLogger.warn('Falling back to mock book in development');
-          return getMockBookResponse(holdId, totalFare);
+        const parsedHoldId = isNaN(Number(holdId)) ? holdId : Number(holdId);
+        const payload = {
+          HoldId: parsedHoldId,
+        };
+
+        this.txLogger.info({ payload }, 'Calling Mantis GDS POST /ota/BookSeats');
+        const response = await this.client.post<any>('/ota/BookSeats', payload);
+        const raw = response.data;
+        const data = raw?.data || raw;
+
+        this.txLogger.info({ response: data }, 'Mantis GDS BookSeats Response');
+
+        if (data && (data.TicketNo || data.PNRNo || data.HoldId)) {
+          return {
+            HoldId: String(data.HoldId || holdId),
+            TicketNo: String(data.TicketNo || data.ticketNo || ''),
+            PNRNo: String(data.PNRNo || data.pnrNo || ''),
+            Status: data.Status ?? (data.TicketNo ? 1 : 0),
+            Message: data.Message || 'Booking confirmed successfully',
+            TotalFare: Number(data.TotalFare || totalFare || 0),
+          };
         }
-        throw err;
+
+        const msg = data?.Message || data?.Error?.Msg || 'Failed to book seats with provider';
+        throw new ProviderError('GDS', msg);
+      } catch (err: any) {
+        if (err instanceof ProviderError) throw err;
+        const errorData = err.response?.data;
+        const gdsMsg =
+          errorData?.Error?.Msg ||
+          errorData?.Message ||
+          errorData?.message ||
+          errorData?.data?.Message ||
+          (typeof errorData === 'string' ? errorData : null) ||
+          err.message ||
+          'Failed to book seats with provider';
+
+        this.txLogger.error({ err: err.message, status: err.response?.status, errorData, holdId }, 'GDS BookSeats failed');
+        throw new ProviderError('GDS', gdsMsg);
       }
     });
   }

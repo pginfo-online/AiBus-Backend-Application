@@ -12,7 +12,10 @@ class SeatsController {
         try {
             const busIdParam = Array.isArray(req.params.busId) ? req.params.busId[0] : req.params.busId;
             const busId = parseInt(busIdParam, 10);
-            const chart = await this.seatsService.getSeatChart(busId);
+            const fromCityId = req.query.fromCityId ? Number(req.query.fromCityId) : undefined;
+            const toCityId = req.query.toCityId ? Number(req.query.toCityId) : undefined;
+            const journeyDate = req.query.journeyDate ? String(req.query.journeyDate) : undefined;
+            const chart = await this.seatsService.getSeatChart(busId, { fromCityId, toCityId, journeyDate });
             response_1.ApiResponse.success(res, chart);
         }
         catch (error) {

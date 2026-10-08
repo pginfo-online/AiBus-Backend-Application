@@ -52,8 +52,20 @@ export class GdsAdapter implements IGdsAdapter {
     return this.partnerClient.searchBuses(params);
   }
 
-  public async getSeatChart(busId: number): Promise<GdsChartResponse> {
-    return this.partnerClient.getSeatChart(busId);
+  public async searchBus(params: {
+    busId: number;
+    fromCityId: number;
+    toCityId: number;
+    journeyDate: string;
+  }): Promise<GdsBusSearchResult[]> {
+    return this.partnerClient.searchBus(params);
+  }
+
+  public async getSeatChart(
+    busId: number,
+    extraParams?: { fromCityId?: number; toCityId?: number; journeyDate?: string }
+  ): Promise<GdsChartResponse> {
+    return this.partnerClient.getSeatChart(busId, extraParams);
   }
 
   public async holdSeats(params: GdsHoldRequest): Promise<GdsHoldResponse> {

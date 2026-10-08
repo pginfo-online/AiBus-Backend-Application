@@ -97,6 +97,12 @@ function createApp() {
     app.use(`${apiPrefix}/payments`, payments_routes_1.default);
     app.use(`${apiPrefix}/cancellations`, cancellations_routes_1.default);
     app.use(`${apiPrefix}/tickets`, tickets_routes_1.default);
+    // Frontend aliases (/api/bus/* & /api/cities etc.)
+    app.use('/api/bus/cities', cities_routes_1.default);
+    app.use('/api/cities', cities_routes_1.default);
+    app.use('/api/bus/search', search_routes_1.default);
+    app.use('/api/search', search_routes_1.default);
+    app.use('/api/bus', seats_routes_1.default);
     // 13. Central 404 & Error handlers
     app.use(middleware_1.notFoundHandler);
     app.use(middleware_1.errorHandler);

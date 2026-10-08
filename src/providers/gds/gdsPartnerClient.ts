@@ -1,5 +1,5 @@
 import axios, { AxiosInstance } from 'axios';
-import { env, isDevelopment } from '../../config/env';
+import { env } from '../../config/env';
 import { logger } from '../../infrastructure/logger';
 import { GdsAuthClient } from './gdsAuthClient';
 import { CircuitBreaker } from '../circuitBreaker';
@@ -9,7 +9,6 @@ import {
   GdsBusSearchResult,
   GdsChartResponse,
 } from '../types';
-import { MOCK_CITIES, getMockBuses, getMockChart } from './gdsMockData';
 import { parseGdsSearchResponse } from './gdsSearchResponse';
 
 export class GdsPartnerClient {
@@ -39,69 +38,118 @@ export class GdsPartnerClient {
     });
   }
 
+  /**
+   * Mantis GET /ota/CityList
+   */
   public async getCityList(): Promise<GdsCity[]> {
-    if (env.GDS_CLIENT_SECRET.includes('sandbox') || env.GDS_CLIENT_SECRET.includes('test')) {
-      return MOCK_CITIES;
-    }
-
     return this.circuitBreaker.execute(async () => {
       try {
-        const response = await this.client.get<GdsCity[]>('/ota/CityList');
-        return response.data;
+        const response = await this.client.get<any>('/ota/CityList');
+        const raw = response.data;
+        let list: any[] = [];
+        if (Array.isArray(raw)) {
+          list = raw;
+        } else if (raw && Array.isArray(raw.data)) {
+          list = raw.data;
+        } else if (raw && Array.isArray(raw.CityList)) {
+          list = raw.CityList;
+        } else if (raw && Array.isArray(raw.cities)) {
+          list = raw.cities;
+        } else if (raw && typeof raw === 'object') {
+          const found = Object.values(raw).find((v) => Array.isArray(v));
+          if (Array.isArray(found)) {
+            list = found;
+          }
+        }
+
+        const parsedCities: GdsCity[] = list
+          .map((item: any) => ({
+            CityId: Number(item.CityId || item.id || item.cityId || 0),
+            CityName: String(item.City || item.CityName || item.name || '').trim(),
+            State: String(item.State || item.state || '').trim(),
+          }))
+          .filter((c) => c.CityId > 0 && c.CityName.length > 0);
+
+        if (parsedCities.length > 0) {
+          return parsedCities;
+        }
+
+        throw new Error('CityList returned 0 cities from GDS');
       } catch (err: any) {
         this.partnerLogger.error({ err: err.message }, 'GDS CityList call failed');
-        if (isDevelopment) {
-          this.partnerLogger.warn('Falling back to mock cities data in development');
-          return MOCK_CITIES;
-        }
         throw err;
       }
     });
   }
 
+  /**
+   * Mantis GET /ota/Search
+   */
   public async searchBuses(params: GdsSearchParams): Promise<GdsBusSearchResult[]> {
-    // if (env.GDS_CLIENT_SECRET.includes('sandbox') || env.GDS_CLIENT_SECRET.includes('test')) {
-    //   return getMockBuses(params.fromCityId, params.toCityId, params.journeyDate);
-    // }
-
     return this.circuitBreaker.execute(async () => {
       try {
         const response = await this.client.get<unknown>('/ota/Search', {
           params: {
-            fromCityId: params.fromCityId,
-            toCityId: params.toCityId,
+            fromCityId: Number(params.fromCityId),
+            toCityId: Number(params.toCityId),
             journeyDate: params.journeyDate,
           },
         });
         return parseGdsSearchResponse(response.data);
       } catch (err: any) {
         this.partnerLogger.error({ err: err.message, params }, 'GDS Search call failed');
-        if (isDevelopment) {
-          this.partnerLogger.warn('Falling back to mock bus search results in development');
-          return getMockBuses(params.fromCityId, params.toCityId, params.journeyDate);
-        }
         throw err;
       }
     });
   }
 
-  public async getSeatChart(busId: number): Promise<GdsChartResponse> {
-    if (env.GDS_CLIENT_SECRET.includes('sandbox') || env.GDS_CLIENT_SECRET.includes('test')) {
-      return getMockChart(busId);
-    }
-
+  /**
+   * Mantis GET /ota/Chart
+   */
+  public async getSeatChart(
+    busId: number,
+    extraParams?: { fromCityId?: number; toCityId?: number; journeyDate?: string }
+  ): Promise<GdsChartResponse> {
     return this.circuitBreaker.execute(async () => {
       try {
         const response = await this.client.get<GdsChartResponse>('/ota/Chart', {
-          params: { busId },
+          params: {
+            busId: Number(busId),
+            ...(extraParams?.fromCityId ? { fromCityId: Number(extraParams.fromCityId) } : {}),
+            ...(extraParams?.toCityId ? { toCityId: Number(extraParams.toCityId) } : {}),
+            ...(extraParams?.journeyDate ? { journeyDate: extraParams.journeyDate } : {}),
+          },
         });
         return response.data;
       } catch (err: any) {
         this.partnerLogger.error({ err: err.message, busId }, 'GDS Chart call failed');
-        if (isDevelopment) {
-          this.partnerLogger.warn('Falling back to mock seat chart in development');
-          return getMockChart(busId);
-        }
+        throw err;
+      }
+    });
+  }
+
+  /**
+   * Mantis GET /ota/SearchBus
+   */
+  public async searchBus(params: {
+    busId: number;
+    fromCityId: number;
+    toCityId: number;
+    journeyDate: string;
+  }): Promise<GdsBusSearchResult[]> {
+    return this.circuitBreaker.execute(async () => {
+      try {
+        const response = await this.client.get<unknown>('/ota/SearchBus', {
+          params: {
+            busId: Number(params.busId),
+            fromCityId: Number(params.fromCityId),
+            toCityId: Number(params.toCityId),
+            journeyDate: params.journeyDate,
+          },
+        });
+        return parseGdsSearchResponse(response.data);
+      } catch (err: any) {
+        this.partnerLogger.error({ err: err.message, params }, 'GDS SearchBus call failed');
         throw err;
       }
     });

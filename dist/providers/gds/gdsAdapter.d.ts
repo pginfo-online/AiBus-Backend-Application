@@ -9,7 +9,11 @@ export declare class GdsAdapter implements IGdsAdapter {
     static getInstance(): GdsAdapter;
     getCities(): Promise<GdsCity[]>;
     searchBuses(params: GdsSearchParams): Promise<GdsBusSearchResult[]>;
-    getSeatChart(busId: number): Promise<GdsChartResponse>;
+    getSeatChart(busId: number, extraParams?: {
+        fromCityId?: number;
+        toCityId?: number;
+        journeyDate?: string;
+    }): Promise<GdsChartResponse>;
     holdSeats(params: GdsHoldRequest): Promise<GdsHoldResponse>;
     bookSeats(holdId: string, totalFare?: number): Promise<GdsBookResponse>;
     checkBookingStatus(holdId: string): Promise<GdsBookingStatusResponse>;
@@ -17,7 +21,7 @@ export declare class GdsAdapter implements IGdsAdapter {
     cancelSeats(params: GdsCancelRequest): Promise<GdsCancelResponse>;
     getBookingDetails(pnr: string, ticketNo: string): Promise<GdsBookingDetailsResponse>;
     getBalance(): Promise<GdsBalanceResponse>;
-    getCircuitBreakerState(): import("../circuitBreaker").CircuitState;
+    getCircuitBreakerState(): import(".").CircuitState;
     /**
      * Asynchronously audit-logs provider transactions without blocking response pipeline
      */

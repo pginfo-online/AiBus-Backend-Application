@@ -33,8 +33,8 @@ class GdsAdapter {
     async searchBuses(params) {
         return this.partnerClient.searchBuses(params);
     }
-    async getSeatChart(busId) {
-        return this.partnerClient.getSeatChart(busId);
+    async getSeatChart(busId, extraParams) {
+        return this.partnerClient.getSeatChart(busId, extraParams);
     }
     async holdSeats(params) {
         const start = Date.now();

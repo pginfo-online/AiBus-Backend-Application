@@ -109,4 +109,71 @@ export class SearchService {
       total: filtered.length,
     };
   }
+
+  public async searchSingleBus(query: {
+    fromCityId: number;
+    toCityId: number;
+    journeyDate: string;
+    busId: number;
+  }): Promise<{ results: GdsBusSearchResult[]; total: number }> {
+    const rawCacheKey = `single:${query.busId}:${query.fromCityId}:${query.toCityId}:${query.journeyDate}`;
+    const hash = crypto.createHash('md5').update(rawCacheKey).digest('hex');
+    const cacheKey = `${RedisPrefix.CACHE_SEARCH}gds:${hash}`;
+
+    let buses: GdsBusSearchResult[] = [];
+
+    // 1. Try cache
+    try {
+      const redis = getRedisClient();
+      const cached = await redis.get(cacheKey);
+      if (cached) {
+        const parsed: unknown = JSON.parse(cached);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          buses = parsed;
+        }
+      }
+    } catch (err) {
+      this.searchLogger.warn({ err }, 'Redis error reading single bus search cache');
+    }
+
+    // 2. Fetch from upstream GDS provider if cache miss
+    if (buses.length === 0) {
+      try {
+        buses = await this.gdsAdapter.searchBus({
+          busId: query.busId,
+          fromCityId: query.fromCityId,
+          toCityId: query.toCityId,
+          journeyDate: query.journeyDate,
+        });
+
+        if (Array.isArray(buses) && buses.length > 0) {
+          try {
+            const redis = getRedisClient();
+            await redis.set(cacheKey, JSON.stringify(buses), 'EX', 300);
+          } catch (cacheErr) {
+            this.searchLogger.warn({ cacheErr }, 'Failed to cache single bus search in Redis');
+          }
+        }
+      } catch (err: any) {
+        this.searchLogger.warn({ err: err.message, query }, 'GDS SearchBus failed, trying full search fallback');
+        // Fallback: search all buses for the route and filter by busId
+        const fullSearch = await this.searchBuses({
+          fromCityId: query.fromCityId,
+          toCityId: query.toCityId,
+          journeyDate: query.journeyDate,
+        });
+        const match = fullSearch.results.find(
+          (b) => b.RouteBusId === query.busId || String(b.TripId) === String(query.busId)
+        );
+        if (match) {
+          buses = [match];
+        }
+      }
+    }
+
+    return {
+      results: buses,
+      total: buses.length,
+    };
+  }
 }

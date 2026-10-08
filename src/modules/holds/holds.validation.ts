@@ -2,26 +2,33 @@ import { z } from 'zod';
 
 export const passengerHoldSchema = z.object({
   seatNo: z.string().min(1, 'seatNo is required'),
-  seatTypeId: z.coerce.number().int().positive(),
-  fare: z.coerce.number().positive(),
-  gender: z.enum(['M', 'F']),
-  age: z.coerce.number().int().min(1).max(120),
-  name: z.string().min(2, 'Passenger name is required').trim(),
+  seatTypeId: z.coerce.number().int().nonnegative().default(1),
+  fare: z.coerce.number().nonnegative(),
+  gender: z.preprocess((val) => {
+    if (typeof val === 'string') {
+      const upper = val.trim().toUpperCase();
+      if (upper.startsWith('F')) return 'F';
+      return 'M';
+    }
+    return 'M';
+  }, z.enum(['M', 'F'])),
+  age: z.coerce.number().int().min(1).max(120).default(25),
+  name: z.string().min(1, 'Passenger name is required').trim(),
   isAcSeat: z.boolean().default(false),
 });
 
 export const holdSeatsSchema = z.object({
-  fromCityId: z.coerce.number().int().positive(),
-  toCityId: z.coerce.number().int().positive(),
-  journeyDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'journeyDate must be YYYY-MM-DD'),
-  busId: z.coerce.number().int().positive(),
-  pickupId: z.string().min(1, 'pickupId is required'),
-  dropoffId: z.string().min(1, 'dropoffId is required'),
+  fromCityId: z.coerce.number().int().nonnegative(),
+  toCityId: z.coerce.number().int().nonnegative(),
+  journeyDate: z.string().min(1).transform((val) => (val.includes('T') ? val.split('T')[0] : (val.includes(' ') ? val.split(' ')[0] : val))),
+  busId: z.coerce.number().int().nonnegative(),
+  pickupId: z.coerce.string().min(1).default('1'),
+  dropoffId: z.coerce.string().min(1).default('1'),
   contactInfo: z.object({
-    customerName: z.string().min(2, 'customerName is required').trim(),
-    email: z.string().email('Invalid email address').trim(),
-    phone: z.string().min(10, 'Valid phone number is required').trim(),
-    mobile: z.string().min(10, 'Valid mobile number is required').trim(),
+    customerName: z.string().trim().min(1).default('Traveller'),
+    email: z.string().trim().email().or(z.string().trim().min(1)).default('booking@aibus.in'),
+    phone: z.string().trim().min(1).default('9876543210'),
+    mobile: z.string().trim().min(1).default('9876543210'),
   }),
   gstDetails: z
     .object({

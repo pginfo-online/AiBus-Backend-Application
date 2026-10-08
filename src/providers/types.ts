@@ -5,6 +5,7 @@
 export interface GdsCity {
   CityId: number;
   CityName: string;
+  State?: string;
 }
 
 export interface GdsSearchParams {
@@ -105,11 +106,12 @@ export interface GdsHoldRequest {
     Gstin: string;
     GstCompany: string;
   };
-  Passenger: GdsPassengerHold[];
+  Passengers?: GdsPassengerHold[];
+  Passenger?: GdsPassengerHold[];
 }
 
 export interface GdsHoldResponse {
-  HoldId: string;
+  HoldId: string | number;
   Status: number; // 1 = success
   Message?: string;
   TotalFare: number;
@@ -190,6 +192,12 @@ export interface GdsBalanceResponse {
 export interface IGdsAdapter {
   getCities(): Promise<GdsCity[]>;
   searchBuses(params: GdsSearchParams): Promise<GdsBusSearchResult[]>;
+  searchBus(params: {
+    busId: number;
+    fromCityId: number;
+    toCityId: number;
+    journeyDate: string;
+  }): Promise<GdsBusSearchResult[]>;
   getSeatChart(busId: number): Promise<GdsChartResponse>;
   holdSeats(params: GdsHoldRequest): Promise<GdsHoldResponse>;
   bookSeats(holdId: string): Promise<GdsBookResponse>;

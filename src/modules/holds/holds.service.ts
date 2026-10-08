@@ -1,5 +1,5 @@
 import { v4 as uuidv4 } from 'uuid';
-import { env } from '../../config/env';
+import { env, isDevelopment } from '../../config/env';
 import { GdsAdapter } from '../../providers/gds/gdsAdapter';
 import { getPrismaClient } from '../../infrastructure/database';
 import { acquireLock, releaseLock } from '../../infrastructure/redis';
@@ -104,10 +104,11 @@ export class HoldsService {
               GstCompany: input.gstDetails.gstCompany,
             }
           : undefined,
+        Passengers: gdsPassengers,
         Passenger: gdsPassengers,
       });
 
-      if (gdsResponse.Status !== 1) {
+      if (gdsResponse.Status !== 1 || !gdsResponse.HoldId) {
         throw new ProviderError('GDS', gdsResponse.Message || 'Failed to hold seats with provider');
       }
 
@@ -115,11 +116,12 @@ export class HoldsService {
       // Layer 3: Persist Hold record in database
       // -----------------------------------------------------------------------
       const expiresAt = new Date(Date.now() + env.SEAT_HOLD_TTL_SECONDS * 1000);
+      const strHoldId = String(gdsResponse.HoldId);
 
       const holdRecord = await prisma.seatHold.create({
         data: {
           userId: userId ?? null,
-          providerHoldId: gdsResponse.HoldId,
+          providerHoldId: strHoldId,
           providerName: 'GDS',
           status: HoldStatus.ACTIVE,
           fromCityId: input.fromCityId,
@@ -138,7 +140,7 @@ export class HoldsService {
         await addJob(
           QueueName.HOLD_EXPIRY_CLEANUP,
           'expire-hold',
-          { holdId: holdRecord.id, providerHoldId: gdsResponse.HoldId },
+          { holdId: holdRecord.id, providerHoldId: strHoldId },
           { delay: env.SEAT_HOLD_TTL_SECONDS * 1000 }
         );
       } catch (queueErr) {
@@ -146,16 +148,17 @@ export class HoldsService {
       }
 
       this.holdsLogger.info(
-        { holdId: holdRecord.id, providerHoldId: gdsResponse.HoldId, expiresAt },
+        { holdId: holdRecord.id, providerHoldId: strHoldId, expiresAt },
         'Seats successfully held'
       );
 
       return {
         id: holdRecord.id,
-        providerHoldId: gdsResponse.HoldId,
+        holdId: strHoldId,
+        providerHoldId: strHoldId,
         expiresAt,
         ttlSeconds: env.SEAT_HOLD_TTL_SECONDS,
-        totalFare: gdsResponse.TotalFare,
+        totalFare: gdsResponse.TotalFare || input.passengers.reduce((sum, p) => sum + p.fare, 0),
         seats: input.passengers,
       };
     } finally {

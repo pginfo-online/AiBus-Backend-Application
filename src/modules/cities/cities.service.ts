@@ -3,6 +3,8 @@ import { getPrismaClient } from '../../infrastructure/database';
 import { getRedisClient } from '../../infrastructure/redis';
 import { RedisPrefix } from '../../shared/constants';
 import { logger } from '../../infrastructure/logger';
+import { MOCK_CITIES } from '../../providers/gds/gdsMockData';
+import { GdsCity } from '../../providers/types';
 
 export class CitiesService {
   private static instance: CitiesService;
@@ -22,89 +24,122 @@ export class CitiesService {
 
   public async getCities(query?: string) {
     const cacheKey = `${RedisPrefix.CACHE_CITIES}gds`;
-    let cities: Array<{ id: string; providerCityId: number; name: string }> = [];
+    let cities: Array<{ id: string; providerCityId: number; name: string; City: string; CityId: number; State?: string }> = [];
 
     // 1. Try reading from Redis cache
     try {
       const redis = getRedisClient();
       const cached = await redis.get(cacheKey);
       if (cached) {
-        cities = JSON.parse(cached);
+        const parsed = JSON.parse(cached);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          cities = parsed;
+        }
       }
     } catch (err) {
       this.citiesLogger.warn({ err }, 'Redis error reading cities cache');
     }
 
-    // 2. If not cached, fetch from database or sync from GDS
-    if (cities.length === 0) {
-      const prisma = getPrismaClient();
-      let dbCities = await prisma.city.findMany({
-        where: { active: true },
-        select: { id: true, providerCityId: true, name: true },
-        orderBy: { name: 'asc' },
-      });
-
-      if (dbCities.length === 0) {
-        // Sync from GDS
-        await this.syncCities();
-        dbCities = await prisma.city.findMany({
-          where: { active: true },
-          select: { id: true, providerCityId: true, name: true },
-          orderBy: { name: 'asc' },
-        });
-      }
-
-      cities = dbCities.map((c) => ({
-        id: c.id,
-        providerCityId: c.providerCityId || 0,
-        name: c.name,
-      }));
-
-      // Cache for 24 hours
+    // 2. If not cached, fetch directly from live GDS provider (/ota/CityList)
+    if (!cities || cities.length === 0) {
       try {
-        const redis = getRedisClient();
-        await redis.set(cacheKey, JSON.stringify(cities), 'EX', 24 * 60 * 60);
-      } catch (cacheErr) {
-        this.citiesLogger.warn({ cacheErr }, 'Failed to cache cities in Redis');
+        const gdsCities = await this.gdsAdapter.getCities();
+        if (Array.isArray(gdsCities) && gdsCities.length > 0) {
+          cities = gdsCities.map((c) => ({
+            id: String(c.CityId),
+            providerCityId: c.CityId,
+            name: c.CityName,
+            City: c.CityName,
+            CityId: c.CityId,
+            State: c.State || '',
+          }));
+
+          // Cache for 24 hours in Redis as per Mantis API guidelines
+          try {
+            const redis = getRedisClient();
+            await redis.set(cacheKey, JSON.stringify(cities), 'EX', 24 * 60 * 60);
+          } catch (cacheErr) {
+            this.citiesLogger.warn({ cacheErr }, 'Failed to cache cities in Redis');
+          }
+        }
+      } catch (gdsErr: any) {
+        this.citiesLogger.error({ gdsErr: gdsErr.message }, 'Live GDS provider failed to return cities');
+        throw gdsErr;
       }
     }
 
     // 3. Filter by query if provided (case-insensitive autocomplete)
     if (query && query.trim()) {
       const q = query.toLowerCase().trim();
-      return cities.filter((c) => c.name.toLowerCase().includes(q));
+      return cities.filter((c) => (c.name || c.City || '').toLowerCase().includes(q));
     }
 
     return cities;
   }
 
-  public async syncCities(): Promise<number> {
-    const prisma = getPrismaClient();
-    this.citiesLogger.info('Syncing cities from GDS provider...');
-
-    const gdsCities = await this.gdsAdapter.getCities();
-    let count = 0;
-
-    for (const item of gdsCities) {
-      await prisma.city.upsert({
-        where: {
-          providerName_providerCityId: {
-            providerName: 'GDS',
-            providerCityId: item.CityId,
+  private async syncCitiesSafe(gdsCities: Array<{ CityId: number; CityName: string }>): Promise<void> {
+    try {
+      const prisma = getPrismaClient();
+      for (const item of gdsCities) {
+        if (!item.CityId || !item.CityName) continue;
+        await prisma.city.upsert({
+          where: {
+            providerName_providerCityId: {
+              providerName: 'GDS',
+              providerCityId: item.CityId,
+            },
           },
-        },
-        update: {
-          name: item.CityName,
-          active: true,
-        },
-        create: {
-          name: item.CityName,
-          providerCityId: item.CityId,
-          providerName: 'GDS',
-          active: true,
-        },
-      });
-      count++;
+          update: {
+            name: item.CityName,
+            active: true,
+          },
+          create: {
+            name: item.CityName,
+            providerCityId: item.CityId,
+            providerName: 'GDS',
+            active: true,
+          },
+        });
+      }
+    } catch (err: any) {
+      this.citiesLogger.warn({ err: err.message }, 'Prisma DB sync failed');
+    }
+  }
+
+  public async syncCities(): Promise<number> {
+    this.citiesLogger.info('Syncing cities from GDS provider...');
+    const gdsCities = await this.gdsAdapter.getCities();
+    if (!Array.isArray(gdsCities) || gdsCities.length === 0) {
+      return 0;
+    }
+
+    let count = 0;
+    try {
+      const prisma = getPrismaClient();
+      for (const item of gdsCities) {
+        if (!item.CityId || !item.CityName) continue;
+        await prisma.city.upsert({
+          where: {
+            providerName_providerCityId: {
+              providerName: 'GDS',
+              providerCityId: item.CityId,
+            },
+          },
+          update: {
+            name: item.CityName,
+            active: true,
+          },
+          create: {
+            name: item.CityName,
+            providerCityId: item.CityId,
+            providerName: 'GDS',
+            active: true,
+          },
+        });
+        count++;
+      }
+    } catch (err: any) {
+      this.citiesLogger.warn({ err: err.message }, 'syncCities database upsert failed');
     }
 
     // Invalidate cache

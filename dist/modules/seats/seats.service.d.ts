@@ -5,6 +5,10 @@ export declare class SeatsService {
     private seatsLogger;
     private constructor();
     static getInstance(): SeatsService;
-    getSeatChart(busId: number): Promise<GdsChartResponse>;
+    getSeatChart(busId: number, params?: {
+        fromCityId?: number;
+        toCityId?: number;
+        journeyDate?: string;
+    }): Promise<GdsChartResponse>;
 }
 //# sourceMappingURL=seats.service.d.ts.map
