@@ -10,6 +10,7 @@ import {
   GdsChartResponse,
 } from '../types';
 import { MOCK_CITIES, getMockBuses, getMockChart } from './gdsMockData';
+import { parseGdsSearchResponse } from './gdsSearchResponse';
 
 export class GdsPartnerClient {
   private readonly client: AxiosInstance;
@@ -59,20 +60,20 @@ export class GdsPartnerClient {
   }
 
   public async searchBuses(params: GdsSearchParams): Promise<GdsBusSearchResult[]> {
-    if (env.GDS_CLIENT_SECRET.includes('sandbox') || env.GDS_CLIENT_SECRET.includes('test')) {
-      return getMockBuses(params.fromCityId, params.toCityId, params.journeyDate);
-    }
+    // if (env.GDS_CLIENT_SECRET.includes('sandbox') || env.GDS_CLIENT_SECRET.includes('test')) {
+    //   return getMockBuses(params.fromCityId, params.toCityId, params.journeyDate);
+    // }
 
     return this.circuitBreaker.execute(async () => {
       try {
-        const response = await this.client.get<GdsBusSearchResult[]>('/ota/Search', {
+        const response = await this.client.get<unknown>('/ota/Search', {
           params: {
             fromCityId: params.fromCityId,
             toCityId: params.toCityId,
             journeyDate: params.journeyDate,
           },
         });
-        return response.data;
+        return parseGdsSearchResponse(response.data);
       } catch (err: any) {
         this.partnerLogger.error({ err: err.message, params }, 'GDS Search call failed');
         if (isDevelopment) {

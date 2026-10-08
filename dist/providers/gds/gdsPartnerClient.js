@@ -9,6 +9,7 @@ const env_1 = require("../../config/env");
 const logger_1 = require("../../infrastructure/logger");
 const gdsAuthClient_1 = require("./gdsAuthClient");
 const gdsMockData_1 = require("./gdsMockData");
+const gdsSearchResponse_1 = require("./gdsSearchResponse");
 class GdsPartnerClient {
     client;
     authClient;
@@ -64,7 +65,7 @@ class GdsPartnerClient {
                         journeyDate: params.journeyDate,
                     },
                 });
-                return response.data;
+                return (0, gdsSearchResponse_1.parseGdsSearchResponse)(response.data);
             }
             catch (err) {
                 this.partnerLogger.error({ err: err.message, params }, 'GDS Search call failed');

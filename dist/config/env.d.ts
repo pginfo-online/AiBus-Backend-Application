@@ -29,7 +29,10 @@ declare const envSchema: z.ZodObject<{
     DATABASE_POOL_MAX: z.ZodDefault<z.ZodCoercedNumber<unknown>>;
     REDIS_URL: z.ZodDefault<z.ZodString>;
     REDIS_PASSWORD: z.ZodOptional<z.ZodString>;
-    REDIS_TLS: z.ZodDefault<z.ZodCoercedBoolean<unknown>>;
+    REDIS_TLS: z.ZodPreprocess<z.ZodPipe<z.ZodDefault<z.ZodEnum<{
+        true: "true";
+        false: "false";
+    }>>, z.ZodTransform<boolean, "true" | "false">>, unknown>;
     REDIS_KEY_PREFIX: z.ZodDefault<z.ZodString>;
     BULL_PREFIX: z.ZodDefault<z.ZodString>;
     GDS_PARTNER_BASE_URL: z.ZodDefault<z.ZodString>;

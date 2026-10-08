@@ -35,7 +35,10 @@ const envSchema = z.object({
   // Redis
   REDIS_URL: z.string().default('redis://localhost:6379'),
   REDIS_PASSWORD: z.string().optional(),
-  REDIS_TLS: z.coerce.boolean().default(false),
+  REDIS_TLS: z.preprocess(
+    (value) => (typeof value === 'string' ? value.toLowerCase() : value),
+    z.enum(['true', 'false']).default('false').transform((value) => value === 'true')
+  ),
   REDIS_KEY_PREFIX: z.string().default('aibus:'),
 
   // BullMQ

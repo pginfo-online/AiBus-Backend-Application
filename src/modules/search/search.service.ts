@@ -34,7 +34,12 @@ export class SearchService {
       const redis = getRedisClient();
       const cached = await redis.get(cacheKey);
       if (cached) {
-        buses = JSON.parse(cached);
+        const parsed: unknown = JSON.parse(cached);
+        if (Array.isArray(parsed)) {
+          buses = parsed;
+        } else {
+          this.searchLogger.warn({ cacheKey }, 'Invalid bus search cache value; refreshing from provider');
+        }
       }
     } catch (err) {
       this.searchLogger.warn({ err }, 'Redis error reading bus search cache');

@@ -35,7 +35,7 @@ const envSchema = zod_1.z.object({
     // Redis
     REDIS_URL: zod_1.z.string().default('redis://localhost:6379'),
     REDIS_PASSWORD: zod_1.z.string().optional(),
-    REDIS_TLS: zod_1.z.coerce.boolean().default(false),
+    REDIS_TLS: zod_1.z.preprocess((value) => (typeof value === 'string' ? value.toLowerCase() : value), zod_1.z.enum(['true', 'false']).default('false').transform((value) => value === 'true')),
     REDIS_KEY_PREFIX: zod_1.z.string().default('aibus:'),
     // BullMQ
     BULL_PREFIX: zod_1.z.string().default('bull'),
