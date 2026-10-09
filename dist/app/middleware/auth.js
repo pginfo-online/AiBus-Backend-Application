@@ -97,9 +97,11 @@ function optionalAuth(req, _res, next) {
 /** Role hierarchy for comparison */
 const ROLE_HIERARCHY = {
     [constants_1.UserRole.CUSTOMER]: 0,
-    [constants_1.UserRole.SUPPORT]: 1,
-    [constants_1.UserRole.ADMIN]: 2,
-    [constants_1.UserRole.SUPER_ADMIN]: 3,
+    [constants_1.UserRole.OPERATOR_AGENT]: 1,
+    [constants_1.UserRole.SUPPORT]: 2,
+    [constants_1.UserRole.SUPPORT_AGENT]: 2,
+    [constants_1.UserRole.ADMIN]: 3,
+    [constants_1.UserRole.SUPER_ADMIN]: 4,
 };
 /**
  * Check if a role has at least the minimum required privilege level.

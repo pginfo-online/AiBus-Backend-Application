@@ -23,22 +23,30 @@ class BookingsService {
     }
     async createBooking(input, userId) {
         const prisma = (0, database_1.getPrismaClient)();
-        // 1. Verify hold exists, is ACTIVE, and not expired
-        const hold = await prisma.seatHold.findUnique({
-            where: { id: input.holdId },
-        });
-        if (!hold) {
-            throw new errors_1.NotFoundError('Hold record not found');
-        }
-        if (hold.status !== client_1.HoldStatus.ACTIVE) {
-            throw new errors_1.ValidationError(`Cannot create booking: Hold status is ${hold.status}`);
-        }
-        if (new Date() > hold.expiresAt) {
-            await prisma.seatHold.update({
-                where: { id: hold.id },
-                data: { status: client_1.HoldStatus.EXPIRED },
-            });
-            throw new errors_1.ValidationError('Seat hold has expired. Please select seats again.');
+        // 1. Verify hold exists if a valid UUID holdId was provided
+        let providerHoldId = `HOLD-GDS-${Date.now()}`;
+        let holdRecordId = null;
+        if (input.holdId) {
+            const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(input.holdId);
+            if (isUuid) {
+                const hold = await prisma.seatHold.findUnique({
+                    where: { id: input.holdId },
+                });
+                if (hold) {
+                    if (hold.status !== client_1.HoldStatus.ACTIVE) {
+                        throw new errors_1.ValidationError(`Cannot create booking: Hold status is ${hold.status}`);
+                    }
+                    if (new Date() > hold.expiresAt) {
+                        await prisma.seatHold.update({
+                            where: { id: hold.id },
+                            data: { status: client_1.HoldStatus.EXPIRED },
+                        });
+                        throw new errors_1.ValidationError('Seat hold has expired. Please select seats again.');
+                    }
+                    providerHoldId = hold.providerHoldId;
+                    holdRecordId = hold.id;
+                }
+            }
         }
         // 2. Generate unique booking number
         const bookingNumber = this.generateBookingNumber();
@@ -50,7 +58,7 @@ class BookingsService {
                     bookingNumber,
                     status: client_1.BookingStatus.HELD,
                     providerName: 'GDS',
-                    providerHoldId: hold.providerHoldId,
+                    providerHoldId,
                     fromCityId: input.fromCityId,
                     toCityId: input.toCityId,
                     fromCityName: input.fromCityName,
@@ -99,14 +107,21 @@ class BookingsService {
                     passengers: true,
                 },
             });
-            // Link hold to booking
-            await tx.seatHold.update({
-                where: { id: hold.id },
-                data: { bookingId: createdBooking.id },
-            });
+            // Link hold to booking if holdRecordId exists
+            if (holdRecordId) {
+                await tx.seatHold.update({
+                    where: { id: holdRecordId },
+                    data: { bookingId: createdBooking.id },
+                });
+            }
             return createdBooking;
         });
         this.bookingLogger.info({ bookingId: booking.id, bookingNumber: booking.bookingNumber }, 'Booking initiated successfully');
+        // 4. Confirm with Mantis GDS BookSeats (/ota/BookSeats)
+        if (providerHoldId) {
+            const confirmedBooking = await this.confirmBooking(booking.id);
+            return confirmedBooking;
+        }
         return booking;
     }
     /**
@@ -138,7 +153,7 @@ class BookingsService {
         try {
             // Call GDS BookSeats
             const bookRes = await this.gdsAdapter.bookSeats(booking.providerHoldId, Number(booking.totalFare));
-            if (bookRes.Status !== 1) {
+            if (bookRes.Status !== 1 || !bookRes.TicketNo) {
                 throw new errors_1.ProviderError('GDS', bookRes.Message || 'Booking failed at provider');
             }
             // Confirmed at provider!
@@ -227,16 +242,28 @@ class BookingsService {
     }
     async getBooking(id) {
         const prisma = (0, database_1.getPrismaClient)();
-        const booking = await prisma.booking.findUnique({
-            where: { id },
-            include: {
-                seats: true,
-                passengers: true,
-                payments: true,
-                ticket: true,
-                cancellations: true,
-            },
-        });
+        const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id);
+        const booking = isUuid
+            ? await prisma.booking.findUnique({
+                where: { id },
+                include: {
+                    seats: true,
+                    passengers: true,
+                    payments: true,
+                    ticket: true,
+                    cancellations: true,
+                },
+            })
+            : await prisma.booking.findUnique({
+                where: { bookingNumber: id },
+                include: {
+                    seats: true,
+                    passengers: true,
+                    payments: true,
+                    ticket: true,
+                    cancellations: true,
+                },
+            });
         if (!booking) {
             throw new errors_1.NotFoundError('Booking not found');
         }

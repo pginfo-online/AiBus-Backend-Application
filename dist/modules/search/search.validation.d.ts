@@ -23,4 +23,11 @@ export declare const searchBusesSchema: z.ZodObject<{
     maxFare: z.ZodOptional<z.ZodCoercedNumber<unknown>>;
 }, z.core.$strip>;
 export type SearchBusesQuery = z.infer<typeof searchBusesSchema>;
+export declare const searchSingleBusSchema: z.ZodObject<{
+    fromCityId: z.ZodCoercedNumber<unknown>;
+    toCityId: z.ZodCoercedNumber<unknown>;
+    journeyDate: z.ZodString;
+    busId: z.ZodCoercedNumber<unknown>;
+}, z.core.$strip>;
+export type SearchSingleBusQuery = z.infer<typeof searchSingleBusSchema>;
 //# sourceMappingURL=search.validation.d.ts.map

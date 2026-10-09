@@ -7,6 +7,7 @@ export declare class HoldsService {
     static getInstance(): HoldsService;
     holdSeats(input: HoldSeatsInput, userId?: string): Promise<{
         id: string;
+        holdId: string;
         providerHoldId: string;
         expiresAt: Date;
         ttlSeconds: number;

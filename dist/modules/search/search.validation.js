@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.searchBusesSchema = void 0;
+exports.searchSingleBusSchema = exports.searchBusesSchema = void 0;
 const zod_1 = require("zod");
 exports.searchBusesSchema = zod_1.z.object({
     fromCityId: zod_1.z.coerce.number().int().positive('fromCityId is required'),
@@ -24,5 +24,13 @@ exports.searchBusesSchema = zod_1.z.object({
     sortBy: zod_1.z.enum(['fare_asc', 'fare_desc', 'departure_asc', 'departure_desc', 'duration_asc']).optional(),
     minFare: zod_1.z.coerce.number().nonnegative().optional(),
     maxFare: zod_1.z.coerce.number().positive().optional(),
+});
+exports.searchSingleBusSchema = zod_1.z.object({
+    fromCityId: zod_1.z.coerce.number().int().positive('fromCityId is required'),
+    toCityId: zod_1.z.coerce.number().int().positive('toCityId is required'),
+    journeyDate: zod_1.z
+        .string()
+        .regex(/^\d{4}-\d{2}-\d{2}$/, 'journeyDate must be in YYYY-MM-DD format'),
+    busId: zod_1.z.coerce.number().int().positive('busId is required'),
 });
 //# sourceMappingURL=search.validation.js.map

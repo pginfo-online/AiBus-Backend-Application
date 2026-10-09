@@ -10,5 +10,14 @@ export declare class SearchService {
         results: GdsBusSearchResult[];
         total: number;
     }>;
+    searchSingleBus(query: {
+        fromCityId: number;
+        toCityId: number;
+        journeyDate: string;
+        busId: number;
+    }): Promise<{
+        results: GdsBusSearchResult[];
+        total: number;
+    }>;
 }
 //# sourceMappingURL=search.service.d.ts.map

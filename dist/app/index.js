@@ -23,6 +23,7 @@ const bookings_routes_1 = __importDefault(require("../modules/bookings/bookings.
 const payments_routes_1 = __importDefault(require("../modules/payments/payments.routes"));
 const cancellations_routes_1 = __importDefault(require("../modules/cancellations/cancellations.routes"));
 const tickets_routes_1 = __importDefault(require("../modules/tickets/tickets.routes"));
+const admin_routes_1 = __importDefault(require("../modules/admin/admin.routes"));
 const pino_http_1 = require("pino-http");
 const logger_1 = require("../infrastructure/logger");
 const swagger_ui_express_1 = __importDefault(require("swagger-ui-express"));
@@ -97,6 +98,7 @@ function createApp() {
     app.use(`${apiPrefix}/payments`, payments_routes_1.default);
     app.use(`${apiPrefix}/cancellations`, cancellations_routes_1.default);
     app.use(`${apiPrefix}/tickets`, tickets_routes_1.default);
+    app.use(`${apiPrefix}/admin`, admin_routes_1.default);
     // Frontend aliases (/api/bus/* & /api/cities etc.)
     app.use('/api/bus/cities', cities_routes_1.default);
     app.use('/api/cities', cities_routes_1.default);

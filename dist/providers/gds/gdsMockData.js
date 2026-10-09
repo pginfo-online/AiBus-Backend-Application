@@ -164,7 +164,7 @@ function getMockChart(busId) {
     };
 }
 function getMockHoldResponse(totalFare) {
-    const holdId = `GDS-HOLD-${Date.now()}-${Math.floor(Math.random() * 10000)}`;
+    const holdId = Math.floor(18000000 + Math.random() * 900000);
     return {
         HoldId: holdId,
         Status: 1,

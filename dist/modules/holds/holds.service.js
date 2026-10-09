@@ -88,19 +88,21 @@ class HoldsService {
                         GstCompany: input.gstDetails.gstCompany,
                     }
                     : undefined,
+                Passengers: gdsPassengers,
                 Passenger: gdsPassengers,
             });
-            if (gdsResponse.Status !== 1) {
+            if (gdsResponse.Status !== 1 || !gdsResponse.HoldId) {
                 throw new errors_1.ProviderError('GDS', gdsResponse.Message || 'Failed to hold seats with provider');
             }
             // -----------------------------------------------------------------------
             // Layer 3: Persist Hold record in database
             // -----------------------------------------------------------------------
             const expiresAt = new Date(Date.now() + env_1.env.SEAT_HOLD_TTL_SECONDS * 1000);
+            const strHoldId = String(gdsResponse.HoldId);
             const holdRecord = await prisma.seatHold.create({
                 data: {
                     userId: userId ?? null,
-                    providerHoldId: gdsResponse.HoldId,
+                    providerHoldId: strHoldId,
                     providerName: 'GDS',
                     status: client_1.HoldStatus.ACTIVE,
                     fromCityId: input.fromCityId,
@@ -115,18 +117,19 @@ class HoldsService {
             // Layer 4: Schedule delayed BullMQ job to expire hold if unpaid
             // -----------------------------------------------------------------------
             try {
-                await (0, queues_1.addJob)(constants_1.QueueName.HOLD_EXPIRY_CLEANUP, 'expire-hold', { holdId: holdRecord.id, providerHoldId: gdsResponse.HoldId }, { delay: env_1.env.SEAT_HOLD_TTL_SECONDS * 1000 });
+                await (0, queues_1.addJob)(constants_1.QueueName.HOLD_EXPIRY_CLEANUP, 'expire-hold', { holdId: holdRecord.id, providerHoldId: strHoldId }, { delay: env_1.env.SEAT_HOLD_TTL_SECONDS * 1000 });
             }
             catch (queueErr) {
                 this.holdsLogger.warn({ queueErr }, 'Failed to enqueue hold expiry cleanup job');
             }
-            this.holdsLogger.info({ holdId: holdRecord.id, providerHoldId: gdsResponse.HoldId, expiresAt }, 'Seats successfully held');
+            this.holdsLogger.info({ holdId: holdRecord.id, providerHoldId: strHoldId, expiresAt }, 'Seats successfully held');
             return {
                 id: holdRecord.id,
-                providerHoldId: gdsResponse.HoldId,
+                holdId: strHoldId,
+                providerHoldId: strHoldId,
                 expiresAt,
                 ttlSeconds: env_1.env.SEAT_HOLD_TTL_SECONDS,
-                totalFare: gdsResponse.TotalFare,
+                totalFare: gdsResponse.TotalFare || input.passengers.reduce((sum, p) => sum + p.fare, 0),
                 seats: input.passengers,
             };
         }

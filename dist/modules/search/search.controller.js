@@ -17,6 +17,15 @@ class SearchController {
             next(error);
         }
     };
+    searchSingleBus = async (req, res, next) => {
+        try {
+            const result = await this.searchService.searchSingleBus(req.query);
+            response_1.ApiResponse.success(res, result);
+        }
+        catch (error) {
+            next(error);
+        }
+    };
 }
 exports.SearchController = SearchController;
 //# sourceMappingURL=search.controller.js.map

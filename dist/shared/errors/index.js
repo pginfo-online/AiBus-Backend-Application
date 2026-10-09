@@ -3,7 +3,7 @@
 // Application error taxonomy — machine-readable, stable codes
 // ---------------------------------------------------------------------------
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.InvalidStateTransitionError = exports.InternalError = exports.IdempotencyConflictError = exports.RateLimitError = exports.ProviderError = exports.ProviderRateLimitedError = exports.ProviderUnavailableError = exports.ProviderCircuitBreakerOpenError = exports.ProviderTimeoutError = exports.RefundFailedError = exports.CancellationFailedError = exports.CancellationNotAllowedError = exports.PaymentPendingError = exports.PaymentFailedError = exports.BookingUnknownError = exports.BookingFailedError = exports.SeatHoldExpiredError = exports.SeatHoldFailedError = exports.SeatUnavailableError = exports.ConflictError = exports.NotFoundError = exports.ValidationError = exports.AuthorizationError = exports.TokenExpiredError = exports.AuthenticationError = exports.AppError = void 0;
+exports.InvalidConfigError = exports.AdminActionDeniedError = exports.BadRequestError = exports.InvalidStateTransitionError = exports.InternalError = exports.IdempotencyConflictError = exports.RateLimitError = exports.ProviderError = exports.ProviderRateLimitedError = exports.ProviderUnavailableError = exports.ProviderCircuitBreakerOpenError = exports.ProviderTimeoutError = exports.RefundFailedError = exports.CancellationFailedError = exports.CancellationNotAllowedError = exports.PaymentPendingError = exports.PaymentFailedError = exports.BookingUnknownError = exports.BookingFailedError = exports.SeatHoldExpiredError = exports.SeatHoldFailedError = exports.SeatUnavailableError = exports.ConflictError = exports.NotFoundError = exports.ValidationError = exports.AuthorizationError = exports.TokenExpiredError = exports.AuthenticationError = exports.AppError = void 0;
 /**
  * Base application error. All domain/business errors extend this.
  *
@@ -271,4 +271,28 @@ class InvalidStateTransitionError extends AppError {
     }
 }
 exports.InvalidStateTransitionError = InvalidStateTransitionError;
+// ---------------------------------------------------------------------------
+// Client / Admin domain errors
+// ---------------------------------------------------------------------------
+class BadRequestError extends AppError {
+    constructor(message = 'Bad request', metadata) {
+        super({ code: 'BAD_REQUEST', message, statusCode: 400, metadata });
+        this.name = 'BadRequestError';
+    }
+}
+exports.BadRequestError = BadRequestError;
+class AdminActionDeniedError extends AppError {
+    constructor(message = 'Admin action denied', metadata) {
+        super({ code: 'ADMIN_ACTION_DENIED', message, statusCode: 403, metadata });
+        this.name = 'AdminActionDeniedError';
+    }
+}
+exports.AdminActionDeniedError = AdminActionDeniedError;
+class InvalidConfigError extends AppError {
+    constructor(message = 'Invalid system configuration', metadata) {
+        super({ code: 'INVALID_CONFIG', message, statusCode: 400, metadata });
+        this.name = 'InvalidConfigError';
+    }
+}
+exports.InvalidConfigError = InvalidConfigError;
 //# sourceMappingURL=index.js.map

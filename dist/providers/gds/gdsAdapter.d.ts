@@ -9,6 +9,12 @@ export declare class GdsAdapter implements IGdsAdapter {
     static getInstance(): GdsAdapter;
     getCities(): Promise<GdsCity[]>;
     searchBuses(params: GdsSearchParams): Promise<GdsBusSearchResult[]>;
+    searchBus(params: {
+        busId: number;
+        fromCityId: number;
+        toCityId: number;
+        journeyDate: string;
+    }): Promise<GdsBusSearchResult[]>;
     getSeatChart(busId: number, extraParams?: {
         fromCityId?: number;
         toCityId?: number;

@@ -1,36 +1,36 @@
 import { z } from 'zod';
 export declare const createBookingSchema: z.ZodObject<{
-    holdId: z.ZodString;
+    holdId: z.ZodNullable<z.ZodOptional<z.ZodString>>;
     fromCityId: z.ZodCoercedNumber<unknown>;
     toCityId: z.ZodCoercedNumber<unknown>;
-    fromCityName: z.ZodString;
-    toCityName: z.ZodString;
-    journeyDate: z.ZodString;
+    fromCityName: z.ZodDefault<z.ZodString>;
+    toCityName: z.ZodDefault<z.ZodString>;
+    journeyDate: z.ZodPipe<z.ZodString, z.ZodTransform<string, string>>;
     busId: z.ZodCoercedNumber<unknown>;
-    tripId: z.ZodString;
-    pickupCode: z.ZodString;
-    pickupLocation: z.ZodString;
-    pickupTime: z.ZodString;
-    dropoffCode: z.ZodString;
-    dropoffLocation: z.ZodString;
-    dropoffTime: z.ZodString;
-    operatorName: z.ZodString;
-    busType: z.ZodString;
+    tripId: z.ZodCoercedString<unknown>;
+    pickupCode: z.ZodDefault<z.ZodCoercedString<unknown>>;
+    pickupLocation: z.ZodDefault<z.ZodString>;
+    pickupTime: z.ZodDefault<z.ZodString>;
+    dropoffCode: z.ZodDefault<z.ZodCoercedString<unknown>>;
+    dropoffLocation: z.ZodDefault<z.ZodString>;
+    dropoffTime: z.ZodDefault<z.ZodString>;
+    operatorName: z.ZodDefault<z.ZodString>;
+    busType: z.ZodDefault<z.ZodString>;
     totalFare: z.ZodCoercedNumber<unknown>;
     baseFare: z.ZodCoercedNumber<unknown>;
-    serviceTax: z.ZodCoercedNumber<unknown>;
-    contactName: z.ZodString;
-    contactEmail: z.ZodString;
-    contactPhone: z.ZodString;
+    serviceTax: z.ZodDefault<z.ZodCoercedNumber<unknown>>;
+    contactName: z.ZodDefault<z.ZodString>;
+    contactEmail: z.ZodDefault<z.ZodUnion<[z.ZodString, z.ZodString]>>;
+    contactPhone: z.ZodDefault<z.ZodString>;
     passengers: z.ZodArray<z.ZodObject<{
         seatNo: z.ZodString;
-        seatTypeId: z.ZodCoercedNumber<unknown>;
+        seatTypeId: z.ZodDefault<z.ZodCoercedNumber<unknown>>;
         fare: z.ZodCoercedNumber<unknown>;
-        gender: z.ZodEnum<{
+        gender: z.ZodPreprocess<z.ZodEnum<{
             M: "M";
             F: "F";
-        }>;
-        age: z.ZodCoercedNumber<unknown>;
+        }>, unknown>;
+        age: z.ZodDefault<z.ZodCoercedNumber<unknown>>;
         name: z.ZodString;
         isAcSeat: z.ZodDefault<z.ZodBoolean>;
     }, z.core.$strip>>;

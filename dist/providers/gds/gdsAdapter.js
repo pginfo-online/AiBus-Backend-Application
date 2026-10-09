@@ -33,6 +33,9 @@ class GdsAdapter {
     async searchBuses(params) {
         return this.partnerClient.searchBuses(params);
     }
+    async searchBus(params) {
+        return this.partnerClient.searchBus(params);
+    }
     async getSeatChart(busId, extraParams) {
         return this.partnerClient.getSeatChart(busId, extraParams);
     }

@@ -1,0 +1,873 @@
+# 🏗️ AiBus — Production-Grade Admin Module: Implementation Plan
+
+> **Date:** October 9, 2026  
+> **Scope:** Backend Admin Module for AiBus Bus Booking Platform  
+> **Based on:** Deep analysis of existing codebase + research of RedBus, AbhiBus, and industry leaders
+
+---
+
+## 1. Existing Codebase Analysis Summary
+
+### 1.1 Architecture Overview
+
+The current AiBus backend is a well-structured **modular monolith** built with:
+
+| Layer | Technology | Purpose |
+|---|---|---|
+| Runtime | Node.js + TypeScript | Type-safe backend |
+| Framework | Express 5 | HTTP layer |
+| ORM | Prisma (PostgreSQL) | Database access |
+| Cache/Locks | Redis (ioredis) | Caching, distributed locks |
+| Queue | BullMQ | Background jobs |
+| Validation | Zod | Schema validation |
+| Auth | JWT (access + refresh tokens) | Token-based auth |
+| Logging | Pino | Structured logging |
+| Security | Helmet, HPP, CORS, Rate Limiting | Production hardening |
+| Docs | Swagger/OpenAPI | API documentation |
+
+### 1.2 Module Pattern (Existing Convention)
+
+Every module follows this strict pattern:
+```
+src/modules/<module>/
+  ├── <module>.routes.ts       # Express Router with middleware chain
+  ├── <module>.controller.ts   # Thin controller (delegates to service)
+  ├── <module>.service.ts      # Business logic (Singleton pattern)
+  └── <module>.validation.ts   # Zod schemas + exported types
+```
+
+**Key Patterns Observed:**
+- **Singleton services** via `static getInstance()` pattern
+- **Zod validation** via `validate()` middleware
+- **Standardized API responses** via `ApiResponse` utility (`success`, `created`, `paginated`, `noContent`, `error`)
+- **Centralized error hierarchy** via `AppError` base class with specific subclasses
+- **Child loggers** per module via `logger.child({ module: 'name' })`
+- **`getPrismaClient()`** for database access (lazy singleton)
+- **Role-based auth** via `authenticate` + `authorize(...roles)` middleware
+- **Idempotency** via `Idempotency-Key` header middleware
+- **Request tracing** via `X-Request-Id` header
+
+### 1.3 Database Schema (Current State)
+
+**Existing Models (18):**
+`User`, `RefreshToken`, `City`, `Booking`, `BookingSeat`, `BookingPassenger`, `SeatHold`, `Payment`, `Cancellation`, `Refund`, `Ticket`, `WebhookEvent`, `ProviderTransaction`, `WalletTransaction`, `Notification`, `AuditLog`, `IdempotencyRecord`
+
+**Existing Enums:**
+`UserRole` (CUSTOMER, OPERATOR_AGENT, SUPPORT_AGENT, ADMIN, SUPER_ADMIN), `UserStatus`, `BookingStatus` (16 states), `HoldStatus`, `PaymentStatus`, `CancellationStatus`, `RefundStatus`, `RefundDestination`, `TicketStatus`, `NotificationChannel`, `NotificationType`, `NotificationStatus`, `WalletTransactionType`, `IdempotencyStatus`
+
+**Existing Roles (already in schema):**
+- `CUSTOMER` — end users
+- `OPERATOR_AGENT` — bus operator staff (not yet utilized)
+- `SUPPORT_AGENT` — customer support (not yet utilized)
+- `ADMIN` — platform admin (not yet utilized)
+- `SUPER_ADMIN` — super admin (not yet utilized)
+
+### 1.4 What Exists vs. What's Missing
+
+| Area | Current State | Admin Gap |
+|---|---|---|
+| **Authentication** | ✅ JWT with refresh token rotation, bcrypt, family-based revocation | ❌ No admin-specific login, no MFA, no session management |
+| **Authorization** | ✅ `authenticate`, `authorize`, `hasMinimumRole` middleware | ❌ No granular permissions (only role-based, no permission-based) |
+| **User Management** | ✅ Basic profile (get/update self) | ❌ No admin user CRUD, no suspend/activate, no bulk ops |
+| **Booking Management** | ✅ Create, get, user bookings | ❌ No admin listing, no filters, no status override, no bulk actions |
+| **Payment Management** | ✅ Create intent, verify, webhook | ❌ No admin payment listing, no manual reconciliation, no settlement |
+| **Cancellation/Refund** | ✅ Check cancellability, cancel seats | ❌ No admin-initiated cancellation, no manual refund processing |
+| **City Management** | ✅ List + sync from GDS | ❌ No admin CRUD, no activate/deactivate control |
+| **Dashboard/Analytics** | ❌ None | ❌ Revenue, booking, user, payment, system analytics |
+| **Operator Management** | ❌ None | ❌ Full operator CRUD, document management |
+| **Route/Schedule Mgmt** | ❌ None (GDS-driven) | ❌ Admin view/override/configuration of routes |
+| **Offers/Coupons** | ❌ None | ❌ Full promotion engine |
+| **Support/Complaints** | ❌ None | ❌ Ticket system, escalation, resolution tracking |
+| **Notifications Admin** | ❌ BullMQ workers exist but no management | ❌ Template management, broadcast, history, retry |
+| **Content/Config** | ❌ None | ❌ Dynamic config, feature flags, CMS |
+| **Reports/Exports** | ❌ None | ❌ Downloadable reports, scheduled reports |
+| **Audit Logs** | ✅ AuditLog model exists | ❌ No admin API to view/search/filter audit logs |
+| **System Health** | ✅ Basic health check | ❌ No admin system monitoring dashboard |
+
+---
+
+## 2. Industry Research Summary (RedBus, AbhiBus, etc.)
+
+Based on research of RedBus Primo, AbhiBus EDGE, TravelCarma, and other leading platforms:
+
+### Must-Have Admin Capabilities for Production
+
+```mermaid
+graph TD
+    A[Admin Module] --> B[Dashboard & Analytics]
+    A --> C[User Management]
+    A --> D[Booking Operations]
+    A --> E[Financial Operations]
+    A --> F[Inventory Management]
+    A --> G[Marketing & Promotions]
+    A --> H[Support & CRM]
+    A --> I[System Administration]
+    
+    B --> B1[Revenue Dashboard]
+    B --> B2[Booking Analytics]
+    B --> B3[User Analytics]
+    B --> B4[System Health]
+    
+    C --> C1[Customer Management]
+    C --> C2[Admin/Staff Management]
+    C --> C3[Operator Management]
+    
+    D --> D1[Booking CRUD]
+    D --> D2[Cancellation Override]
+    D --> D3[Booking Reconciliation]
+    
+    E --> E1[Payment Management]
+    E --> E2[Refund Processing]
+    E --> E3[Settlement Management]
+    E --> E4[Commission Tracking]
+    
+    F --> F1[City Management]
+    F --> F2[Route Configuration]
+    F --> F3[Bus/Operator Control]
+    F --> F4[Provider Management]
+    
+    G --> G1[Coupons & Offers]
+    G --> G2[Pricing Rules]
+    G --> G3[Campaigns]
+    
+    H --> H1[Support Tickets]
+    H --> H2[Complaint Management]
+    H --> H3[Notification Management]
+    
+    I --> I1[Audit Logs]
+    I --> I2[System Settings]
+    I --> I3[Feature Flags]
+    I --> I4[Reports & Exports]
+```
+
+---
+
+## 3. Admin Module Architecture
+
+### 3.1 Directory Structure (Following Existing Convention)
+
+```
+src/modules/admin/
+  ├── admin.routes.ts                 # Main admin router (mounts sub-routers)
+  │
+  ├── dashboard/
+  │   ├── dashboard.controller.ts
+  │   ├── dashboard.service.ts
+  │   └── dashboard.validation.ts
+  │
+  ├── user-management/
+  │   ├── user-management.controller.ts
+  │   ├── user-management.service.ts
+  │   └── user-management.validation.ts
+  │
+  ├── booking-management/
+  │   ├── booking-management.controller.ts
+  │   ├── booking-management.service.ts
+  │   └── booking-management.validation.ts
+  │
+  ├── payment-management/
+  │   ├── payment-management.controller.ts
+  │   ├── payment-management.service.ts
+  │   └── payment-management.validation.ts
+  │
+  ├── refund-management/
+  │   ├── refund-management.controller.ts
+  │   ├── refund-management.service.ts
+  │   └── refund-management.validation.ts
+  │
+  ├── city-management/
+  │   ├── city-management.controller.ts
+  │   ├── city-management.service.ts
+  │   └── city-management.validation.ts
+  │
+  ├── operator-management/
+  │   ├── operator-management.controller.ts
+  │   ├── operator-management.service.ts
+  │   └── operator-management.validation.ts
+  │
+  ├── coupon-management/
+  │   ├── coupon-management.controller.ts
+  │   ├── coupon-management.service.ts
+  │   └── coupon-management.validation.ts
+  │
+  ├── support-management/
+  │   ├── support-management.controller.ts
+  │   ├── support-management.service.ts
+  │   └── support-management.validation.ts
+  │
+  ├── notification-management/
+  │   ├── notification-management.controller.ts
+  │   ├── notification-management.service.ts
+  │   └── notification-management.validation.ts
+  │
+  ├── audit-log/
+  │   ├── audit-log.controller.ts
+  │   ├── audit-log.service.ts
+  │   └── audit-log.validation.ts
+  │
+  ├── system-config/
+  │   ├── system-config.controller.ts
+  │   ├── system-config.service.ts
+  │   └── system-config.validation.ts
+  │
+  ├── report/
+  │   ├── report.controller.ts
+  │   ├── report.service.ts
+  │   └── report.validation.ts
+  │
+  └── provider-management/
+      ├── provider-management.controller.ts
+      ├── provider-management.service.ts
+      └── provider-management.validation.ts
+```
+
+### 3.2 API Route Structure
+
+All admin APIs will be mounted under `/api/v1/admin/` with:
+- **Authentication:** `authenticate` middleware (mandatory)
+- **Authorization:** `authorize('ADMIN', 'SUPER_ADMIN')` middleware (mandatory)
+- **Admin Rate Limiting:** Separate, more permissive rate limiter for admin
+- **Audit Logging:** Automatic audit trail on every mutation
+
+```
+/api/v1/admin/
+  ├── /dashboard              # Analytics & metrics
+  │   ├── GET /overview       # Platform overview stats
+  │   ├── GET /revenue        # Revenue analytics (daily/weekly/monthly)
+  │   ├── GET /bookings       # Booking analytics & trends
+  │   ├── GET /users          # User growth & segmentation
+  │   └── GET /system         # System health & performance
+  │
+  ├── /users                  # User management
+  │   ├── GET /                # List all users (paginated, filtered)
+  │   ├── GET /:id             # Get user details with activity
+  │   ├── PATCH /:id           # Update user profile/role/status
+  │   ├── POST /:id/suspend    # Suspend user
+  │   ├── POST /:id/activate   # Activate user
+  │   ├── GET /:id/bookings    # Get user's booking history
+  │   ├── GET /:id/payments    # Get user's payment history
+  │   └── GET /:id/wallet      # Get user's wallet transactions
+  │
+  ├── /bookings               # Booking management
+  │   ├── GET /                # List all bookings (paginated, filtered)
+  │   ├── GET /:id             # Get booking details (full)
+  │   ├── PATCH /:id/status    # Admin status override
+  │   ├── POST /:id/cancel     # Admin-initiated cancellation
+  │   ├── POST /:id/reconcile  # Manual reconciliation trigger
+  │   └── GET /stats           # Booking statistics
+  │
+  ├── /payments               # Payment management
+  │   ├── GET /                # List all payments (paginated, filtered)
+  │   ├── GET /:id             # Get payment details
+  │   ├── POST /:id/reconcile  # Manual payment reconciliation
+  │   └── GET /stats           # Payment statistics
+  │
+  ├── /refunds                # Refund management
+  │   ├── GET /                # List all refunds (paginated, filtered)
+  │   ├── GET /:id             # Get refund details
+  │   ├── POST /:id/process    # Manually process a refund
+  │   ├── POST /:id/retry      # Retry failed refund
+  │   └── GET /stats           # Refund statistics
+  │
+  ├── /cancellations          # Cancellation management
+  │   ├── GET /                # List all cancellations
+  │   └── GET /:id             # Get cancellation details
+  │
+  ├── /cities                 # City management
+  │   ├── GET /                # List all cities (admin view with metadata)
+  │   ├── POST /               # Create city
+  │   ├── PATCH /:id           # Update city
+  │   ├── DELETE /:id          # Soft-delete/deactivate city
+  │   └── POST /sync           # Trigger GDS city sync
+  │
+  ├── /operators              # Operator management
+  │   ├── GET /                # List operators
+  │   ├── GET /:id             # Get operator details
+  │   ├── POST /               # Create operator
+  │   ├── PATCH /:id           # Update operator
+  │   ├── POST /:id/suspend    # Suspend operator
+  │   ├── POST /:id/activate   # Activate operator
+  │   └── GET /:id/bookings    # Get operator's bookings
+  │
+  ├── /coupons                # Coupon & promotion management
+  │   ├── GET /                # List all coupons
+  │   ├── GET /:id             # Get coupon details
+  │   ├── POST /               # Create coupon
+  │   ├── PATCH /:id           # Update coupon
+  │   ├── DELETE /:id          # Deactivate coupon
+  │   └── GET /:id/usage       # Get coupon usage stats
+  │
+  ├── /support                # Support ticket management
+  │   ├── GET /tickets         # List support tickets
+  │   ├── GET /tickets/:id     # Get ticket details
+  │   ├── POST /tickets        # Create ticket (admin-initiated)
+  │   ├── PATCH /tickets/:id   # Update ticket status/assignment
+  │   └── POST /tickets/:id/reply  # Admin reply to ticket
+  │
+  ├── /notifications          # Notification management
+  │   ├── GET /                # List notification history
+  │   ├── POST /broadcast      # Send broadcast notification
+  │   ├── POST /:id/retry      # Retry failed notification
+  │   └── GET /templates       # List notification templates
+  │
+  ├── /audit-logs             # Audit log viewer
+  │   ├── GET /                # List audit logs (paginated, filtered)
+  │   └── GET /export          # Export audit logs
+  │
+  ├── /system                 # System configuration
+  │   ├── GET /config          # Get system configuration
+  │   ├── PATCH /config        # Update system configuration
+  │   ├── GET /feature-flags   # Get feature flags
+  │   ├── PATCH /feature-flags # Toggle feature flags
+  │   └── GET /health          # Detailed system health
+  │
+  ├── /reports                # Reports & exports
+  │   ├── GET /revenue         # Revenue report (downloadable)
+  │   ├── GET /bookings        # Booking report
+  │   ├── GET /users           # User report
+  │   ├── GET /cancellations   # Cancellation report
+  │   └── GET /payments        # Payment report
+  │
+  └── /providers              # Provider management
+      ├── GET /                # List providers
+      ├── GET /:name/health    # Provider health status
+      ├── GET /:name/transactions  # Provider transaction log
+      └── GET /:name/balance   # Provider balance check
+```
+
+---
+
+## 4. Database Schema Changes
+
+### 4.1 New Models Required
+
+```prisma
+// ---------------------------------------------------------------------------
+// New Admin Models
+// ---------------------------------------------------------------------------
+
+enum OperatorStatus {
+  ACTIVE
+  SUSPENDED
+  PENDING_REVIEW
+  DEACTIVATED
+}
+
+enum CouponType {
+  PERCENTAGE
+  FLAT
+  CASHBACK
+}
+
+enum CouponStatus {
+  ACTIVE
+  EXPIRED
+  EXHAUSTED
+  DISABLED
+}
+
+enum SupportTicketStatus {
+  OPEN
+  IN_PROGRESS
+  AWAITING_CUSTOMER
+  RESOLVED
+  CLOSED
+  ESCALATED
+}
+
+enum SupportTicketPriority {
+  LOW
+  MEDIUM
+  HIGH
+  URGENT
+}
+
+enum SystemConfigType {
+  STRING
+  NUMBER
+  BOOLEAN
+  JSON
+}
+
+model Operator {
+  id               String         @id @default(uuid()) @db.Uuid
+  name             String
+  code             String         @unique              // e.g., "SRS", "VRL"
+  contactEmail     String         @map("contact_email")
+  contactPhone     String         @map("contact_phone")
+  status           OperatorStatus @default(ACTIVE)
+  providerName     String         @default("GDS") @map("provider_name")
+  providerOperatorId String?      @map("provider_operator_id")
+  commissionPct    Decimal        @default(0.00) @map("commission_pct") @db.Decimal(5, 2)
+  gstNumber        String?        @map("gst_number")
+  panNumber        String?        @map("pan_number")
+  address          String?
+  city             String?
+  state            String?
+  metadata         Json?
+  totalBookings    Int            @default(0) @map("total_bookings")
+  totalRevenue     Decimal        @default(0.00) @map("total_revenue") @db.Decimal(14, 2)
+  createdAt        DateTime       @default(now()) @map("created_at")
+  updatedAt        DateTime       @updatedAt @map("updated_at")
+
+  @@index([name])
+  @@index([status])
+  @@map("operators")
+}
+
+model Coupon {
+  id               String       @id @default(uuid()) @db.Uuid
+  code             String       @unique
+  type             CouponType
+  value            Decimal      @db.Decimal(10, 2)    // % or flat amount
+  maxDiscount      Decimal?     @map("max_discount") @db.Decimal(10, 2)
+  minOrderValue    Decimal?     @map("min_order_value") @db.Decimal(10, 2)
+  status           CouponStatus @default(ACTIVE)
+  description      String?
+  termsAndConditions String?    @map("terms_and_conditions")
+  usageLimit       Int?         @map("usage_limit")    // total uses allowed
+  usageLimitPerUser Int?        @map("usage_limit_per_user")
+  usedCount        Int          @default(0) @map("used_count")
+  applicableRoutes Json?        @map("applicable_routes") // route restrictions
+  applicableOperators Json?     @map("applicable_operators")
+  validFrom        DateTime     @map("valid_from")
+  validUntil       DateTime     @map("valid_until")
+  createdBy        String?      @map("created_by") @db.Uuid
+  createdAt        DateTime     @default(now()) @map("created_at")
+  updatedAt        DateTime     @updatedAt @map("updated_at")
+
+  usages           CouponUsage[]
+
+  @@index([code])
+  @@index([status])
+  @@index([validFrom, validUntil])
+  @@map("coupons")
+}
+
+model CouponUsage {
+  id         String   @id @default(uuid()) @db.Uuid
+  couponId   String   @map("coupon_id") @db.Uuid
+  userId     String   @map("user_id") @db.Uuid
+  bookingId  String?  @map("booking_id") @db.Uuid
+  discount   Decimal  @db.Decimal(10, 2)
+  appliedAt  DateTime @default(now()) @map("applied_at")
+
+  coupon     Coupon   @relation(fields: [couponId], references: [id], onDelete: Cascade)
+
+  @@index([couponId])
+  @@index([userId])
+  @@map("coupon_usages")
+}
+
+model SupportTicket {
+  id           String                @id @default(uuid()) @db.Uuid
+  ticketNumber String                @unique @map("ticket_number")
+  userId       String?               @map("user_id") @db.Uuid
+  bookingId    String?               @map("booking_id") @db.Uuid
+  subject      String
+  description  String
+  category     String                // BOOKING, PAYMENT, REFUND, CANCELLATION, GENERAL, OTHER
+  status       SupportTicketStatus   @default(OPEN)
+  priority     SupportTicketPriority @default(MEDIUM)
+  assignedTo   String?               @map("assigned_to") @db.Uuid
+  resolvedAt   DateTime?             @map("resolved_at")
+  closedAt     DateTime?             @map("closed_at")
+  createdAt    DateTime              @default(now()) @map("created_at")
+  updatedAt    DateTime              @updatedAt @map("updated_at")
+
+  replies      SupportTicketReply[]
+
+  @@index([userId])
+  @@index([bookingId])
+  @@index([status])
+  @@index([assignedTo])
+  @@index([priority])
+  @@map("support_tickets")
+}
+
+model SupportTicketReply {
+  id         String   @id @default(uuid()) @db.Uuid
+  ticketId   String   @map("ticket_id") @db.Uuid
+  authorId   String   @map("author_id") @db.Uuid
+  authorType String   @map("author_type") // CUSTOMER, ADMIN, SUPPORT_AGENT, SYSTEM
+  message    String
+  isInternal Boolean  @default(false) @map("is_internal") // Admin-only notes
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  ticket     SupportTicket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+
+  @@index([ticketId])
+  @@map("support_ticket_replies")
+}
+
+model SystemConfig {
+  id          String           @id @default(uuid()) @db.Uuid
+  key         String           @unique
+  value       String
+  type        SystemConfigType @default(STRING)
+  description String?
+  group       String           @default("general") // general, payment, booking, notification, etc.
+  isSecret    Boolean          @default(false) @map("is_secret")
+  updatedBy   String?          @map("updated_by") @db.Uuid
+  createdAt   DateTime         @default(now()) @map("created_at")
+  updatedAt   DateTime         @updatedAt @map("updated_at")
+
+  @@index([group])
+  @@map("system_configs")
+}
+
+model FeatureFlag {
+  id          String   @id @default(uuid()) @db.Uuid
+  key         String   @unique
+  enabled     Boolean  @default(false)
+  description String?
+  metadata    Json?
+  updatedBy   String?  @map("updated_by") @db.Uuid
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  @@map("feature_flags")
+}
+
+model AdminActivityLog {
+  id           String   @id @default(uuid()) @db.Uuid
+  adminId      String   @map("admin_id") @db.Uuid
+  action       String
+  module       String                // which admin sub-module
+  resourceType String   @map("resource_type")
+  resourceId   String?  @map("resource_id")
+  details      Json?
+  ipAddress    String?  @map("ip_address")
+  userAgent    String?  @map("user_agent")
+  requestId    String?  @map("request_id")
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  @@index([adminId])
+  @@index([module])
+  @@index([action])
+  @@index([createdAt])
+  @@map("admin_activity_logs")
+}
+```
+
+### 4.2 Modifications to Existing Models
+
+- **No breaking changes** to existing models
+- Add optional `couponId` to `Booking` (for applied coupon tracking)
+- Add `operatorCode` to `Booking` (for operator-level analytics)
+
+---
+
+## 5. Admin Roles & Permissions
+
+### 5.1 Role Hierarchy (Existing — Enhanced)
+
+| Role | Level | Capabilities |
+|---|---|---|
+| `CUSTOMER` | 0 | Self-service only |
+| `OPERATOR_AGENT` | 1 | View own operator's bookings, limited stats |
+| `SUPPORT_AGENT` | 2 | View bookings, users, tickets; resolve support issues |
+| `ADMIN` | 3 | Full platform management, cannot manage other admins |
+| `SUPER_ADMIN` | 4 | Everything + admin management + system config + dangerous ops |
+
+### 5.2 Permission-Based Access Control (New)
+
+A granular permission system layered on top of roles:
+
+```typescript
+export const AdminPermission = {
+  // Dashboard
+  DASHBOARD_VIEW: 'dashboard:view',
+  
+  // Users
+  USERS_LIST: 'users:list',
+  USERS_VIEW: 'users:view',
+  USERS_UPDATE: 'users:update',
+  USERS_SUSPEND: 'users:suspend',
+  USERS_DELETE: 'users:delete',
+  
+  // Bookings
+  BOOKINGS_LIST: 'bookings:list',
+  BOOKINGS_VIEW: 'bookings:view',
+  BOOKINGS_UPDATE_STATUS: 'bookings:update_status',
+  BOOKINGS_CANCEL: 'bookings:cancel',
+  BOOKINGS_RECONCILE: 'bookings:reconcile',
+  
+  // Payments
+  PAYMENTS_LIST: 'payments:list',
+  PAYMENTS_VIEW: 'payments:view',
+  PAYMENTS_RECONCILE: 'payments:reconcile',
+  
+  // Refunds
+  REFUNDS_LIST: 'refunds:list',
+  REFUNDS_PROCESS: 'refunds:process',
+  REFUNDS_RETRY: 'refunds:retry',
+  
+  // Cities
+  CITIES_MANAGE: 'cities:manage',
+  
+  // Operators
+  OPERATORS_MANAGE: 'operators:manage',
+  
+  // Coupons
+  COUPONS_MANAGE: 'coupons:manage',
+  
+  // Support
+  SUPPORT_VIEW: 'support:view',
+  SUPPORT_MANAGE: 'support:manage',
+  
+  // Notifications
+  NOTIFICATIONS_MANAGE: 'notifications:manage',
+  NOTIFICATIONS_BROADCAST: 'notifications:broadcast',
+  
+  // Audit
+  AUDIT_VIEW: 'audit:view',
+  AUDIT_EXPORT: 'audit:export',
+  
+  // System
+  SYSTEM_CONFIG: 'system:config',
+  SYSTEM_FEATURE_FLAGS: 'system:feature_flags',
+  
+  // Reports
+  REPORTS_VIEW: 'reports:view',
+  REPORTS_EXPORT: 'reports:export',
+  
+  // Providers
+  PROVIDERS_VIEW: 'providers:view',
+  PROVIDERS_MANAGE: 'providers:manage',
+} as const;
+```
+
+**Default Permission Mapping:**
+
+| Permission | SUPPORT_AGENT | ADMIN | SUPER_ADMIN |
+|---|---|---|---|
+| dashboard:view | ✅ | ✅ | ✅ |
+| users:list/view | ✅ | ✅ | ✅ |
+| users:update/suspend | ❌ | ✅ | ✅ |
+| bookings:list/view | ✅ | ✅ | ✅ |
+| bookings:cancel/reconcile | ❌ | ✅ | ✅ |
+| payments:reconcile | ❌ | ✅ | ✅ |
+| refunds:process/retry | ❌ | ✅ | ✅ |
+| cities/operators:manage | ❌ | ✅ | ✅ |
+| coupons:manage | ❌ | ✅ | ✅ |
+| support:view | ✅ | ✅ | ✅ |
+| support:manage | ✅ | ✅ | ✅ |
+| system:config | ❌ | ❌ | ✅ |
+| system:feature_flags | ❌ | ❌ | ✅ |
+| audit:export | ❌ | ✅ | ✅ |
+| reports:export | ❌ | ✅ | ✅ |
+
+---
+
+## 6. What to Reuse, Improve, and Build New
+
+### 6.1 Reuse (No Changes)
+
+| Component | Rationale |
+|---|---|
+| `AppError` hierarchy | All admin errors extend the existing error taxonomy |
+| `ApiResponse` utility | Same response envelope for admin APIs |
+| `validate()` middleware | Same Zod validation pattern |
+| `authenticate` middleware | Same JWT verification |
+| `requestIdMiddleware` | Same tracing |
+| `getPrismaClient()` | Same database access |
+| `getRedisClient()` | Same cache access |
+| `addJob()` / BullMQ | Same queue system |
+| `logger` (Pino) | Same structured logging |
+| `idempotencyMiddleware` | Same idempotency on mutations |
+
+### 6.2 Improve (Small Enhancements)
+
+| Component | Enhancement |
+|---|---|
+| `authorize()` middleware | Add granular permission checking alongside role-based |
+| `shared/constants` | Add admin-specific constants (permissions, new audit actions, Redis keys, queue names) |
+| `shared/errors` | Add admin-specific errors (`AdminActionDeniedError`, `InvalidConfigError`) |
+| `ApiResponse` | Add `exportCsv()` utility for report downloads |
+| `AuditLog` recording | Create a reusable `auditAction()` helper for consistent admin activity tracking |
+
+### 6.3 Build New
+
+| Component | Description |
+|---|---|
+| `src/modules/admin/` | Entire admin module directory tree |
+| Admin sub-modules (14) | Dashboard, user-mgmt, booking-mgmt, payment-mgmt, refund-mgmt, city-mgmt, operator-mgmt, coupon-mgmt, support-mgmt, notification-mgmt, audit-log, system-config, report, provider-mgmt |
+| Prisma models (8 new) | `Operator`, `Coupon`, `CouponUsage`, `SupportTicket`, `SupportTicketReply`, `SystemConfig`, `FeatureFlag`, `AdminActivityLog` |
+| Admin middleware | `adminAuditMiddleware` — auto-records admin actions |
+| Admin rate limiter | Separate, admin-specific rate limits |
+| Redis caching | Dashboard stats caching (1–5 min TTL) |
+| BullMQ jobs | Report generation worker, admin notification worker |
+
+---
+
+## 7. Implementation Phases & Order
+
+> [!IMPORTANT]
+> Each phase is self-contained and deployable. Implementation must preserve all existing functionality.
+
+### Phase 1: Foundation & Core Infrastructure
+**Files to create/modify: ~12 files**
+
+1. **Database schema updates** — New Prisma models + migration
+2. **Admin route mounting** — `admin.routes.ts` + register in `app/index.ts`
+3. **Permission system** — Admin permission constants + `authorizePermission()` middleware
+4. **Admin audit middleware** — Auto-records every admin mutation
+5. **Admin-specific error classes** — Extend `AppError` for admin domain
+6. **Shared admin utilities** — Pagination builder, CSV export, filter parser
+
+### Phase 2: Dashboard & Analytics APIs
+**Files to create: ~3 files**
+
+1. **Dashboard overview** — Total users, bookings, revenue, active holds, pending refunds
+2. **Revenue analytics** — Daily/weekly/monthly revenue with breakdown by operator, route
+3. **Booking analytics** — Status distribution, trends, conversion funnel
+4. **User analytics** — Registration trends, active users, user segmentation
+5. **System health** — DB health, Redis health, queue stats, provider circuit breaker state
+
+### Phase 3: User Management
+**Files to create: ~3 files**
+
+1. **List users** — Paginated with filters (role, status, date range, search by name/email)
+2. **Get user details** — Full profile with booking/payment/wallet summary
+3. **Update user** — Admin can edit profile, change role, update status
+4. **Suspend/Activate user** — With audit trail and optional reason
+5. **User's activity** — Bookings, payments, wallet transactions
+
+### Phase 4: Booking & Cancellation Management
+**Files to create: ~3 files**
+
+1. **List all bookings** — Paginated with rich filters (status, date range, operator, route, amount)
+2. **Get booking details** — Full booking with all relations (payments, passengers, seats, holds, ticket, cancellations, provider transactions)
+3. **Admin status override** — Manually transition booking status (with strong validation)
+4. **Admin-initiated cancellation** — Cancel on behalf of customer (with refund trigger)
+5. **Manual reconciliation** — Trigger reconciliation for stuck/unknown bookings
+
+### Phase 5: Payment & Refund Management
+**Files to create: ~6 files**
+
+1. **List all payments** — Paginated, filterable by status, gateway, date
+2. **Payment reconciliation** — Manually verify/reconcile payment with gateway
+3. **List all refunds** — Filterable by status, date range
+4. **Process refund** — Manually process a pending refund
+5. **Retry failed refund** — Re-queue a failed refund for processing
+6. **Cancellation listing** — View all cancellations with details
+
+### Phase 6: City & Operator Management
+**Files to create: ~6 files**
+
+1. **City CRUD** — Create, update, deactivate cities with admin control
+2. **GDS sync trigger** — Manually trigger city sync from GDS provider
+3. **Operator CRUD** — Full operator lifecycle management
+4. **Operator analytics** — Bookings, revenue per operator
+5. **Operator suspension/activation** — With audit trail
+
+### Phase 7: Coupon & Promotion Management
+**Files to create: ~3 files**
+
+1. **Coupon CRUD** — Create percentage/flat/cashback coupons with rules
+2. **Coupon validation rules** — Min order, max discount, route/operator restrictions, date validity
+3. **Coupon usage tracking** — View who used which coupon, usage stats
+
+### Phase 8: Support & Notification Management
+**Files to create: ~6 files**
+
+1. **Support ticket CRUD** — Create, update status, assign, prioritize
+2. **Ticket replies** — Admin can reply, add internal notes
+3. **Notification history** — View all sent notifications with status
+4. **Broadcast notifications** — Send bulk notifications
+5. **Retry failed notifications** — Re-queue failed notification
+
+### Phase 9: Audit Logs & System Configuration
+**Files to create: ~6 files**
+
+1. **Audit log viewer** — Paginated, filterable by actor, action, resource, date
+2. **Audit log export** — CSV/JSON export for compliance
+3. **System config CRUD** — Dynamic platform configuration
+4. **Feature flags** — Toggle features on/off (e.g., wallet payments, new operator onboarding)
+5. **Detailed system health** — DB pool stats, Redis info, queue metrics, provider status
+
+### Phase 10: Reports & Provider Management
+**Files to create: ~6 files**
+
+1. **Revenue reports** — Daily/weekly/monthly with CSV export
+2. **Booking reports** — By status, route, operator, date range
+3. **User reports** — Registration, active users, churn
+4. **Payment/refund reports** — Financial reconciliation reports
+5. **Provider health monitoring** — Circuit breaker state, latency, error rates
+6. **Provider transaction log** — View all GDS API calls with request/response
+
+---
+
+## 8. Cross-Cutting Production Concerns
+
+### 8.1 Performance & Caching Strategy
+
+| Endpoint | Cache Strategy | TTL |
+|---|---|---|
+| Dashboard overview | Redis cache | 60s |
+| Revenue analytics | Redis cache | 300s |
+| City list (admin) | Redis cache | 3600s |
+| Operator list | Redis cache | 600s |
+| Audit log queries | No cache (real-time) | — |
+| Booking/Payment lists | No cache (real-time) | — |
+
+### 8.2 Security Measures
+
+- **All admin routes behind `authenticate` + `authorize`** (role check)
+- **Granular permissions** via `authorizePermission()` for sensitive operations
+- **Admin-specific rate limiting** (200 req/min for reads, 50 req/min for writes)
+- **IP logging** on every admin action
+- **Automatic audit trail** on all mutations via middleware
+- **SUPER_ADMIN-only access** for system config, feature flags, user deletion
+- **Sensitive field masking** in audit logs (passwords, tokens, secrets)
+
+### 8.3 Database Optimization
+
+- All new models indexed on common query patterns (status, dates, foreign keys)
+- Paginated queries with `skip`/`take` + total count
+- Aggregate queries for dashboard use `$queryRaw` for performance
+- No N+1 queries — proper `include` usage
+
+### 8.4 Error Handling
+
+- All admin services throw typed `AppError` subclasses
+- Admin-specific errors: `AdminActionDeniedError`, `InvalidConfigError`, `ReportGenerationError`
+- All errors include `requestId` for tracing
+
+### 8.5 Logging
+
+- Every admin service creates a child logger: `logger.child({ module: 'admin-<submodule>' })`
+- All admin mutations log the acting admin ID, target resource, and action
+- Sensitive data (passwords, tokens) never logged
+
+---
+
+## 9. Summary of Files to Create/Modify
+
+### New Files (~60+)
+- `src/modules/admin/admin.routes.ts` (main router)
+- 14 sub-modules × 3 files each (controller, service, validation) = **42 files**
+- `src/app/middleware/adminAudit.ts` (admin audit middleware)
+- `src/shared/constants/admin.ts` (admin permissions, actions)
+- `src/shared/utils/pagination.ts` (pagination builder)
+- `src/shared/utils/csvExport.ts` (CSV export utility)
+- Prisma migration file (auto-generated)
+
+### Modified Files (~5)
+- `prisma/schema.prisma` — Add new models + enums
+- `src/app/index.ts` — Mount admin routes
+- `src/app/middleware/index.ts` — Export new middleware
+- `src/shared/constants/index.ts` — Export admin constants
+- `src/shared/errors/index.ts` — Add admin error classes
+
+### Not Modified (Preserved)
+- All existing module files (auth, bookings, payments, cancellations, etc.)
+- All existing infrastructure files (database, redis, queues, http, logger)
+- All existing middleware (requestId, validation, errorHandler, rateLimiter, idempotency)
+- Server bootstrap and shutdown logic
+
+---
+
+> [!TIP]
+> **Recommended starting point:** Phase 1 (Foundation) → Phase 2 (Dashboard) → Phase 3 (User Management). These three phases establish the admin infrastructure and provide immediate value with analytics and user control.

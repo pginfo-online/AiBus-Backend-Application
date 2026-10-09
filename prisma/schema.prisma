@@ -533,3 +533,214 @@ model IdempotencyRecord {
   @@index([expiresAt])
   @@map("idempotency_records")
 }
+
+// ---------------------------------------------------------------------------
+// Admin Module — Enums
+// ---------------------------------------------------------------------------
+
+enum OperatorStatus {
+  ACTIVE
+  SUSPENDED
+  PENDING_REVIEW
+  DEACTIVATED
+}
+
+enum CouponType {
+  PERCENTAGE
+  FLAT
+  CASHBACK
+}
+
+enum CouponStatus {
+  ACTIVE
+  EXPIRED
+  EXHAUSTED
+  DISABLED
+}
+
+enum SupportTicketStatus {
+  OPEN
+  IN_PROGRESS
+  AWAITING_CUSTOMER
+  RESOLVED
+  CLOSED
+  ESCALATED
+}
+
+enum SupportTicketPriority {
+  LOW
+  MEDIUM
+  HIGH
+  URGENT
+}
+
+enum SystemConfigType {
+  STRING
+  NUMBER
+  BOOLEAN
+  JSON
+}
+
+// ---------------------------------------------------------------------------
+// Admin Module — Models
+// ---------------------------------------------------------------------------
+
+model Operator {
+  id                 String         @id @default(uuid()) @db.Uuid
+  name               String
+  code               String         @unique
+  contactEmail       String         @map("contact_email")
+  contactPhone       String         @map("contact_phone")
+  status             OperatorStatus @default(ACTIVE)
+  providerName       String         @default("GDS") @map("provider_name")
+  providerOperatorId String?        @map("provider_operator_id")
+  commissionPct      Decimal        @default(0.00) @map("commission_pct") @db.Decimal(5, 2)
+  gstNumber          String?        @map("gst_number")
+  panNumber          String?        @map("pan_number")
+  address            String?
+  city               String?
+  state              String?
+  metadata           Json?
+  totalBookings      Int            @default(0) @map("total_bookings")
+  totalRevenue       Decimal        @default(0.00) @map("total_revenue") @db.Decimal(14, 2)
+  createdAt          DateTime       @default(now()) @map("created_at")
+  updatedAt          DateTime       @updatedAt @map("updated_at")
+
+  @@index([name])
+  @@index([status])
+  @@map("operators")
+}
+
+model Coupon {
+  id                 String       @id @default(uuid()) @db.Uuid
+  code               String       @unique
+  type               CouponType
+  value              Decimal      @db.Decimal(10, 2)
+  maxDiscount        Decimal?     @map("max_discount") @db.Decimal(10, 2)
+  minOrderValue      Decimal?     @map("min_order_value") @db.Decimal(10, 2)
+  status             CouponStatus @default(ACTIVE)
+  description        String?
+  termsAndConditions String?      @map("terms_and_conditions")
+  usageLimit         Int?         @map("usage_limit")
+  usageLimitPerUser  Int?         @map("usage_limit_per_user")
+  usedCount          Int          @default(0) @map("used_count")
+  applicableRoutes   Json?        @map("applicable_routes")
+  applicableOperators Json?       @map("applicable_operators")
+  validFrom          DateTime     @map("valid_from")
+  validUntil         DateTime     @map("valid_until")
+  createdBy          String?      @map("created_by") @db.Uuid
+  createdAt          DateTime     @default(now()) @map("created_at")
+  updatedAt          DateTime     @updatedAt @map("updated_at")
+
+  usages             CouponUsage[]
+
+  @@index([code])
+  @@index([status])
+  @@index([validFrom, validUntil])
+  @@map("coupons")
+}
+
+model CouponUsage {
+  id        String   @id @default(uuid()) @db.Uuid
+  couponId  String   @map("coupon_id") @db.Uuid
+  userId    String   @map("user_id") @db.Uuid
+  bookingId String?  @map("booking_id") @db.Uuid
+  discount  Decimal  @db.Decimal(10, 2)
+  appliedAt DateTime @default(now()) @map("applied_at")
+
+  coupon    Coupon   @relation(fields: [couponId], references: [id], onDelete: Cascade)
+
+  @@index([couponId])
+  @@index([userId])
+  @@map("coupon_usages")
+}
+
+model SupportTicket {
+  id           String                @id @default(uuid()) @db.Uuid
+  ticketNumber String                @unique @map("ticket_number")
+  userId       String?               @map("user_id") @db.Uuid
+  bookingId    String?               @map("booking_id") @db.Uuid
+  subject      String
+  description  String
+  category     String
+  status       SupportTicketStatus   @default(OPEN)
+  priority     SupportTicketPriority @default(MEDIUM)
+  assignedTo   String?               @map("assigned_to") @db.Uuid
+  resolvedAt   DateTime?             @map("resolved_at")
+  closedAt     DateTime?             @map("closed_at")
+  createdAt    DateTime              @default(now()) @map("created_at")
+  updatedAt    DateTime              @updatedAt @map("updated_at")
+
+  replies      SupportTicketReply[]
+
+  @@index([userId])
+  @@index([bookingId])
+  @@index([status])
+  @@index([assignedTo])
+  @@index([priority])
+  @@map("support_tickets")
+}
+
+model SupportTicketReply {
+  id         String   @id @default(uuid()) @db.Uuid
+  ticketId   String   @map("ticket_id") @db.Uuid
+  authorId   String   @map("author_id") @db.Uuid
+  authorType String   @map("author_type")
+  message    String
+  isInternal Boolean  @default(false) @map("is_internal")
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  ticket     SupportTicket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+
+  @@index([ticketId])
+  @@map("support_ticket_replies")
+}
+
+model SystemConfig {
+  id          String           @id @default(uuid()) @db.Uuid
+  key         String           @unique
+  value       String
+  type        SystemConfigType @default(STRING)
+  description String?
+  group       String           @default("general")
+  isSecret    Boolean          @default(false) @map("is_secret")
+  updatedBy   String?          @map("updated_by") @db.Uuid
+  createdAt   DateTime         @default(now()) @map("created_at")
+  updatedAt   DateTime         @updatedAt @map("updated_at")
+
+  @@index([group])
+  @@map("system_configs")
+}
+
+model FeatureFlag {
+  id          String   @id @default(uuid()) @db.Uuid
+  key         String   @unique
+  enabled     Boolean  @default(false)
+  description String?
+  metadata    Json?
+  updatedBy   String?  @map("updated_by") @db.Uuid
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  @@map("feature_flags")
+}
+
+model AdminActivityLog {
+  id           String   @id @default(uuid()) @db.Uuid
+  adminId      String   @map("admin_id") @db.Uuid
+  action       String
+  module       String
+  resourceType String   @map("resource_type")
+  resourceId   String?  @map("resource_id")
+  details      Json?
+  ipAddress    String?  @map("ip_address")
+  userAgent    String?  @map("user_agent")
+  requestId    String?  @map("request_id")
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  @@index([adminId])
+  @@index([module])
+  @@index([action])
+  @@index([createdAt])
+  @@map("admin_activity_logs")
+}

@@ -94,4 +94,13 @@ export declare class InternalError extends AppError {
 export declare class InvalidStateTransitionError extends AppError {
     constructor(from: string, to: string, entity?: string);
 }
+export declare class BadRequestError extends AppError {
+    constructor(message?: string, metadata?: Record<string, unknown>);
+}
+export declare class AdminActionDeniedError extends AppError {
+    constructor(message?: string, metadata?: Record<string, unknown>);
+}
+export declare class InvalidConfigError extends AppError {
+    constructor(message?: string, metadata?: Record<string, unknown>);
+}
 //# sourceMappingURL=index.d.ts.map

@@ -280,3 +280,28 @@ export class InvalidStateTransitionError extends AppError {
     this.name = 'InvalidStateTransitionError';
   }
 }
+
+// ---------------------------------------------------------------------------
+// Client / Admin domain errors
+// ---------------------------------------------------------------------------
+export class BadRequestError extends AppError {
+  constructor(message = 'Bad request', metadata?: Record<string, unknown>) {
+    super({ code: 'BAD_REQUEST', message, statusCode: 400, metadata });
+    this.name = 'BadRequestError';
+  }
+}
+
+export class AdminActionDeniedError extends AppError {
+  constructor(message = 'Admin action denied', metadata?: Record<string, unknown>) {
+    super({ code: 'ADMIN_ACTION_DENIED', message, statusCode: 403, metadata });
+    this.name = 'AdminActionDeniedError';
+  }
+}
+
+export class InvalidConfigError extends AppError {
+  constructor(message = 'Invalid system configuration', metadata?: Record<string, unknown>) {
+    super({ code: 'INVALID_CONFIG', message, statusCode: 400, metadata });
+    this.name = 'InvalidConfigError';
+  }
+}
+

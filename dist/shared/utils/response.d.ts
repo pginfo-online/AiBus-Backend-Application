@@ -4,13 +4,15 @@ interface SuccessResponseOptions<T> {
     meta?: Record<string, unknown>;
     statusCode?: number;
 }
-interface PaginatedMeta {
+export interface PaginatedMeta {
     page: number;
     limit: number;
     total: number;
     totalPages: number;
-    hasNext: boolean;
-    hasPrev: boolean;
+    hasNext?: boolean;
+    hasPrev?: boolean;
+    hasNextPage?: boolean;
+    hasPrevPage?: boolean;
 }
 /**
  * Send a standardized success response.
@@ -32,7 +34,7 @@ export declare const ApiResponse: {
     success<T>(res: Response, data: T, message?: string, meta?: Record<string, unknown>): void;
     created<T>(res: Response, data: T, message?: string): void;
     noContent(res: Response): void;
-    paginated<T>(res: Response, data: T[], pagination: PaginatedMeta): void;
+    paginated<T>(res: Response, data: T[], pagination: PaginatedMeta, message?: string): void;
     error(res: Response, message: string, code?: string, statusCode?: number): void;
 };
 export {};

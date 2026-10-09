@@ -58,8 +58,15 @@ exports.ApiResponse = {
     noContent(res) {
         res.status(204).send();
     },
-    paginated(res, data, pagination) {
-        sendPaginated(res, data, pagination);
+    paginated(res, data, pagination, message) {
+        res.status(200).json({
+            success: true,
+            data,
+            meta: {
+                pagination,
+            },
+            ...(message ? { message } : {}),
+        });
     },
     error(res, message, code = 'ERROR', statusCode = 400) {
         res.status(statusCode).json({

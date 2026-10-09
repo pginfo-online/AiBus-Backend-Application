@@ -122,6 +122,8 @@ export const SeatType = {
 /** User roles — ordered by privilege level */
 export const UserRole = {
   CUSTOMER: 'CUSTOMER',
+  OPERATOR_AGENT: 'OPERATOR_AGENT',
+  SUPPORT_AGENT: 'SUPPORT_AGENT',
   SUPPORT: 'SUPPORT',
   ADMIN: 'ADMIN',
   SUPER_ADMIN: 'SUPER_ADMIN',

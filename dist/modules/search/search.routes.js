@@ -8,6 +8,7 @@ const search_validation_1 = require("./search.validation");
 const searchRouter = (0, express_1.Router)();
 exports.searchRouter = searchRouter;
 const controller = new search_controller_1.SearchController();
+searchRouter.get('/bus', (0, middleware_1.validate)({ query: search_validation_1.searchSingleBusSchema }), controller.searchSingleBus);
 searchRouter.get('/', (0, middleware_1.validate)({ query: search_validation_1.searchBusesSchema }), controller.searchBuses);
 exports.default = searchRouter;
 //# sourceMappingURL=search.routes.js.map

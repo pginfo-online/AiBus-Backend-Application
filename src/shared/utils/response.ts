@@ -10,13 +10,15 @@ interface SuccessResponseOptions<T> {
   statusCode?: number;
 }
 
-interface PaginatedMeta {
+export interface PaginatedMeta {
   page: number;
   limit: number;
   total: number;
   totalPages: number;
-  hasNext: boolean;
-  hasPrev: boolean;
+  hasNext?: boolean;
+  hasPrev?: boolean;
+  hasNextPage?: boolean;
+  hasPrevPage?: boolean;
 }
 
 /**
@@ -86,8 +88,15 @@ export const ApiResponse = {
     res.status(204).send();
   },
 
-  paginated<T>(res: Response, data: T[], pagination: PaginatedMeta): void {
-    sendPaginated(res, data, pagination);
+  paginated<T>(res: Response, data: T[], pagination: PaginatedMeta, message?: string): void {
+    res.status(200).json({
+      success: true,
+      data,
+      meta: {
+        pagination,
+      },
+      ...(message ? { message } : {}),
+    });
   },
 
   error(res: Response, message: string, code = 'ERROR', statusCode = 400): void {

@@ -79,6 +79,8 @@ export declare const SeatType: {
 /** User roles — ordered by privilege level */
 export declare const UserRole: {
     readonly CUSTOMER: "CUSTOMER";
+    readonly OPERATOR_AGENT: "OPERATOR_AGENT";
+    readonly SUPPORT_AGENT: "SUPPORT_AGENT";
     readonly SUPPORT: "SUPPORT";
     readonly ADMIN: "ADMIN";
     readonly SUPER_ADMIN: "SUPER_ADMIN";

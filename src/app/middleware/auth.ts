@@ -132,9 +132,11 @@ export function optionalAuth(
 /** Role hierarchy for comparison */
 const ROLE_HIERARCHY: Record<UserRoleType, number> = {
   [UserRole.CUSTOMER]: 0,
-  [UserRole.SUPPORT]: 1,
-  [UserRole.ADMIN]: 2,
-  [UserRole.SUPER_ADMIN]: 3,
+  [UserRole.OPERATOR_AGENT]: 1,
+  [UserRole.SUPPORT]: 2,
+  [UserRole.SUPPORT_AGENT]: 2,
+  [UserRole.ADMIN]: 3,
+  [UserRole.SUPER_ADMIN]: 4,
 };
 
 /**
