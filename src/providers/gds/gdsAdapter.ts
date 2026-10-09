@@ -116,8 +116,20 @@ export class GdsAdapter implements IGdsAdapter {
     }
   }
 
-  public async isCancellable(ticketNo: string, seatNos: string): Promise<GdsIsCancellableResponse> {
-    return this.transactionClient.isCancellable(ticketNo, seatNos);
+  public async isCancellable(ticketNo: string, seatNos: string, pnrNo?: string): Promise<GdsIsCancellableResponse> {
+    const start = Date.now();
+    let errorMsg: string | undefined;
+    let res: GdsIsCancellableResponse | undefined;
+
+    try {
+      res = await this.transactionClient.isCancellable(ticketNo, seatNos, pnrNo);
+      return res;
+    } catch (err: any) {
+      errorMsg = err.message;
+      throw err;
+    } finally {
+      this.recordTransaction('IsCancellable', { ticketNo, seatNos, pnrNo }, res, Date.now() - start, errorMsg);
+    }
   }
 
   public async cancelSeats(params: GdsCancelRequest): Promise<GdsCancelResponse> {

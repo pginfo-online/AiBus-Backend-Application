@@ -22,20 +22,26 @@ export class CancellationsService {
     return CancellationsService.instance;
   }
 
-  public async checkCancellability(bookingId: string, seatNos?: string[]) {
+  public async checkCancellability(bookingIdentifier: string, seatNos?: string[]) {
     const prisma = getPrismaClient();
 
-    const booking = await prisma.booking.findUnique({
-      where: { id: bookingId },
-      include: { seats: true },
-    });
+    const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(bookingIdentifier);
+    const booking = isUuid
+      ? await prisma.booking.findUnique({
+          where: { id: bookingIdentifier },
+          include: { seats: true },
+        })
+      : await prisma.booking.findUnique({
+          where: { bookingNumber: bookingIdentifier },
+          include: { seats: true },
+        });
 
     if (!booking) {
       throw new NotFoundError('Booking not found');
     }
 
     if (booking.status !== BookingStatus.CONFIRMED) {
-      throw new ValidationError(`Cannot cancel booking in status ${booking.status}`);
+      throw new ValidationError(`Cannot check cancellation: Booking status is ${booking.status}`);
     }
 
     if (!booking.providerTicketNo) {
@@ -44,22 +50,47 @@ export class CancellationsService {
 
     const seatsToCancel = seatNos && seatNos.length > 0 ? seatNos.join(',') : booking.seats.map((s) => s.seatNo).join(',');
 
-    const cancellableInfo = await this.gdsAdapter.isCancellable(booking.providerTicketNo, seatsToCancel);
+    const cancellableInfo = await this.gdsAdapter.isCancellable(
+      booking.providerTicketNo,
+      seatsToCancel,
+      booking.providerPnrNo || undefined
+    );
+
     return {
       bookingId: booking.id,
+      bookingNumber: booking.bookingNumber,
       ticketNo: booking.providerTicketNo,
+      pnrNo: booking.providerPnrNo,
       seatNos: seatsToCancel,
       ...cancellableInfo,
     };
   }
 
-  public async cancelSeats(bookingId: string, seatNos: string[], reason?: string, userId?: string) {
+  public async checkCancellabilityDirect(params: { ticketNo: string; seatNos: string; pnrNo?: string }) {
+    return this.gdsAdapter.isCancellable(params.ticketNo, params.seatNos, params.pnrNo);
+  }
+
+  public async cancelSeatsDirect(params: { TicketNo: string; SeatNos: string; PNR?: string }) {
+    return this.gdsAdapter.cancelSeats({
+      TicketNo: params.TicketNo,
+      SeatNos: params.SeatNos,
+      PNR: params.PNR,
+    });
+  }
+
+  public async cancelSeats(bookingIdentifier: string, seatNos: string[], reason?: string, userId?: string) {
     const prisma = getPrismaClient();
 
-    const booking = await prisma.booking.findUnique({
-      where: { id: bookingId },
-      include: { seats: true, payments: true },
-    });
+    const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(bookingIdentifier);
+    const booking = isUuid
+      ? await prisma.booking.findUnique({
+          where: { id: bookingIdentifier },
+          include: { seats: true, payments: true },
+        })
+      : await prisma.booking.findUnique({
+          where: { bookingNumber: bookingIdentifier },
+          include: { seats: true, payments: true },
+        });
 
     if (!booking) {
       throw new NotFoundError('Booking not found');
@@ -85,10 +116,11 @@ export class CancellationsService {
       // 2. Call upstream GDS provider CancelSeats
       const cancelRes = await this.gdsAdapter.cancelSeats({
         TicketNo: booking.providerTicketNo,
+        PNR: booking.providerPnrNo || undefined,
         SeatNos: seatString,
       });
 
-      if (cancelRes.Status !== 1) {
+      if (cancelRes.Status !== 1 && cancelRes.Status !== undefined && cancelRes.Status < 0) {
         throw new ProviderError('GDS', cancelRes.Message || 'Failed to cancel seats with provider');
       }
 
@@ -101,13 +133,13 @@ export class CancellationsService {
             userId: userId ?? booking.userId ?? null,
             status: CancellationStatus.COMPLETED,
             seatNos,
-            providerNewHoldId: cancelRes.NewHoldId,
-            providerNewTicketNo: cancelRes.NewTicketNo,
-            providerNewPnrNo: cancelRes.NewPNRNo,
-            chargePct: 25.0, // Calculated percentage
-            chargeAmt: cancelRes.CancellationCharge,
-            refundAmount: cancelRes.RefundAmount,
-            totalFare: booking.totalFare,
+            providerNewHoldId: cancelRes.NewHoldId ? String(cancelRes.NewHoldId) : null,
+            providerNewTicketNo: cancelRes.NewTicketNo ? String(cancelRes.NewTicketNo) : null,
+            providerNewPnrNo: cancelRes.NewPNRNo ? String(cancelRes.NewPNRNo) : null,
+            chargePct: Number(cancelRes.ChargePct ?? 0),
+            chargeAmt: Number(cancelRes.ChargeAmt ?? cancelRes.CancellationCharge ?? 0),
+            refundAmount: Number(cancelRes.RefundAmount ?? 0),
+            totalFare: Number(cancelRes.TotalFare || booking.totalFare),
             reason,
           },
         });
@@ -129,14 +161,14 @@ export class CancellationsService {
             paymentId: payment?.id ?? null,
             cancellationId: cancellation.id,
             userId: userId ?? booking.userId ?? null,
-            amount: cancelRes.RefundAmount,
+            amount: Number(cancelRes.RefundAmount ?? 0),
             status: RefundStatus.PENDING,
             destination: RefundDestination.ORIGINAL_PAYMENT_METHOD,
             reason: reason || 'Customer requested seat cancellation',
           },
         });
 
-        return { cancellation, refund };
+        return { cancellation, refund, providerResponse: cancelRes };
       });
 
       // 4. Enqueue refund processing job
@@ -144,7 +176,7 @@ export class CancellationsService {
         await addJob(QueueName.REFUND_PROCESSING, 'process-refund', {
           refundId: cancellationResult.refund.id,
           bookingId: booking.id,
-          amount: cancelRes.RefundAmount,
+          amount: Number(cancelRes.RefundAmount ?? 0),
         });
       } catch (queueErr) {
         this.cancelLogger.warn({ queueErr }, 'Failed to queue refund processing job');

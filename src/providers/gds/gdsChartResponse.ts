@@ -150,7 +150,7 @@ export function parseGdsChartResponse(response: unknown, busId: number): GdsChar
       return {
         PickupCode: requiredString(pickup.PickupCode, `Pickups[${index}].PickupCode`),
         PickupName: requiredString(pickup.PickupName, `Pickups[${index}].PickupName`),
-        Address: typeof pickup.Address === 'string' ? pickup.Address : '',
+        Address: typeof pickup.Address === 'string' && pickup.Address.trim() ? pickup.Address : (typeof pickup.PickupArea === 'string' ? pickup.PickupArea : ''),
         Landmark: typeof pickup.Landmark === 'string' ? pickup.Landmark : undefined,
         Contact: typeof pickup.Contact === 'string' ? pickup.Contact : undefined,
         PickupTime: requiredString(pickup.PickupTime, `Pickups[${index}].PickupTime`),
@@ -164,8 +164,14 @@ export function parseGdsChartResponse(response: unknown, busId: number): GdsChar
         DropoffCode: requiredString(dropoff.DropoffCode, `Dropoffs[${index}].DropoffCode`),
         DropoffName: requiredString(dropoff.DropoffName, `Dropoffs[${index}].DropoffName`),
         DropoffTime: requiredString(dropoff.DropoffTime, `Dropoffs[${index}].DropoffTime`),
+        Address: typeof dropoff.Address === 'string' && dropoff.Address.trim() ? dropoff.Address : (typeof dropoff.DropoffArea === 'string' ? dropoff.DropoffArea : ''),
+        Landmark: typeof dropoff.Landmark === 'string' ? dropoff.Landmark : undefined,
+        Contact: typeof dropoff.Contact === 'string' ? dropoff.Contact : undefined,
       };
     }),
     CancellationPolicy: cancellationPolicy,
+    ChartLayout: chartLayout,
+    ChartSeats: chartSeats,
+    SeatsStatus: seatsStatus,
   };
 }

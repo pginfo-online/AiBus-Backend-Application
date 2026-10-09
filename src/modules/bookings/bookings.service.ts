@@ -39,27 +39,31 @@ export class BookingsService {
 
     if (input.holdId) {
       const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(input.holdId);
-      if (isUuid) {
-        const hold = await prisma.seatHold.findUnique({
-          where: { id: input.holdId },
-        });
+      const hold = isUuid
+        ? await prisma.seatHold.findUnique({ where: { id: input.holdId } })
+        : await prisma.seatHold.findFirst({
+            where: { providerHoldId: String(input.holdId) },
+            orderBy: { createdAt: 'desc' },
+          });
 
-        if (hold) {
-          if (hold.status !== HoldStatus.ACTIVE) {
-            throw new ValidationError(`Cannot create booking: Hold status is ${hold.status}`);
-          }
-
-          if (new Date() > hold.expiresAt) {
-            await prisma.seatHold.update({
-              where: { id: hold.id },
-              data: { status: HoldStatus.EXPIRED },
-            });
-            throw new ValidationError('Seat hold has expired. Please select seats again.');
-          }
-
-          providerHoldId = hold.providerHoldId;
-          holdRecordId = hold.id;
+      if (hold) {
+        if (hold.status !== HoldStatus.ACTIVE) {
+          throw new ValidationError(`Cannot create booking: Hold status is ${hold.status}`);
         }
+
+        if (new Date() > hold.expiresAt) {
+          await prisma.seatHold.update({
+            where: { id: hold.id },
+            data: { status: HoldStatus.EXPIRED },
+          });
+          throw new ValidationError('Seat hold has expired. Please select seats again.');
+        }
+
+        providerHoldId = hold.providerHoldId;
+        holdRecordId = hold.id;
+      } else if (!isUuid) {
+        // Direct providerHoldId provided
+        providerHoldId = String(input.holdId);
       }
     }
 
@@ -349,6 +353,74 @@ export class BookingsService {
       },
       orderBy: { createdAt: 'desc' },
     });
+  }
+
+  public async checkBookingStatus(input: { holdId?: string; HoldId?: string; bookingId?: string; bookingNumber?: string }) {
+    const prisma = getPrismaClient();
+
+    let targetHoldId = input.holdId || input.HoldId;
+    let localBooking: any = null;
+
+    if (!targetHoldId) {
+      const searchKey = input.bookingId || input.bookingNumber;
+      if (searchKey) {
+        const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(searchKey);
+        localBooking = isUuid
+          ? await prisma.booking.findUnique({ where: { id: searchKey } })
+          : await prisma.booking.findUnique({ where: { bookingNumber: searchKey } });
+
+        if (localBooking?.providerHoldId) {
+          targetHoldId = localBooking.providerHoldId;
+        }
+      }
+    }
+
+    if (!targetHoldId) {
+      throw new ValidationError('HoldId or BookingId is required to check booking status');
+    }
+
+    // Check if targetHoldId is a local SeatHold UUID
+    const isHoldUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(targetHoldId);
+    if (isHoldUuid) {
+      const holdRec = await prisma.seatHold.findUnique({ where: { id: targetHoldId } });
+      if (holdRec?.providerHoldId) {
+        targetHoldId = holdRec.providerHoldId;
+      }
+    }
+
+    // Call Mantis GDS POST /ota/bookingstatusv2
+    const statusRes = await this.gdsAdapter.checkBookingStatus(targetHoldId);
+
+    // If booking was successful (Status 1) and we have local booking record not yet confirmed, auto-confirm
+    if (statusRes.Status === 1 && statusRes.TicketNo) {
+      if (!localBooking) {
+        localBooking = await prisma.booking.findFirst({
+          where: { providerHoldId: targetHoldId },
+        });
+      }
+
+      if (localBooking && localBooking.status !== BookingStatus.CONFIRMED) {
+        await prisma.booking.update({
+          where: { id: localBooking.id },
+          data: {
+            status: BookingStatus.CONFIRMED,
+            providerTicketNo: statusRes.TicketNo,
+            providerPnrNo: statusRes.PNRNo,
+            confirmedAt: new Date(),
+          },
+        });
+      }
+    }
+
+    return {
+      HoldId: statusRes.HoldId || targetHoldId,
+      Status: statusRes.Status,
+      TicketNo: statusRes.TicketNo,
+      PNRNo: statusRes.PNRNo,
+      Message: statusRes.Message,
+      bookingId: localBooking?.id,
+      bookingNumber: localBooking?.bookingNumber,
+    };
   }
 
   private generateBookingNumber(): string {

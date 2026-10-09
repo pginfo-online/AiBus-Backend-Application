@@ -12,6 +12,10 @@ bookingsRouter.post('/', optionalAuth, validate({ body: createBookingSchema }), 
 // Get current user's bookings (authenticated)
 bookingsRouter.get('/my-bookings', authenticate, controller.getUserBookings);
 
+// Check booking status against Hold ID or Booking ID (Mantis GDS /ota/bookingstatusv2)
+bookingsRouter.post('/status', optionalAuth, controller.checkBookingStatus);
+bookingsRouter.get('/status/:holdId', optionalAuth, controller.checkBookingStatus);
+
 // Get single booking by ID
 bookingsRouter.get('/:id', optionalAuth, controller.getBooking);
 

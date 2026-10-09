@@ -27,6 +27,9 @@ export interface GdsDroppingPoint {
   DropoffCode: string;
   DropoffName: string;
   DropoffTime: string;
+  Address?: string;
+  Landmark?: string;
+  Contact?: string;
 }
 
 export interface GdsBusSearchResult {
@@ -73,6 +76,9 @@ export interface GdsChartResponse {
   BoardingPoints: GdsBoardingPoint[];
   DroppingPoints: GdsDroppingPoint[];
   CancellationPolicy: Array<{ Amt: number; Pct: number; Mins: number }>;
+  ChartLayout?: any;
+  ChartSeats?: any;
+  SeatsStatus?: any;
   BusTypeName?: string;
   CompanyName?: string;
   DepartureTime?: string;
@@ -140,46 +146,82 @@ export interface GdsBookingStatusResponse {
 
 export interface GdsIsCancellableResponse {
   IsCancellable: boolean;
-  RefundPercentage: number;
-  CancellationCharge: number;
+  ChargePct?: number;
+  ChargeAmt?: number;
+  TotalFare?: number;
+  CancSeatsTotalFare?: number;
+  RefundPercentage?: number;
+  CancellationCharge?: number;
   RefundAmount: number;
   Message?: string;
 }
 
 export interface GdsCancelRequest {
   TicketNo: string;
-  SeatNos: string; // Comma-separated "A1,A2"
+  SeatNos: string; // Comma-separated "A1,A2" or "7"
+  PNR?: string;
+  PNRNo?: string;
 }
 
 export interface GdsCancelResponse {
   Status: number;
-  NewHoldId?: string;
+  NewHoldId?: string | number;
   NewTicketNo?: string;
   NewPNRNo?: string;
+  NewTotalFare?: number;
+  ChargeAmt?: number;
+  ChargePct?: number;
   RefundAmount: number;
   CancellationCharge: number;
+  TotalFare?: number;
   Message?: string;
 }
 
+export interface GdsPickupInfo {
+  PickupTime?: string;
+  Address?: string;
+  Phone?: string;
+  Landmark?: string;
+  PickupName?: string;
+}
+
+export interface GdsPassengerDetail {
+  IsAcSeat?: boolean;
+  Age?: number;
+  Fare?: number;
+  SeatType?: string;
+  SeatNo?: string;
+  Gender?: string;
+  Name?: string;
+}
+
+export interface GdsContactInfo {
+  Mobile?: string;
+  Phone?: string;
+  Email?: string;
+  CustomerName?: string;
+}
+
 export interface GdsBookingDetailsResponse {
-  PNRNo: string;
-  TicketNo: string;
-  Status: string;
-  BusId: number;
-  OperatorName: string;
-  FromCity: string;
-  ToCity: string;
-  JourneyDate: string;
-  DepartureTime: string;
-  ArrivalTime: string;
-  TotalFare: number;
-  Seats: Array<{
-    SeatNo: string;
-    PassengerName: string;
-    Gender: string;
-    Age: number;
-    Fare: number;
-  }>;
+  IsCancelled?: boolean;
+  TotalFare?: number;
+  TotalSeats?: number;
+  PickupInfo?: GdsPickupInfo;
+  Passengers?: GdsPassengerDetail[];
+  ContactInfo?: GdsContactInfo;
+  BusTypeName?: string;
+  DepartureDateTime?: string;
+  ArrivalDateTime?: string;
+  JourneyDate?: string;
+  ToCityName?: string;
+  FromCityName?: string;
+  CompanyName?: string;
+  TicketNo?: string;
+  PNRNo?: string;
+  Status?: string | number;
+  BusId?: number;
+  Seats?: any[];
+  [key: string]: any;
 }
 
 export interface GdsBalanceResponse {
