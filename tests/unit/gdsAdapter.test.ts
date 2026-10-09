@@ -54,7 +54,7 @@ describe('GDS Adapter Unit Tests', () => {
         Phone: '9876543210',
         Mobile: '9876543210',
       },
-      Passenger: [
+      Passengers: [
         {
           SeatNo: 'L1',
           SeatTypeId: 2,

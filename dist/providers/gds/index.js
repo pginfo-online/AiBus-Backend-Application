@@ -21,4 +21,5 @@ __exportStar(require("./gdsPartnerClient"), exports);
 __exportStar(require("./gdsTransactionClient"), exports);
 __exportStar(require("./gdsAdapter"), exports);
 __exportStar(require("./gdsMockData"), exports);
+__exportStar(require("./gdsChartResponse"), exports);
 //# sourceMappingURL=index.js.map

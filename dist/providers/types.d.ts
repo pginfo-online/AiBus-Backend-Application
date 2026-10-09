@@ -61,10 +61,6 @@ export interface GdsSeatLayoutItem {
 }
 export interface GdsChartResponse {
     BusId: number;
-    BusTypeName: string;
-    CompanyName: string;
-    DepartureTime: string;
-    ArrivalTime: string;
     TotalSeats: number;
     AvailableSeats: number;
     Layout: GdsSeatLayoutItem[];
@@ -75,6 +71,10 @@ export interface GdsChartResponse {
         Pct: number;
         Mins: number;
     }>;
+    BusTypeName?: string;
+    CompanyName?: string;
+    DepartureTime?: string;
+    ArrivalTime?: string;
 }
 export interface GdsPassengerHold {
     SeatNo: string;
@@ -103,7 +103,6 @@ export interface GdsHoldRequest {
         GstCompany: string;
     };
     Passengers?: GdsPassengerHold[];
-    Passenger?: GdsPassengerHold[];
 }
 export interface GdsHoldResponse {
     HoldId: string | number;

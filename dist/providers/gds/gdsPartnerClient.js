@@ -9,6 +9,7 @@ const env_1 = require("../../config/env");
 const logger_1 = require("../../infrastructure/logger");
 const gdsAuthClient_1 = require("./gdsAuthClient");
 const gdsSearchResponse_1 = require("./gdsSearchResponse");
+const gdsChartResponse_1 = require("./gdsChartResponse");
 class GdsPartnerClient {
     client;
     authClient;
@@ -102,20 +103,37 @@ class GdsPartnerClient {
      * Mantis GET /ota/Chart
      */
     async getSeatChart(busId, extraParams) {
+        const params = {
+            busId: Number(busId),
+            ...(extraParams?.fromCityId ? { fromCityId: Number(extraParams.fromCityId) } : {}),
+            ...(extraParams?.toCityId ? { toCityId: Number(extraParams.toCityId) } : {}),
+            ...(extraParams?.journeyDate ? { journeyDate: extraParams.journeyDate } : {}),
+        };
         return this.circuitBreaker.execute(async () => {
             try {
                 const response = await this.client.get('/ota/Chart', {
-                    params: {
-                        busId: Number(busId),
-                        ...(extraParams?.fromCityId ? { fromCityId: Number(extraParams.fromCityId) } : {}),
-                        ...(extraParams?.toCityId ? { toCityId: Number(extraParams.toCityId) } : {}),
-                        ...(extraParams?.journeyDate ? { journeyDate: extraParams.journeyDate } : {}),
-                    },
+                    params,
                 });
-                return response.data;
+                return (0, gdsChartResponse_1.parseGdsChartResponse)(response.data, busId);
             }
             catch (err) {
-                this.partnerLogger.error({ err: err.message, busId }, 'GDS Chart call failed');
+                const providerResponse = err.response?.data;
+                const providerError = providerResponse && typeof providerResponse === 'object' && 'Error' in providerResponse
+                    ? providerResponse.Error
+                    : undefined;
+                const errorDetails = providerError && typeof providerError === 'object'
+                    ? {
+                        code: 'Code' in providerError ? providerError.Code : undefined,
+                        message: 'Msg' in providerError ? providerError.Msg : undefined,
+                        traceId: 'TraceId' in providerError ? providerError.TraceId : undefined,
+                    }
+                    : undefined;
+                this.partnerLogger.error({
+                    err: err.message,
+                    status: err.response?.status,
+                    params,
+                    ...(errorDetails ? { providerError: errorDetails } : {}),
+                }, 'GDS Chart call failed');
                 throw err;
             }
         });

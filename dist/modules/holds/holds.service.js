@@ -72,7 +72,7 @@ class HoldsService {
             const gdsResponse = await this.gdsAdapter.holdSeats({
                 FromCityId: input.fromCityId,
                 ToCityId: input.toCityId,
-                JourneyDate: `${input.journeyDate}T00:00:00.000Z`,
+                JourneyDate: input.journeyDate,
                 BusId: input.busId,
                 PickUpID: input.pickupId,
                 DropOffID: input.dropoffId,
@@ -89,7 +89,6 @@ class HoldsService {
                     }
                     : undefined,
                 Passengers: gdsPassengers,
-                Passenger: gdsPassengers,
             });
             if (gdsResponse.Status !== 1 || !gdsResponse.HoldId) {
                 throw new errors_1.ProviderError('GDS', gdsResponse.Message || 'Failed to hold seats with provider');

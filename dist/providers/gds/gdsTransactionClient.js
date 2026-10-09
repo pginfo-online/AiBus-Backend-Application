@@ -4,12 +4,40 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.GdsTransactionClient = void 0;
+exports.buildGdsHoldSeatsPayload = buildGdsHoldSeatsPayload;
 const axios_1 = __importDefault(require("axios"));
 const env_1 = require("../../config/env");
 const logger_1 = require("../../infrastructure/logger");
 const gdsAuthClient_1 = require("./gdsAuthClient");
 const errors_1 = require("../../shared/errors");
 const gdsMockData_1 = require("./gdsMockData");
+function buildGdsHoldSeatsPayload(request) {
+    const passengers = (request.Passengers || []).map((p) => ({
+        Name: p.Name,
+        Age: Number(p.Age),
+        Gender: p.Gender,
+        SeatNo: String(p.SeatNo),
+        Fare: Number(p.Fare),
+        SeatTypeId: Number(p.SeatTypeId || 1),
+        IsAcSeat: Boolean(p.IsAcSeat),
+    }));
+    return {
+        FromCityId: Number(request.FromCityId),
+        ToCityId: Number(request.ToCityId),
+        JourneyDate: request.JourneyDate,
+        BusId: Number(request.BusId),
+        PickUpID: String(request.PickUpID),
+        DropOffID: String(request.DropOffID),
+        ContactInfo: {
+            CustomerName: request.ContactInfo.CustomerName,
+            Email: request.ContactInfo.Email,
+            Phone: request.ContactInfo.Phone,
+            Mobile: request.ContactInfo.Mobile,
+        },
+        ...(request.GSTDetails && { GSTDetails: request.GSTDetails }),
+        Passengers: passengers,
+    };
+}
 class GdsTransactionClient {
     client;
     authClient;
@@ -35,44 +63,27 @@ class GdsTransactionClient {
     async holdSeats(request) {
         return this.circuitBreaker.execute(async () => {
             try {
-                const passengers = (request.Passengers || request.Passenger || []).map((p) => ({
-                    Name: p.Name,
-                    Age: Number(p.Age),
-                    Gender: p.Gender,
-                    SeatNo: String(p.SeatNo),
-                    Fare: Number(p.Fare),
-                    SeatTypeId: Number(p.SeatTypeId || 1),
-                    IsAcSeat: Boolean(p.IsAcSeat),
-                }));
-                const payload = {
-                    FromCityId: Number(request.FromCityId),
-                    ToCityId: Number(request.ToCityId),
-                    JourneyDate: request.JourneyDate,
-                    BusId: Number(request.BusId),
-                    PickUpID: String(request.PickUpID),
-                    DropOffID: String(request.DropOffID),
-                    ContactInfo: {
-                        CustomerName: request.ContactInfo.CustomerName,
-                        Email: request.ContactInfo.Email,
-                        Phone: request.ContactInfo.Phone,
-                        Mobile: request.ContactInfo.Mobile,
-                    },
-                    ...(request.GSTDetails && { GSTDetails: request.GSTDetails }),
-                    Passengers: passengers,
-                    Passenger: passengers,
-                };
-                this.txLogger.info({ payload }, 'Calling Mantis GDS POST /ota/HoldSeats');
+                const payload = buildGdsHoldSeatsPayload(request);
+                this.txLogger.info({
+                    fromCityId: payload.FromCityId,
+                    toCityId: payload.ToCityId,
+                    journeyDate: payload.JourneyDate,
+                    busId: payload.BusId,
+                    pickupId: payload.PickUpID,
+                    dropoffId: payload.DropOffID,
+                    passengerCount: payload.Passengers.length,
+                }, 'Calling Mantis GDS POST /ota/HoldSeats');
                 const response = await this.client.post('/ota/HoldSeats', payload);
                 const raw = response.data;
                 const data = raw?.data || raw;
-                this.txLogger.info({ response: data }, 'Mantis GDS HoldSeats Response');
                 const holdId = data?.HoldId ?? data?.holdId;
                 if (holdId) {
+                    this.txLogger.info({ holdId, status: data?.Status ?? 1 }, 'Mantis GDS HoldSeats succeeded');
                     return {
                         HoldId: holdId,
                         Status: data?.Status ?? 1,
                         Message: data?.Message || 'Seats held successfully',
-                        TotalFare: Number(data?.TotalFare || passengers.reduce((sum, p) => sum + p.Fare, 0)),
+                        TotalFare: Number(data?.TotalFare || payload.Passengers.reduce((sum, passenger) => sum + passenger.Fare, 0)),
                         ExpiryMinutes: data?.ExpiryMinutes || 10,
                     };
                 }
@@ -90,7 +101,25 @@ class GdsTransactionClient {
                     (typeof errorData === 'string' ? errorData : null) ||
                     err.message ||
                     'Failed to hold seats with provider';
-                this.txLogger.error({ err: err.message, status: err.response?.status, errorData, request }, 'GDS HoldSeats failed');
+                const providerError = errorData?.Error;
+                this.txLogger.error({
+                    err: err.message,
+                    status: err.response?.status,
+                    fromCityId: request.FromCityId,
+                    toCityId: request.ToCityId,
+                    journeyDate: request.JourneyDate,
+                    busId: request.BusId,
+                    pickupId: request.PickUpID,
+                    dropoffId: request.DropOffID,
+                    passengerCount: request.Passengers?.length ?? 0,
+                    ...(providerError && {
+                        providerError: {
+                            code: providerError.Code,
+                            message: providerError.Msg,
+                            traceId: providerError.TraceId,
+                        },
+                    }),
+                }, 'GDS HoldSeats failed');
                 throw new errors_1.ProviderError('GDS', gdsMsg);
             }
         });

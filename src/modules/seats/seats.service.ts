@@ -3,6 +3,7 @@ import { getRedisClient } from '../../infrastructure/redis';
 import { RedisPrefix } from '../../shared/constants';
 import { logger } from '../../infrastructure/logger';
 import { GdsChartResponse } from '../../providers/types';
+import { parseGdsChartResponse } from '../../providers/gds/gdsChartResponse';
 
 export class SeatsService {
   private static instance: SeatsService;
@@ -24,14 +25,14 @@ export class SeatsService {
     busId: number,
     params?: { fromCityId?: number; toCityId?: number; journeyDate?: string }
   ): Promise<GdsChartResponse> {
-    const cacheKey = `${RedisPrefix.CACHE_CHART}gds:${busId}:${params?.fromCityId || ''}:${params?.toCityId || ''}:${params?.journeyDate || ''}`;
+    const cacheKey = `${RedisPrefix.CACHE_CHART}gds:v2:${busId}:${params?.fromCityId || ''}:${params?.toCityId || ''}:${params?.journeyDate || ''}`;
 
     // 1. Try Redis cache (2 min TTL)
     try {
       const redis = getRedisClient();
       const cached = await redis.get(cacheKey);
       if (cached) {
-        return JSON.parse(cached);
+        return parseGdsChartResponse(JSON.parse(cached), busId);
       }
     } catch (err) {
       this.seatsLogger.warn({ err }, 'Redis error reading seat chart cache');

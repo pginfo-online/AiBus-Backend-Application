@@ -1,1 +1,1 @@
-{"version":3,"file":"index.d.ts","sourceRoot":"","sources":["../../../src/providers/gds/index.ts"],"names":[],"mappings":"AAAA,cAAc,UAAU,CAAC;AACzB,cAAc,mBAAmB,CAAC;AAClC,cAAc,iBAAiB,CAAC;AAChC,cAAc,oBAAoB,CAAC;AACnC,cAAc,wBAAwB,CAAC;AACvC,cAAc,cAAc,CAAC;AAC7B,cAAc,eAAe,CAAC"}
+{"version":3,"file":"index.d.ts","sourceRoot":"","sources":["../../../src/providers/gds/index.ts"],"names":[],"mappings":"AAAA,cAAc,UAAU,CAAC;AACzB,cAAc,mBAAmB,CAAC;AAClC,cAAc,iBAAiB,CAAC;AAChC,cAAc,oBAAoB,CAAC;AACnC,cAAc,wBAAwB,CAAC;AACvC,cAAc,cAAc,CAAC;AAC7B,cAAc,eAAe,CAAC;AAC9B,cAAc,oBAAoB,CAAC"}

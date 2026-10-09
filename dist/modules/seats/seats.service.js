@@ -5,6 +5,7 @@ const gdsAdapter_1 = require("../../providers/gds/gdsAdapter");
 const redis_1 = require("../../infrastructure/redis");
 const constants_1 = require("../../shared/constants");
 const logger_1 = require("../../infrastructure/logger");
+const gdsChartResponse_1 = require("../../providers/gds/gdsChartResponse");
 class SeatsService {
     static instance;
     gdsAdapter;
@@ -19,13 +20,13 @@ class SeatsService {
         return SeatsService.instance;
     }
     async getSeatChart(busId, params) {
-        const cacheKey = `${constants_1.RedisPrefix.CACHE_CHART}gds:${busId}:${params?.fromCityId || ''}:${params?.toCityId || ''}:${params?.journeyDate || ''}`;
+        const cacheKey = `${constants_1.RedisPrefix.CACHE_CHART}gds:v2:${busId}:${params?.fromCityId || ''}:${params?.toCityId || ''}:${params?.journeyDate || ''}`;
         // 1. Try Redis cache (2 min TTL)
         try {
             const redis = (0, redis_1.getRedisClient)();
             const cached = await redis.get(cacheKey);
             if (cached) {
-                return JSON.parse(cached);
+                return (0, gdsChartResponse_1.parseGdsChartResponse)(JSON.parse(cached), busId);
             }
         }
         catch (err) {
