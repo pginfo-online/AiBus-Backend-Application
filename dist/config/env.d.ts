@@ -44,7 +44,7 @@ declare const envSchema: z.ZodObject<{
     PHONEPE_MERCHANT_ID: z.ZodOptional<z.ZodString>;
     PHONEPE_CLIENT_ID: z.ZodOptional<z.ZodString>;
     PHONEPE_CLIENT_SECRET: z.ZodOptional<z.ZodString>;
-    PHONEPE_CLIENT_VERSION: z.ZodOptional<z.ZodCoercedNumber<unknown>>;
+    PHONEPE_CLIENT_VERSION: z.ZodDefault<z.ZodOptional<z.ZodString>>;
     PHONEPE_ENVIRONMENT: z.ZodDefault<z.ZodEnum<{
         SANDBOX: "SANDBOX";
         PRODUCTION: "PRODUCTION";
@@ -91,6 +91,7 @@ export declare const env: {
     GDS_CLIENT_SECRET: string;
     GDS_REQUEST_TIMEOUT_MS: number;
     GDS_CONNECT_TIMEOUT_MS: number;
+    PHONEPE_CLIENT_VERSION: string;
     PHONEPE_ENVIRONMENT: "SANDBOX" | "PRODUCTION";
     RATE_LIMIT_WINDOW_MS: number;
     RATE_LIMIT_MAX_REQUESTS: number;
@@ -105,7 +106,6 @@ export declare const env: {
     PHONEPE_MERCHANT_ID?: string | undefined;
     PHONEPE_CLIENT_ID?: string | undefined;
     PHONEPE_CLIENT_SECRET?: string | undefined;
-    PHONEPE_CLIENT_VERSION?: number | undefined;
     PHONEPE_CALLBACK_URL?: string | undefined;
     PHONEPE_REDIRECT_URL?: string | undefined;
     CLOUDINARY_CLOUD_NAME?: string | undefined;

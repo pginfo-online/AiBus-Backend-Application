@@ -32,6 +32,20 @@ class HoldsController {
             next(error);
         }
     };
+    checkHoldStatus = async (req, res, next) => {
+        try {
+            const holdId = req.params.id || req.body?.holdId || req.body?.HoldId || req.query?.holdId;
+            if (!holdId) {
+                response_1.ApiResponse.error(res, 'HoldId is required', 'VALIDATION_ERROR', 400);
+                return;
+            }
+            const status = await this.holdsService.checkHoldStatus(holdId);
+            response_1.ApiResponse.success(res, status, status.Message || 'Hold status retrieved');
+        }
+        catch (error) {
+            next(error);
+        }
+    };
 }
 exports.HoldsController = HoldsController;
 //# sourceMappingURL=holds.controller.js.map

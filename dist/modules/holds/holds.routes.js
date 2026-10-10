@@ -10,6 +10,8 @@ exports.holdsRouter = holdsRouter;
 const controller = new holds_controller_1.HoldsController();
 // Optional auth allows both guests and authenticated users to hold seats
 holdsRouter.post('/', middleware_1.optionalAuth, (0, middleware_1.validate)({ body: holds_validation_1.holdSeatsSchema }), controller.holdSeats);
+holdsRouter.post('/status', middleware_1.optionalAuth, controller.checkHoldStatus);
+holdsRouter.get('/:id/status', middleware_1.optionalAuth, controller.checkHoldStatus);
 holdsRouter.get('/:id', controller.getHold);
 exports.default = holdsRouter;
 //# sourceMappingURL=holds.routes.js.map

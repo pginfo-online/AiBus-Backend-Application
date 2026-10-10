@@ -39,5 +39,6 @@ export declare class HoldsService {
         seats: import("@prisma/client/runtime/library").JsonValue;
         releasedAt: Date | null;
     } | null>;
+    checkHoldStatus(holdId: string): Promise<import("../../providers/types").GdsBookingStatusResponse>;
 }
 //# sourceMappingURL=holds.service.d.ts.map

@@ -141,15 +141,12 @@ export class BookingsService {
 
     this.bookingLogger.info(
       { bookingId: booking.id, bookingNumber: booking.bookingNumber },
-      'Booking initiated successfully'
+      'Booking created in HELD status — awaiting payment verification before GDS BookSeats'
     );
 
-    // 4. Confirm with Mantis GDS BookSeats (/ota/BookSeats)
-    if (providerHoldId) {
-      const confirmedBooking = await this.confirmBooking(booking.id);
-      return confirmedBooking;
-    }
-
+    // NOTE: GDS BookSeats (confirmBooking) must ONLY be called after payment verification.
+    // The payment lifecycle is: HELD → PAYMENT_PENDING → PAYMENT_SUCCESS → CONFIRMED.
+    // Never call confirmBooking() here — it is called by PaymentsService.verifyPayment() only.
     return booking;
   }
 
@@ -400,15 +397,37 @@ export class BookingsService {
       }
 
       if (localBooking && localBooking.status !== BookingStatus.CONFIRMED) {
-        await prisma.booking.update({
-          where: { id: localBooking.id },
-          data: {
-            status: BookingStatus.CONFIRMED,
-            providerTicketNo: statusRes.TicketNo,
-            providerPnrNo: statusRes.PNRNo,
-            confirmedAt: new Date(),
-          },
+        // Atomically confirm booking AND create Ticket record
+        await prisma.$transaction(async (tx) => {
+          await tx.booking.update({
+            where: { id: localBooking.id },
+            data: {
+              status: BookingStatus.CONFIRMED,
+              providerTicketNo: statusRes.TicketNo,
+              providerPnrNo: statusRes.PNRNo,
+              confirmedAt: new Date(),
+            },
+          });
+
+          // Ensure Ticket record exists (idempotent — only create if not already present)
+          const existingTicket = await tx.ticket.findUnique({ where: { bookingId: localBooking.id } });
+          if (!existingTicket) {
+            await tx.ticket.create({
+              data: {
+                bookingId: localBooking.id,
+                ticketNumber: `TKT-${localBooking.bookingNumber}`,
+                pnrNumber: statusRes.PNRNo || 'N/A',
+                status: TicketStatus.ISSUED,
+                bookingSnapshot: localBooking as any,
+              },
+            });
+          }
         });
+
+        this.bookingLogger.info(
+          { bookingId: localBooking.id, ticketNo: statusRes.TicketNo, pnrNo: statusRes.PNRNo },
+          'checkBookingStatus: booking auto-confirmed and ticket created'
+        );
       }
     }
 

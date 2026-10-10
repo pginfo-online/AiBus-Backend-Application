@@ -87,8 +87,21 @@ class GdsAdapter {
             this.recordTransaction('BookingStatus', { holdId }, res, Date.now() - start, errorMsg);
         }
     }
-    async isCancellable(ticketNo, seatNos) {
-        return this.transactionClient.isCancellable(ticketNo, seatNos);
+    async isCancellable(ticketNo, seatNos, pnrNo) {
+        const start = Date.now();
+        let errorMsg;
+        let res;
+        try {
+            res = await this.transactionClient.isCancellable(ticketNo, seatNos, pnrNo);
+            return res;
+        }
+        catch (err) {
+            errorMsg = err.message;
+            throw err;
+        }
+        finally {
+            this.recordTransaction('IsCancellable', { ticketNo, seatNos, pnrNo }, res, Date.now() - start, errorMsg);
+        }
     }
     async cancelSeats(params) {
         const start = Date.now();

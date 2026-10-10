@@ -35,8 +35,8 @@ export declare class GdsTransactionClient {
     constructor(circuitBreaker: CircuitBreaker);
     holdSeats(request: GdsHoldRequest): Promise<GdsHoldResponse>;
     bookSeats(holdId: string | number, totalFare?: number): Promise<GdsBookResponse>;
-    checkBookingStatus(holdId: string): Promise<GdsBookingStatusResponse>;
-    isCancellable(ticketNo: string, seatNos: string): Promise<GdsIsCancellableResponse>;
+    checkBookingStatus(holdId: string | number): Promise<GdsBookingStatusResponse>;
+    isCancellable(ticketNo: string, seatNos: string, pnrNo?: string): Promise<GdsIsCancellableResponse>;
     cancelSeats(request: GdsCancelRequest): Promise<GdsCancelResponse>;
     getBookingDetails(pnr: string, ticketNo: string): Promise<GdsBookingDetailsResponse>;
     getBalance(): Promise<GdsBalanceResponse>;

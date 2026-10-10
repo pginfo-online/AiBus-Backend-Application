@@ -4,17 +4,33 @@ export declare class CancellationsService {
     private cancelLogger;
     private constructor();
     static getInstance(): CancellationsService;
-    checkCancellability(bookingId: string, seatNos?: string[]): Promise<{
+    checkCancellability(bookingIdentifier: string, seatNos?: string[]): Promise<{
         IsCancellable: boolean;
-        RefundPercentage: number;
-        CancellationCharge: number;
+        ChargePct?: number;
+        ChargeAmt?: number;
+        TotalFare?: number;
+        CancSeatsTotalFare?: number;
+        RefundPercentage?: number;
+        CancellationCharge?: number;
         RefundAmount: number;
         Message?: string;
         bookingId: string;
+        bookingNumber: string;
         ticketNo: string;
+        pnrNo: string | null;
         seatNos: string;
     }>;
-    cancelSeats(bookingId: string, seatNos: string[], reason?: string, userId?: string): Promise<{
+    checkCancellabilityDirect(params: {
+        ticketNo: string;
+        seatNos: string;
+        pnrNo?: string;
+    }): Promise<import("../../providers/types").GdsIsCancellableResponse>;
+    cancelSeatsDirect(params: {
+        TicketNo: string;
+        SeatNos: string;
+        PNR?: string;
+    }): Promise<import("../../providers/types").GdsCancelResponse>;
+    cancelSeats(bookingIdentifier: string, seatNos: string[], reason?: string, userId?: string): Promise<{
         cancellation: {
             userId: string | null;
             id: string;
@@ -51,6 +67,7 @@ export declare class CancellationsService {
             retryCount: number;
             completedAt: Date | null;
         };
+        providerResponse: import("../../providers/types").GdsCancelResponse;
     }>;
 }
 //# sourceMappingURL=cancellations.service.d.ts.map

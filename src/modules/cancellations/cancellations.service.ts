@@ -120,7 +120,8 @@ export class CancellationsService {
         SeatNos: seatString,
       });
 
-      if (cancelRes.Status !== 1 && cancelRes.Status !== undefined && cancelRes.Status < 0) {
+      // Status 1 = success; any other value (0, -1, -2, etc.) = failure
+      if (cancelRes.Status !== 1) {
         throw new ProviderError('GDS', cancelRes.Message || 'Failed to cancel seats with provider');
       }
 

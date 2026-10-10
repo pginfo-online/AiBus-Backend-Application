@@ -40,6 +40,13 @@ export declare const cancelBookingSchema: z.ZodObject<{
     seatNos: z.ZodArray<z.ZodString>;
     reason: z.ZodOptional<z.ZodString>;
 }, z.core.$strip>;
+export declare const bookingStatusSchema: z.ZodObject<{
+    holdId: z.ZodOptional<z.ZodCoercedString<unknown>>;
+    HoldId: z.ZodOptional<z.ZodCoercedString<unknown>>;
+    bookingId: z.ZodOptional<z.ZodCoercedString<unknown>>;
+    bookingNumber: z.ZodOptional<z.ZodCoercedString<unknown>>;
+}, z.core.$strip>;
 export type CreateBookingInput = z.infer<typeof createBookingSchema>;
 export type CancelBookingInput = z.infer<typeof cancelBookingSchema>;
+export type BookingStatusInput = z.infer<typeof bookingStatusSchema>;
 //# sourceMappingURL=bookings.validation.d.ts.map

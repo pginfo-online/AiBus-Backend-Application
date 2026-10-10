@@ -10,7 +10,7 @@ export declare function startBookingReconciliationWorker(): import("bullmq").Wor
 export declare function startHoldExpiryWorker(): import("bullmq").Worker<unknown, any, string, import("bullmq").RedisQueueBackend, import("bullmq").JobProgress, import("bullmq").ConnectionOptions>;
 /**
  * 3. Refund Processing Worker
- * Dispatches refunds to payment gateway / wallet and updates database records
+ * Dispatches refunds to PhonePe gateway and updates database records
  */
 export declare function startRefundWorker(): import("bullmq").Worker<unknown, any, string, import("bullmq").RedisQueueBackend, import("bullmq").JobProgress, import("bullmq").ConnectionOptions>;
 /**

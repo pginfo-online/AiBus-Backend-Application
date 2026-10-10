@@ -1,1 +1,1 @@
-{"version":3,"file":"holds.routes.d.ts","sourceRoot":"","sources":["../../../src/modules/holds/holds.routes.ts"],"names":[],"mappings":"AAKA,QAAA,MAAM,WAAW,4CAAW,CAAC;AAO7B,OAAO,EAAE,WAAW,EAAE,CAAC;AACvB,eAAe,WAAW,CAAC"}
+{"version":3,"file":"holds.routes.d.ts","sourceRoot":"","sources":["../../../src/modules/holds/holds.routes.ts"],"names":[],"mappings":"AAKA,QAAA,MAAM,WAAW,4CAAW,CAAC;AAS7B,OAAO,EAAE,WAAW,EAAE,CAAC;AACvB,eAAe,WAAW,CAAC"}

@@ -339,6 +339,20 @@ export declare class BookingsService {
         confirmedAt: Date | null;
         cancelledAt: Date | null;
     })[]>;
+    checkBookingStatus(input: {
+        holdId?: string;
+        HoldId?: string;
+        bookingId?: string;
+        bookingNumber?: string;
+    }): Promise<{
+        HoldId: string;
+        Status: number;
+        TicketNo: string | undefined;
+        PNRNo: string | undefined;
+        Message: string | undefined;
+        bookingId: any;
+        bookingNumber: any;
+    }>;
     private generateBookingNumber;
 }
 //# sourceMappingURL=bookings.service.d.ts.map

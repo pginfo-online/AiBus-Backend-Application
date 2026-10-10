@@ -4,5 +4,6 @@ export declare class HoldsController {
     constructor();
     holdSeats: (req: Request, res: Response, next: NextFunction) => Promise<void>;
     getHold: (req: Request, res: Response, next: NextFunction) => Promise<void>;
+    checkHoldStatus: (req: Request, res: Response, next: NextFunction) => Promise<void>;
 }
 //# sourceMappingURL=holds.controller.d.ts.map

@@ -56,10 +56,10 @@ const envSchema = z.object({
   PHONEPE_MERCHANT_ID: z.string().optional(),
   PHONEPE_CLIENT_ID: z.string().optional(),
   PHONEPE_CLIENT_SECRET: z.string().optional(),
-  PHONEPE_CLIENT_VERSION: z.coerce.number().int().optional(),
+  PHONEPE_CLIENT_VERSION: z.string().optional().default('1'),
   PHONEPE_ENVIRONMENT: z.enum(['SANDBOX', 'PRODUCTION']).default('SANDBOX'),
-  PHONEPE_CALLBACK_URL: z.string().url().optional(),
-  PHONEPE_REDIRECT_URL: z.string().url().optional(),
+  PHONEPE_CALLBACK_URL: z.string().optional(),
+  PHONEPE_REDIRECT_URL: z.string().optional(),
 
   // Cloudinary
   CLOUDINARY_CLOUD_NAME: z.string().optional(),

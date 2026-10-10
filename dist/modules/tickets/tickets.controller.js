@@ -28,6 +28,21 @@ class TicketsController {
             next(error);
         }
     };
+    getGdsBookingDetails = async (req, res, next) => {
+        try {
+            const pnr = (req.query.PNR || req.query.pnr || req.query.PNRNo || req.query.pnrNo || req.body?.PNR || req.body?.pnr || req.body?.PNRNo || req.body?.pnrNo);
+            const ticketNo = (req.query.TicketNo || req.query.ticketNo || req.body?.TicketNo || req.body?.ticketNo);
+            if (!pnr || !ticketNo) {
+                response_1.ApiResponse.error(res, 'PNR and TicketNo are required query parameters', 'VALIDATION_ERROR', 400);
+                return;
+            }
+            const result = await this.ticketsService.getGdsBookingDetails(pnr, ticketNo);
+            response_1.ApiResponse.success(res, result, 'Provider booking details retrieved successfully');
+        }
+        catch (error) {
+            next(error);
+        }
+    };
 }
 exports.TicketsController = TicketsController;
 //# sourceMappingURL=tickets.controller.js.map

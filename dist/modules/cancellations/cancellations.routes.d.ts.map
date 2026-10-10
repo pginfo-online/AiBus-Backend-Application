@@ -1,1 +1,1 @@
-{"version":3,"file":"cancellations.routes.d.ts","sourceRoot":"","sources":["../../../src/modules/cancellations/cancellations.routes.ts"],"names":[],"mappings":"AAKA,QAAA,MAAM,mBAAmB,4CAAW,CAAC;AAerC,OAAO,EAAE,mBAAmB,EAAE,CAAC;AAC/B,eAAe,mBAAmB,CAAC"}
+{"version":3,"file":"cancellations.routes.d.ts","sourceRoot":"","sources":["../../../src/modules/cancellations/cancellations.routes.ts"],"names":[],"mappings":"AAKA,QAAA,MAAM,mBAAmB,4CAAW,CAAC;AAsBrC,OAAO,EAAE,mBAAmB,EAAE,CAAC;AAC/B,eAAe,mBAAmB,CAAC"}

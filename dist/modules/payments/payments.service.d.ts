@@ -2,7 +2,6 @@ import { CreatePaymentIntentInput, VerifyPaymentInput } from './payments.validat
 export declare class PaymentsService {
     private static instance;
     private bookingsService;
-    private paymentLogger;
     private constructor();
     static getInstance(): PaymentsService;
     createPaymentIntent(input: CreatePaymentIntentInput, userId?: string): Promise<{
@@ -10,7 +9,7 @@ export declare class PaymentsService {
         merchantTxnId: string;
         amount: number;
         currency: string;
-        gateway: "PHONEPE" | "RAZORPAY" | "MOCK";
+        gateway: string;
         paymentUrl: string;
     }>;
     verifyPayment(input: VerifyPaymentInput): Promise<{
@@ -210,8 +209,24 @@ export declare class PaymentsService {
             cancelledAt: Date | null;
         };
     }>;
+    /**
+     * Handle PhonePe webhook event
+     * POST /api/v1/payments/webhook
+     * Body: { response: "<base64EncodedPayload>" }
+     * Header: X-VERIFY: SHA256(base64Payload + saltKey) + "###" + saltIndex
+     */
     handleWebhook(rawBody: string, xVerifyHeader?: string): Promise<{
         status: string;
+        reason: string;
+        note?: undefined;
+    } | {
+        status: string;
+        note: string;
+        reason?: undefined;
+    } | {
+        status: string;
+        reason?: undefined;
+        note?: undefined;
     }>;
 }
 //# sourceMappingURL=payments.service.d.ts.map

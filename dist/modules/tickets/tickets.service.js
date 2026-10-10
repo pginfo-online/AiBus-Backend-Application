@@ -3,50 +3,129 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.TicketsService = void 0;
 const database_1 = require("../../infrastructure/database");
 const errors_1 = require("../../shared/errors");
+const gdsAdapter_1 = require("../../providers/gds/gdsAdapter");
 class TicketsService {
     static instance;
-    constructor() { }
+    gdsAdapter;
+    constructor() {
+        this.gdsAdapter = gdsAdapter_1.GdsAdapter.getInstance();
+    }
     static getInstance() {
         if (!TicketsService.instance) {
             TicketsService.instance = new TicketsService();
         }
         return TicketsService.instance;
     }
-    async getTicketByBookingId(bookingId) {
+    async getGdsBookingDetails(pnr, ticketNo) {
+        return this.gdsAdapter.getBookingDetails(pnr, ticketNo);
+    }
+    async getTicketByBookingId(bookingIdentifier) {
         const prisma = (0, database_1.getPrismaClient)();
-        const ticket = await prisma.ticket.findUnique({
-            where: { bookingId },
-            include: {
-                booking: {
-                    include: {
-                        seats: true,
-                        passengers: true,
-                    },
+        const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(bookingIdentifier);
+        const booking = isUuid
+            ? await prisma.booking.findUnique({
+                where: { id: bookingIdentifier },
+                include: {
+                    seats: true,
+                    passengers: true,
+                    ticket: true,
+                    payments: true,
+                    cancellations: true,
                 },
-            },
-        });
-        if (!ticket) {
-            throw new errors_1.NotFoundError('Ticket not found for this booking');
+            })
+            : await prisma.booking.findUnique({
+                where: { bookingNumber: bookingIdentifier },
+                include: {
+                    seats: true,
+                    passengers: true,
+                    ticket: true,
+                    payments: true,
+                    cancellations: true,
+                },
+            });
+        if (!booking) {
+            throw new errors_1.NotFoundError('Booking not found');
         }
-        return ticket;
+        let gdsDetails = null;
+        if (booking.providerPnrNo && booking.providerTicketNo) {
+            try {
+                gdsDetails = await this.gdsAdapter.getBookingDetails(booking.providerPnrNo, booking.providerTicketNo);
+            }
+            catch {
+                // Continue with database record if provider details query fails
+            }
+        }
+        return {
+            ticket: booking.ticket,
+            booking,
+            gdsDetails,
+        };
     }
     async getTicketByTicketNumber(ticketNumber) {
         const prisma = (0, database_1.getPrismaClient)();
-        const ticket = await prisma.ticket.findUnique({
+        // Look up by ticket table ticketNumber, or booking.providerTicketNo, or booking.providerPnrNo
+        let ticket = await prisma.ticket.findUnique({
             where: { ticketNumber },
             include: {
                 booking: {
                     include: {
                         seats: true,
                         passengers: true,
+                        payments: true,
+                        cancellations: true,
                     },
                 },
             },
         });
         if (!ticket) {
-            throw new errors_1.NotFoundError('Ticket not found');
+            const booking = await prisma.booking.findFirst({
+                where: {
+                    OR: [
+                        { providerTicketNo: ticketNumber },
+                        { providerPnrNo: ticketNumber },
+                        { bookingNumber: ticketNumber },
+                    ],
+                },
+                include: {
+                    seats: true,
+                    passengers: true,
+                    ticket: true,
+                    payments: true,
+                    cancellations: true,
+                },
+            });
+            if (!booking) {
+                throw new errors_1.NotFoundError('Ticket or booking not found');
+            }
+            let gdsDetails = null;
+            if (booking.providerPnrNo && booking.providerTicketNo) {
+                try {
+                    gdsDetails = await this.gdsAdapter.getBookingDetails(booking.providerPnrNo, booking.providerTicketNo);
+                }
+                catch {
+                    // Provider fetch optional
+                }
+            }
+            return {
+                ticket: booking.ticket,
+                booking,
+                gdsDetails,
+            };
         }
-        return ticket;
+        let gdsDetails = null;
+        if (ticket.booking?.providerPnrNo && ticket.booking?.providerTicketNo) {
+            try {
+                gdsDetails = await this.gdsAdapter.getBookingDetails(ticket.booking.providerPnrNo, ticket.booking.providerTicketNo);
+            }
+            catch {
+                // Optional
+            }
+        }
+        return {
+            ticket,
+            booking: ticket.booking,
+            gdsDetails,
+        };
     }
 }
 exports.TicketsService = TicketsService;

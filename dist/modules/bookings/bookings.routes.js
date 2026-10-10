@@ -12,6 +12,9 @@ const controller = new bookings_controller_1.BookingsController();
 bookingsRouter.post('/', middleware_1.optionalAuth, (0, middleware_1.validate)({ body: bookings_validation_1.createBookingSchema }), controller.createBooking);
 // Get current user's bookings (authenticated)
 bookingsRouter.get('/my-bookings', middleware_1.authenticate, controller.getUserBookings);
+// Check booking status against Hold ID or Booking ID (Mantis GDS /ota/bookingstatusv2)
+bookingsRouter.post('/status', middleware_1.optionalAuth, controller.checkBookingStatus);
+bookingsRouter.get('/status/:holdId', middleware_1.optionalAuth, controller.checkBookingStatus);
 // Get single booking by ID
 bookingsRouter.get('/:id', middleware_1.optionalAuth, controller.getBooking);
 exports.default = bookingsRouter;

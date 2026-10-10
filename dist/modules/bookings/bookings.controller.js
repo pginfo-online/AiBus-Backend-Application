@@ -38,6 +38,22 @@ class BookingsController {
             next(error);
         }
     };
+    checkBookingStatus = async (req, res, next) => {
+        try {
+            const holdId = req.params.holdId || req.body?.holdId || req.body?.HoldId || req.query?.holdId;
+            const bookingId = req.body?.bookingId || req.query?.bookingId;
+            const bookingNumber = req.body?.bookingNumber || req.query?.bookingNumber;
+            const status = await this.bookingsService.checkBookingStatus({
+                holdId,
+                bookingId,
+                bookingNumber,
+            });
+            response_1.ApiResponse.success(res, status, status.Message || 'Booking status retrieved');
+        }
+        catch (error) {
+            next(error);
+        }
+    };
 }
 exports.BookingsController = BookingsController;
 //# sourceMappingURL=bookings.controller.js.map

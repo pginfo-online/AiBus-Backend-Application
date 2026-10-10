@@ -150,6 +150,18 @@ class HoldsService {
             where: { id: holdId },
         });
     }
+    async checkHoldStatus(holdId) {
+        const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(holdId);
+        let providerHoldId = holdId;
+        if (isUuid) {
+            const prisma = (0, database_1.getPrismaClient)();
+            const hold = await prisma.seatHold.findUnique({ where: { id: holdId } });
+            if (hold?.providerHoldId) {
+                providerHoldId = hold.providerHoldId;
+            }
+        }
+        return this.gdsAdapter.checkBookingStatus(providerHoldId);
+    }
 }
 exports.HoldsService = HoldsService;
 //# sourceMappingURL=holds.service.js.map
