@@ -61,6 +61,9 @@ export class TicketsService {
     }
 
     return {
+      ticketNumber: booking.ticket?.ticketNumber || `TKT-${booking.bookingNumber}`,
+      pnrNumber: booking.ticket?.pnrNumber || booking.providerPnrNo || 'N/A',
+      status: booking.ticket?.status || 'ISSUED',
       ticket: booking.ticket,
       booking,
       gdsDetails,

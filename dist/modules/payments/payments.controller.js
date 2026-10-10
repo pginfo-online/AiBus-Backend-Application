@@ -38,6 +38,17 @@ class PaymentsController {
             next(error);
         }
     };
+    handleRedirect = async (req, res, next) => {
+        try {
+            const merchantTxnId = (req.query.merchantOrderId || req.query.merchantTxnId || req.body?.merchantOrderId || req.body?.merchantTxnId || req.query.transactionId || '');
+            const bookingId = (req.query.bookingId || req.body?.bookingId || '');
+            const frontendUrl = `http://localhost:5173/payment-result?merchantTxnId=${encodeURIComponent(merchantTxnId)}&bookingId=${encodeURIComponent(bookingId)}`;
+            res.redirect(frontendUrl);
+        }
+        catch (error) {
+            next(error);
+        }
+    };
 }
 exports.PaymentsController = PaymentsController;
 //# sourceMappingURL=payments.controller.js.map

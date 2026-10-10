@@ -10,6 +10,7 @@ const logger_1 = require("../../infrastructure/logger");
 const gdsAuthClient_1 = require("./gdsAuthClient");
 const gdsSearchResponse_1 = require("./gdsSearchResponse");
 const gdsChartResponse_1 = require("./gdsChartResponse");
+const gdsMockData_1 = require("./gdsMockData");
 class GdsPartnerClient {
     client;
     authClient;
@@ -74,6 +75,10 @@ class GdsPartnerClient {
             }
             catch (err) {
                 this.partnerLogger.error({ err: err.message }, 'GDS CityList call failed');
+                if (env_1.isDevelopment || env_1.isTest) {
+                    this.partnerLogger.warn('Falling back to simulated city list');
+                    return gdsMockData_1.MOCK_CITIES;
+                }
                 throw err;
             }
         });
@@ -95,6 +100,10 @@ class GdsPartnerClient {
             }
             catch (err) {
                 this.partnerLogger.error({ err: err.message, params }, 'GDS Search call failed');
+                if (env_1.isDevelopment || env_1.isTest) {
+                    this.partnerLogger.warn('Falling back to simulated bus search results');
+                    return (0, gdsMockData_1.getMockBuses)(Number(params.fromCityId), Number(params.toCityId), params.journeyDate);
+                }
                 throw err;
             }
         });
@@ -134,6 +143,10 @@ class GdsPartnerClient {
                     params,
                     ...(errorDetails ? { providerError: errorDetails } : {}),
                 }, 'GDS Chart call failed');
+                if (env_1.isDevelopment || env_1.isTest) {
+                    this.partnerLogger.warn({ busId }, 'Falling back to simulated seat chart layout');
+                    return (0, gdsMockData_1.getMockChart)(busId);
+                }
                 throw err;
             }
         });
@@ -156,6 +169,9 @@ class GdsPartnerClient {
             }
             catch (err) {
                 this.partnerLogger.error({ err: err.message, params }, 'GDS SearchBus call failed');
+                if (env_1.isDevelopment || env_1.isTest) {
+                    return (0, gdsMockData_1.getMockBuses)(params.fromCityId, params.toCityId, params.journeyDate).filter((b) => b.RouteBusId === params.busId);
+                }
                 throw err;
             }
         });

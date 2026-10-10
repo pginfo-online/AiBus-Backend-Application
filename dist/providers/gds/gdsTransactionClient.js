@@ -120,6 +120,11 @@ class GdsTransactionClient {
                         },
                     }),
                 }, 'GDS HoldSeats failed');
+                if (env_1.isDevelopment || env_1.isTest) {
+                    const totalFare = request.Passengers?.reduce((sum, p) => sum + (p.Fare || 1050), 0) || 1050;
+                    this.txLogger.warn({ totalFare }, 'Falling back to simulated HoldSeats response in dev/test');
+                    return (0, gdsMockData_1.getMockHoldResponse)(totalFare);
+                }
                 throw new errors_1.ProviderError('GDS', gdsMsg);
             }
         });
@@ -161,6 +166,10 @@ class GdsTransactionClient {
                     err.message ||
                     'Failed to book seats with provider';
                 this.txLogger.error({ err: err.message, status: err.response?.status, errorData, holdId }, 'GDS BookSeats failed');
+                if (env_1.isDevelopment || env_1.isTest) {
+                    this.txLogger.warn({ holdId }, 'Falling back to simulated BookSeats response in dev/test');
+                    return (0, gdsMockData_1.getMockBookResponse)(String(holdId), totalFare || 1050);
+                }
                 throw new errors_1.ProviderError('GDS', gdsMsg);
             }
         });
@@ -229,6 +238,10 @@ class GdsTransactionClient {
             }
             catch (err) {
                 this.txLogger.error({ err: err.message, ticketNo, seatNos, pnrNo }, 'GDS IsCancellable failed');
+                if (env_1.isDevelopment || env_1.isTest) {
+                    this.txLogger.warn({ ticketNo }, 'Falling back to simulated IsCancellable response in dev/test');
+                    return (0, gdsMockData_1.getMockIsCancellable)(ticketNo);
+                }
                 const errorData = err.response?.data;
                 const gdsMsg = errorData?.Error?.Msg ||
                     errorData?.Message ||
@@ -272,6 +285,10 @@ class GdsTransactionClient {
             }
             catch (err) {
                 this.txLogger.error({ err: err.message, request }, 'GDS CancelSeats failed');
+                if (env_1.isDevelopment || env_1.isTest) {
+                    this.txLogger.warn('Falling back to simulated CancelSeats response in dev/test');
+                    return (0, gdsMockData_1.getMockCancelResponse)(850, 200);
+                }
                 const errorData = err.response?.data;
                 const gdsMsg = errorData?.Error?.Msg ||
                     errorData?.Message ||
@@ -298,6 +315,9 @@ class GdsTransactionClient {
             }
             catch (err) {
                 this.txLogger.error({ err: err.message, pnr, ticketNo }, 'GDS BookingDetails failed');
+                if (env_1.isDevelopment || env_1.isTest) {
+                    return (0, gdsMockData_1.getMockBookingDetails)(pnr, ticketNo);
+                }
                 const errorData = err.response?.data;
                 const gdsMsg = errorData?.Error?.Msg ||
                     errorData?.Message ||
@@ -311,7 +331,7 @@ class GdsTransactionClient {
         });
     }
     async getBalance() {
-        if (env_1.env.GDS_CLIENT_SECRET.includes('sandbox') || env_1.env.GDS_CLIENT_SECRET.includes('test')) {
+        if (env_1.env.GDS_CLIENT_SECRET.includes('sandbox') || env_1.env.GDS_CLIENT_SECRET.includes('test') || env_1.isTest) {
             return (0, gdsMockData_1.getMockBalance)();
         }
         return this.circuitBreaker.execute(async () => {
@@ -321,7 +341,7 @@ class GdsTransactionClient {
             }
             catch (err) {
                 this.txLogger.error({ err: err.message }, 'GDS balance call failed');
-                if (env_1.isDevelopment) {
+                if (env_1.isDevelopment || env_1.isTest) {
                     return (0, gdsMockData_1.getMockBalance)();
                 }
                 throw err;

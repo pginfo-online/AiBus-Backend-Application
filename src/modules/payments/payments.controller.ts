@@ -38,4 +38,15 @@ export class PaymentsController {
       next(error);
     }
   };
+
+  public handleRedirect = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+    try {
+      const merchantTxnId = (req.query.merchantOrderId || req.query.merchantTxnId || req.body?.merchantOrderId || req.body?.merchantTxnId || req.query.transactionId || '') as string;
+      const bookingId = (req.query.bookingId || req.body?.bookingId || '') as string;
+      const frontendUrl = `http://localhost:5173/payment-result?merchantTxnId=${encodeURIComponent(merchantTxnId)}&bookingId=${encodeURIComponent(bookingId)}`;
+      res.redirect(frontendUrl);
+    } catch (error) {
+      next(error);
+    }
+  };
 }

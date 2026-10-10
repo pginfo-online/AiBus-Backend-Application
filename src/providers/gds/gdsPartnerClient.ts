@@ -1,5 +1,5 @@
 import axios, { AxiosInstance } from 'axios';
-import { env } from '../../config/env';
+import { env, isDevelopment, isTest } from '../../config/env';
 import { logger } from '../../infrastructure/logger';
 import { GdsAuthClient } from './gdsAuthClient';
 import { CircuitBreaker } from '../circuitBreaker';
@@ -11,6 +11,7 @@ import {
 } from '../types';
 import { parseGdsSearchResponse } from './gdsSearchResponse';
 import { parseGdsChartResponse } from './gdsChartResponse';
+import { MOCK_CITIES, getMockBuses, getMockChart } from './gdsMockData';
 
 export class GdsPartnerClient {
   private readonly client: AxiosInstance;
@@ -78,6 +79,10 @@ export class GdsPartnerClient {
         throw new Error('CityList returned 0 cities from GDS');
       } catch (err: any) {
         this.partnerLogger.error({ err: err.message }, 'GDS CityList call failed');
+        if (isDevelopment || isTest) {
+          this.partnerLogger.warn('Falling back to simulated city list');
+          return MOCK_CITIES;
+        }
         throw err;
       }
     });
@@ -99,6 +104,10 @@ export class GdsPartnerClient {
         return parseGdsSearchResponse(response.data);
       } catch (err: any) {
         this.partnerLogger.error({ err: err.message, params }, 'GDS Search call failed');
+        if (isDevelopment || isTest) {
+          this.partnerLogger.warn('Falling back to simulated bus search results');
+          return getMockBuses(Number(params.fromCityId), Number(params.toCityId), params.journeyDate);
+        }
         throw err;
       }
     });
@@ -148,6 +157,10 @@ export class GdsPartnerClient {
           },
           'GDS Chart call failed'
         );
+        if (isDevelopment || isTest) {
+          this.partnerLogger.warn({ busId }, 'Falling back to simulated seat chart layout');
+          return getMockChart(busId);
+        }
         throw err;
       }
     });
@@ -175,6 +188,11 @@ export class GdsPartnerClient {
         return parseGdsSearchResponse(response.data);
       } catch (err: any) {
         this.partnerLogger.error({ err: err.message, params }, 'GDS SearchBus call failed');
+        if (isDevelopment || isTest) {
+          return getMockBuses(params.fromCityId, params.toCityId, params.journeyDate).filter(
+            (b) => b.RouteBusId === params.busId
+          );
+        }
         throw err;
       }
     });

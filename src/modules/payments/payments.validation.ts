@@ -3,6 +3,7 @@ import { z } from 'zod';
 export const createPaymentIntentSchema = z.object({
   bookingId: z.string().uuid('Valid bookingId is required'),
   gateway: z.enum(['PHONEPE', 'RAZORPAY', 'MOCK']).default('PHONEPE'),
+  redirectUrl: z.string().optional(),
 });
 
 export const verifyPaymentSchema = z.object({

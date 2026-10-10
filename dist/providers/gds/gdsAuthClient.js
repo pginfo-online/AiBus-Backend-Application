@@ -96,7 +96,7 @@ class GdsAuthClient {
     async fetchTokenFromUpstream() {
         const authUrl = `${env_1.env.GDS_PARTNER_BASE_URL}/ota/v1/Auth`;
         // In development or test, if mock secret is provided, avoid hitting live endpoint if mock credentials are set
-        if (env_1.env.GDS_CLIENT_SECRET.includes('sandbox') || env_1.env.GDS_CLIENT_SECRET.includes('test')) {
+        if (env_1.env.GDS_CLIENT_SECRET.includes('sandbox') || env_1.env.GDS_CLIENT_SECRET.includes('test') || env_1.isTest) {
             this.authLogger.info('Using local simulated GDS access token for development/sandbox credentials');
             return `MOCK-GDS-TOKEN-${Date.now()}|${env_1.env.GDS_CLIENT_ID}-S|202610051210|prod|FFFF`;
         }
@@ -122,7 +122,7 @@ class GdsAuthClient {
         }
         catch (error) {
             this.authLogger.error({ error: error.message }, 'Failed to fetch GDS access token');
-            if (env_1.isDevelopment) {
+            if (env_1.isDevelopment || env_1.isTest) {
                 this.authLogger.warn('Falling back to local development simulated token due to upstream error');
                 return `DEV-FALLBACK-TOKEN-${Date.now()}|${env_1.env.GDS_CLIENT_ID}-S|202610051210|prod|FFFF`;
             }

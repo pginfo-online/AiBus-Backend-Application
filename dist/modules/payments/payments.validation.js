@@ -5,6 +5,7 @@ const zod_1 = require("zod");
 exports.createPaymentIntentSchema = zod_1.z.object({
     bookingId: zod_1.z.string().uuid('Valid bookingId is required'),
     gateway: zod_1.z.enum(['PHONEPE', 'RAZORPAY', 'MOCK']).default('PHONEPE'),
+    redirectUrl: zod_1.z.string().optional(),
 });
 exports.verifyPaymentSchema = zod_1.z.object({
     bookingId: zod_1.z.string().uuid(),

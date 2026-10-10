@@ -35,5 +35,9 @@ paymentsRouter.post(
   controller.handleWebhook
 );
 
+// Payment gateway return/redirect URL handler
+paymentsRouter.get('/redirect', controller.handleRedirect);
+paymentsRouter.post('/redirect', controller.handleRedirect);
+
 export { paymentsRouter };
 export default paymentsRouter;

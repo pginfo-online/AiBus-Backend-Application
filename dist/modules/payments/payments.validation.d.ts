@@ -6,6 +6,7 @@ export declare const createPaymentIntentSchema: z.ZodObject<{
         RAZORPAY: "RAZORPAY";
         MOCK: "MOCK";
     }>>;
+    redirectUrl: z.ZodOptional<z.ZodString>;
 }, z.core.$strip>;
 export declare const verifyPaymentSchema: z.ZodObject<{
     bookingId: z.ZodString;

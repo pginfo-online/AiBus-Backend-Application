@@ -5,6 +5,9 @@ export declare class TicketsService {
     static getInstance(): TicketsService;
     getGdsBookingDetails(pnr: string, ticketNo: string): Promise<import("../../providers/types").GdsBookingDetailsResponse>;
     getTicketByBookingId(bookingIdentifier: string): Promise<{
+        ticketNumber: string;
+        pnrNumber: string;
+        status: import(".prisma/client").$Enums.TicketStatus;
         ticket: {
             id: string;
             status: import(".prisma/client").$Enums.TicketStatus;

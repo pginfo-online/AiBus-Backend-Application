@@ -9,8 +9,9 @@ export declare class PaymentsService {
         merchantTxnId: string;
         amount: number;
         currency: string;
-        gateway: string;
+        gateway: "PHONEPE" | "RAZORPAY" | "MOCK";
         paymentUrl: string;
+        gatewayOrderId: string;
     }>;
     verifyPayment(input: VerifyPaymentInput): Promise<{
         status: string;

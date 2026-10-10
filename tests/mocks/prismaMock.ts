@@ -51,8 +51,19 @@ export function createPrismaMock() {
         if (item) Object.assign(item, data);
         return item;
       }),
+      updateMany: vi.fn().mockImplementation(async ({ where, data }) => {
+        const item = bookings.get(where?.id);
+        if (item) Object.assign(item, data);
+        return { count: 1 };
+      }),
     },
     payment: {
+      findFirst: vi.fn().mockImplementation(async ({ where }) => {
+        if (where?.bookingId) {
+          return Array.from(payments.values()).find((p) => p.bookingId === where.bookingId && (!where.status || p.status === where.status)) || null;
+        }
+        return null;
+      }),
       findUnique: vi.fn().mockImplementation(async ({ where }) => {
         if (where.merchantTxnId) {
           const p = Array.from(payments.values()).find((item) => item.merchantTxnId === where.merchantTxnId);

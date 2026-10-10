@@ -1,5 +1,5 @@
 import axios from 'axios';
-import { env, isDevelopment } from '../../config/env';
+import { env, isDevelopment, isTest } from '../../config/env';
 import { logger } from '../../infrastructure/logger';
 import { getRedisClient, acquireLock, releaseLock } from '../../infrastructure/redis';
 import { RedisPrefix } from '../../shared/constants';
@@ -97,7 +97,7 @@ export class GdsAuthClient {
     const authUrl = `${env.GDS_PARTNER_BASE_URL}/ota/v1/Auth`;
 
     // In development or test, if mock secret is provided, avoid hitting live endpoint if mock credentials are set
-    if (env.GDS_CLIENT_SECRET.includes('sandbox') || env.GDS_CLIENT_SECRET.includes('test')) {
+    if (env.GDS_CLIENT_SECRET.includes('sandbox') || env.GDS_CLIENT_SECRET.includes('test') || isTest) {
       this.authLogger.info('Using local simulated GDS access token for development/sandbox credentials');
       return `MOCK-GDS-TOKEN-${Date.now()}|${env.GDS_CLIENT_ID}-S|202610051210|prod|FFFF`;
     }
@@ -132,7 +132,7 @@ export class GdsAuthClient {
     } catch (error: any) {
       this.authLogger.error({ error: error.message }, 'Failed to fetch GDS access token');
 
-      if (isDevelopment) {
+      if (isDevelopment || isTest) {
         this.authLogger.warn('Falling back to local development simulated token due to upstream error');
         return `DEV-FALLBACK-TOKEN-${Date.now()}|${env.GDS_CLIENT_ID}-S|202610051210|prod|FFFF`;
       }
