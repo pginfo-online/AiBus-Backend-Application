@@ -33,5 +33,13 @@ export const cancelBookingSchema = z.object({
   reason: z.string().optional(),
 });
 
+export const bookingStatusSchema = z.object({
+  holdId: z.coerce.string().min(1).optional(),
+  HoldId: z.coerce.string().min(1).optional(),
+  bookingId: z.coerce.string().min(1).optional(),
+  bookingNumber: z.coerce.string().min(1).optional(),
+});
+
 export type CreateBookingInput = z.infer<typeof createBookingSchema>;
 export type CancelBookingInput = z.infer<typeof cancelBookingSchema>;
+export type BookingStatusInput = z.infer<typeof bookingStatusSchema>;

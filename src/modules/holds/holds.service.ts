@@ -178,4 +178,19 @@ export class HoldsService {
       where: { id: holdId },
     });
   }
+
+  public async checkHoldStatus(holdId: string) {
+    const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(holdId);
+    let providerHoldId = holdId;
+
+    if (isUuid) {
+      const prisma = getPrismaClient();
+      const hold = await prisma.seatHold.findUnique({ where: { id: holdId } });
+      if (hold?.providerHoldId) {
+        providerHoldId = hold.providerHoldId;
+      }
+    }
+
+    return this.gdsAdapter.checkBookingStatus(providerHoldId);
+  }
 }

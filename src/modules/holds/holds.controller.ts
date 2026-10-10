@@ -32,4 +32,19 @@ export class HoldsController {
       next(error);
     }
   };
+
+  public checkHoldStatus = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+    try {
+      const holdId = req.params.id || req.body?.holdId || req.body?.HoldId || (req.query?.holdId as string);
+      if (!holdId) {
+        ApiResponse.error(res, 'HoldId is required', 'VALIDATION_ERROR', 400);
+        return;
+      }
+
+      const status = await this.holdsService.checkHoldStatus(holdId);
+      ApiResponse.success(res, status, status.Message || 'Hold status retrieved');
+    } catch (error) {
+      next(error);
+    }
+  };
 }
