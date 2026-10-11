@@ -1,0 +1,93 @@
+services:
+  - type: web
+    name: aibus-backend
+    runtime: node
+    plan: starter
+    region: singapore
+    buildCommand: npm install && npx prisma generate && npm run build
+    startCommand: npm run start
+    healthCheckPath: /health/live
+    autoDeploy: true
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 10000
+      - key: HOST
+        value: 0.0.0.0
+      - key: API_VERSION
+        value: v1
+      - key: APP_NAME
+        value: aibus-backend
+      - key: LOG_LEVEL
+        value: info
+      - key: CORS_ORIGINS
+        sync: false
+      - key: JWT_ACCESS_SECRET
+        generateValue: true
+      - key: JWT_REFRESH_SECRET
+        generateValue: true
+      - key: JWT_ACCESS_EXPIRY
+        value: 15m
+      - key: JWT_REFRESH_EXPIRY
+        value: 7d
+      - key: JWT_ISSUER
+        value: aibus
+      - key: DATABASE_URL
+        sync: false
+      - key: DATABASE_POOL_MIN
+        value: 2
+      - key: DATABASE_POOL_MAX
+        value: 10
+      - key: REDIS_URL
+        sync: false
+      - key: REDIS_TLS
+        value: "true"
+      - key: REDIS_KEY_PREFIX
+        value: "aibus:"
+      - key: BULL_PREFIX
+        value: bull
+      - key: GDS_PARTNER_BASE_URL
+        value: https://partnerapi.iamgds.com
+      - key: GDS_TRANSACTION_BASE_URL
+        value: https://partnertranapi.iamgds.com
+      - key: GDS_CLIENT_ID
+        sync: false
+      - key: GDS_CLIENT_SECRET
+        sync: false
+      - key: GDS_REQUEST_TIMEOUT_MS
+        value: 15000
+      - key: GDS_CONNECT_TIMEOUT_MS
+        value: 5000
+      - key: PHONEPE_MERCHANT_ID
+        sync: false
+      - key: PHONEPE_CLIENT_ID
+        sync: false
+      - key: PHONEPE_CLIENT_SECRET
+        sync: false
+      - key: PHONEPE_CLIENT_VERSION
+        value: "1"
+      - key: PHONEPE_ENVIRONMENT
+        value: SANDBOX
+      - key: PHONEPE_CALLBACK_URL
+        sync: false
+      - key: PHONEPE_REDIRECT_URL
+        sync: false
+      - key: RATE_LIMIT_WINDOW_MS
+        value: 60000
+      - key: RATE_LIMIT_MAX_REQUESTS
+        value: 100
+      - key: AUTH_RATE_LIMIT_WINDOW_MS
+        value: 900000
+      - key: AUTH_RATE_LIMIT_MAX_REQUESTS
+        value: 10
+      - key: BCRYPT_ROUNDS
+        value: 12
+      - key: REQUEST_BODY_LIMIT
+        value: 1mb
+      - key: SEAT_HOLD_TTL_SECONDS
+        value: 600
+      - key: SEAT_LOCK_TTL_SECONDS
+        value: 30
+      - key: SHUTDOWN_TIMEOUT_MS
+        value: 15000

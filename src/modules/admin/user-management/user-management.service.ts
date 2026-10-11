@@ -219,7 +219,8 @@ export class UserManagementService {
       data: { status: 'SUSPENDED' },
       select: {
         id: true,
-        fullName: true,
+        firstName: true,
+        lastName: true,
         email: true,
         role: true,
         status: true,
@@ -267,7 +268,8 @@ export class UserManagementService {
       data: { status: 'ACTIVE' },
       select: {
         id: true,
-        fullName: true,
+        firstName: true,
+        lastName: true,
         email: true,
         role: true,
         status: true,

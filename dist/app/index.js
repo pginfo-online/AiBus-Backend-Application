@@ -40,7 +40,9 @@ function createApp() {
         crossOriginEmbedderPolicy: false,
     }));
     // 4. CORS configuration
-    const allowedOrigins = env_1.env.CORS_ORIGINS.split(',').map((origin) => origin.trim());
+    const allowedOrigins = env_1.env.CORS_ORIGINS.split(',')
+        .map((origin) => origin.trim())
+        .filter(Boolean);
     app.use((0, cors_1.default)({
         origin: (origin, callback) => {
             if (!origin || allowedOrigins.includes(origin) || allowedOrigins.includes('*')) {

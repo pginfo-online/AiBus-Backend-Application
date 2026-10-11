@@ -25,7 +25,8 @@ healthRouter.get('/live', (_req: Request, res: Response) => {
 /**
  * GET /health/ready
  * Readiness probe — can this instance safely receive traffic?
- * Checks critical dependencies (database, Redis).
+ * Checks critical dependency (database) and secondary dependency (Redis).
+ * Returns 200 if critical database is operational (degraded if Redis is offline).
  */
 healthRouter.get('/ready', async (_req: Request, res: Response) => {
   try {
@@ -34,20 +35,21 @@ healthRouter.get('/ready', async (_req: Request, res: Response) => {
       checkRedisHealth(),
     ]);
 
-    const isReady = dbHealthy && redisHealthy;
+    // Database is critical for business traffic
+    const isReady = dbHealthy;
 
     const status = {
-      status: isReady ? 'ready' : 'not_ready',
+      status: isReady ? (redisHealthy ? 'ready' : 'degraded') : 'not_ready',
       timestamp: new Date().toISOString(),
       checks: {
         database: dbHealthy ? 'ok' : 'failing',
-        redis: redisHealthy ? 'ok' : 'failing',
+        redis: redisHealthy ? 'ok' : 'unavailable',
       },
     };
 
     res.status(isReady ? 200 : 503).json(status);
   } catch (error) {
-    logger.error({ err: error }, 'Health check failed');
+    logger.error({ err: error }, 'Readiness health check failed');
     res.status(503).json({
       status: 'not_ready',
       timestamp: new Date().toISOString(),
@@ -62,6 +64,7 @@ healthRouter.get('/ready', async (_req: Request, res: Response) => {
 /**
  * GET /health
  * Detailed health — full dependency status with uptime and memory.
+ * Returns 200 if operational (healthy/degraded), 503 if critical DB is down.
  */
 healthRouter.get('/', async (_req: Request, res: Response) => {
   try {
@@ -71,9 +74,10 @@ healthRouter.get('/', async (_req: Request, res: Response) => {
     ]);
 
     const memUsage = process.memoryUsage();
+    const isOperational = dbHealthy;
 
     const status = {
-      status: dbHealthy && redisHealthy ? 'healthy' : 'degraded',
+      status: dbHealthy && redisHealthy ? 'healthy' : isOperational ? 'degraded' : 'unhealthy',
       timestamp: new Date().toISOString(),
       version: process.env.npm_package_version || '1.0.0',
       uptime: process.uptime(),
@@ -85,14 +89,16 @@ healthRouter.get('/', async (_req: Request, res: Response) => {
       checks: {
         database: {
           status: dbHealthy ? 'ok' : 'failing',
+          critical: true,
         },
         redis: {
-          status: redisHealthy ? 'ok' : 'failing',
+          status: redisHealthy ? 'ok' : 'unavailable',
+          critical: false,
         },
       },
     };
 
-    res.status(dbHealthy && redisHealthy ? 200 : 503).json(status);
+    res.status(isOperational ? 200 : 503).json(status);
   } catch (error) {
     logger.error({ err: error }, 'Detailed health check failed');
     res.status(503).json({

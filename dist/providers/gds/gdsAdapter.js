@@ -134,18 +134,20 @@ class GdsAdapter {
     async recordTransaction(operation, requestPayload, responsePayload, durationMs, errorMessage) {
         try {
             const prisma = (0, database_1.getPrismaClient)();
-            await prisma.providerTransaction.create({
-                data: {
-                    providerName: 'GDS',
-                    operation,
-                    requestPayload: requestPayload ?? {},
-                    responsePayload: responsePayload ?? {},
-                    responseStatus: responsePayload?.Status ?? (errorMessage ? 500 : 200),
-                    durationMs,
-                    errorMessage,
-                    requestId: `gds-tx-${Date.now()}`,
-                },
-            });
+            if (prisma?.providerTransaction) {
+                await prisma.providerTransaction.create({
+                    data: {
+                        providerName: 'GDS',
+                        operation,
+                        requestPayload: requestPayload ?? {},
+                        responsePayload: responsePayload ?? {},
+                        responseStatus: responsePayload?.Status ?? (errorMessage ? 500 : 200),
+                        durationMs,
+                        errorMessage,
+                        requestId: `gds-tx-${Date.now()}`,
+                    },
+                });
+            }
         }
         catch (err) {
             this.adapterLogger.warn({ err }, 'Could not record provider transaction audit row');

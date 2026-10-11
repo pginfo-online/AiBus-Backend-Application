@@ -11,26 +11,44 @@ const jobs_1 = require("./jobs");
 // ---------------------------------------------------------------------------
 // Server lifecycle management — bootstrap and graceful shutdown
 // ---------------------------------------------------------------------------
+const serverLogger = logger_1.logger.child({ module: 'bootstrap' });
+// Global guards to catch and log unhandled exceptions and rejections
+process.on('unhandledRejection', (reason, promise) => {
+    serverLogger.error({ reason, promise }, 'Unhandled Promise Rejection detected');
+});
+process.on('uncaughtException', (error) => {
+    serverLogger.fatal({ err: error }, 'Uncaught Exception detected');
+    // Exit cleanly on uncaught exceptions
+    process.exit(1);
+});
 async function bootstrap() {
-    const serverLogger = logger_1.logger.child({ module: 'bootstrap' });
     try {
-        serverLogger.info({ env: env_1.env.NODE_ENV, port: env_1.env.PORT }, 'Starting AiBus Backend...');
-        // 1. Connect to Database (gracefully handle initial connection in dev)
+        serverLogger.info({ env: env_1.env.NODE_ENV, port: env_1.env.PORT, host: env_1.env.HOST }, 'Starting AiBus Backend...');
+        // 1. Connect to Database with automatic 5 retries and pooling
         try {
-            await (0, database_1.connectDatabase)();
+            await (0, database_1.connectDatabase)(5, 1500);
+            serverLogger.info('Database connection established and verified');
         }
         catch (dbErr) {
-            serverLogger.warn({ err: dbErr }, 'Database connection could not be established immediately (will retry on query)');
+            serverLogger.fatal({ err: dbErr }, 'Database connection could not be established after 5 retries');
+            if (env_1.env.NODE_ENV === 'production') {
+                // Critical dependency failed in production: crash fast so supervisor/Render restarts
+                process.exit(1);
+            }
         }
-        // 2. Connect to Redis (gracefully handle in dev if redis offline)
+        // 2. Connect to Redis (robust 5-retry strategy; degrades gracefully if unavailable)
         try {
-            const redis = (0, redis_1.getRedisClient)();
-            await redis.ping();
-            serverLogger.info('Redis connected successfully');
-            (0, jobs_1.initializeWorkers)();
+            const redisConnected = await (0, redis_1.connectRedis)(5);
+            if (redisConnected) {
+                serverLogger.info('Redis connected successfully; initializing background workers');
+                (0, jobs_1.initializeWorkers)();
+            }
+            else {
+                serverLogger.warn('Redis is unavailable after 5 attempts; continuing in degraded mode (caching/queues disabled)');
+            }
         }
         catch (redisErr) {
-            serverLogger.warn({ err: redisErr }, 'Redis connection could not be established immediately (will reconnect in background)');
+            serverLogger.warn({ err: redisErr }, 'Redis connection failed; continuing in degraded mode');
         }
         // 3. Initialize Express application
         const app = (0, app_1.createApp)();
@@ -45,14 +63,17 @@ async function bootstrap() {
                 return;
             isShuttingDown = true;
             serverLogger.info({ signal }, 'Graceful shutdown initiated...');
-            // Force exit timeout
+            // Force exit timeout to avoid hanging processes
             const forceExitTimer = setTimeout(() => {
                 serverLogger.fatal('Forced shutdown timeout reached. Terminating process.');
                 process.exit(1);
             }, env_1.env.SHUTDOWN_TIMEOUT_MS);
             forceExitTimer.unref();
             try {
-                // 1. Stop accepting new HTTP requests
+                // 1. Stop accepting new HTTP requests and close idle keep-alive connections
+                if ('closeIdleConnections' in server && typeof server.closeIdleConnections === 'function') {
+                    server.closeIdleConnections();
+                }
                 await new Promise((resolve, reject) => {
                     server.close((err) => {
                         if (err)
@@ -82,13 +103,6 @@ async function bootstrap() {
         };
         process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
         process.on('SIGINT', () => gracefulShutdown('SIGINT'));
-        process.on('unhandledRejection', (reason, promise) => {
-            serverLogger.error({ reason, promise }, 'Unhandled Promise Rejection detected');
-        });
-        process.on('uncaughtException', (error) => {
-            serverLogger.fatal({ err: error }, 'Uncaught Exception detected');
-            gracefulShutdown('uncaughtException');
-        });
     }
     catch (error) {
         serverLogger.fatal({ err: error }, 'Failed to start server');

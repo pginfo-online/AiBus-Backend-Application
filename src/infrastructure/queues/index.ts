@@ -1,5 +1,5 @@
 import { Queue, Worker, QueueEvents, Job, WorkerOptions } from 'bullmq';
-import { createBullMQConnection } from '../redis';
+import { createBullMQConnection, isRedisAvailable, Redis } from '../redis';
 import { env } from '../../config/env';
 import { logger } from '../logger';
 import { QueueName } from '../../shared/constants';
@@ -13,6 +13,7 @@ const queueLogger = logger.child({ module: 'queue' });
 const queues = new Map<string, Queue>();
 const workers = new Map<string, Worker>();
 const queueEvents = new Map<string, QueueEvents>();
+const bullMqConnections = new Set<Redis>();
 
 /**
  * Get or create a BullMQ queue. Queues are singletons per name.
@@ -21,6 +22,8 @@ export function getQueue(name: string): Queue {
   let queue = queues.get(name);
   if (!queue) {
     const connection = createBullMQConnection();
+    bullMqConnections.add(connection);
+
     queue = new Queue(name, {
       connection,
       prefix: env.BULL_PREFIX,
@@ -55,6 +58,8 @@ export function createWorker<T = unknown>(
   options?: Partial<WorkerOptions>
 ): Worker<T> {
   const connection = createBullMQConnection();
+  bullMqConnections.add(connection);
+
   const worker = new Worker<T>(
     queueName,
     async (job) => {
@@ -115,12 +120,12 @@ export async function initializeQueues(): Promise<void> {
 }
 
 /**
- * Gracefully shut down all workers and queues.
+ * Gracefully shut down all workers, events, queues, and underlying BullMQ Redis connections.
  */
 export async function shutdownQueues(): Promise<void> {
   queueLogger.info('Shutting down queue infrastructure...');
 
-  // Close workers first — stop processing new jobs
+  // 1. Close workers first — stop processing new jobs
   const workerClosePromises = Array.from(workers.entries()).map(
     async ([name, worker]) => {
       try {
@@ -133,11 +138,12 @@ export async function shutdownQueues(): Promise<void> {
   );
   await Promise.allSettled(workerClosePromises);
 
-  // Close queue events
+  // 2. Close queue events
   const eventClosePromises = Array.from(queueEvents.entries()).map(
     async ([name, events]) => {
       try {
         await events.close();
+        queueLogger.info({ queue: name }, 'Queue events closed');
       } catch (error) {
         queueLogger.error({ err: error, queue: name }, 'Failed to close queue events');
       }
@@ -145,11 +151,12 @@ export async function shutdownQueues(): Promise<void> {
   );
   await Promise.allSettled(eventClosePromises);
 
-  // Close queues
+  // 3. Close queues
   const queueClosePromises = Array.from(queues.entries()).map(
     async ([name, queue]) => {
       try {
         await queue.close();
+        queueLogger.info({ queue: name }, 'Queue closed');
       } catch (error) {
         queueLogger.error({ err: error, queue: name }, 'Failed to close queue');
       }
@@ -157,14 +164,35 @@ export async function shutdownQueues(): Promise<void> {
   );
   await Promise.allSettled(queueClosePromises);
 
+  // 4. Close all dedicated BullMQ Redis connections
+  const connectionClosePromises = Array.from(bullMqConnections).map(async (conn) => {
+    try {
+      conn.removeAllListeners();
+      if (conn.status === 'ready' || conn.status === 'connect') {
+        const quitPromise = conn.quit();
+        const timeoutPromise = new Promise((resolve) => setTimeout(resolve, 2000));
+        await Promise.race([quitPromise, timeoutPromise]);
+      } else {
+        conn.disconnect();
+      }
+    } catch (err: any) {
+      queueLogger.debug({ err: err.message }, 'BullMQ Redis connection forced disconnect');
+      try {
+        conn.disconnect();
+      } catch {}
+    }
+  });
+  await Promise.allSettled(connectionClosePromises);
+
   workers.clear();
   queueEvents.clear();
   queues.clear();
-  queueLogger.info('Queue infrastructure shut down');
+  bullMqConnections.clear();
+  queueLogger.info('Queue infrastructure and all Redis connections shut down cleanly');
 }
 
 /**
- * Add a job to a queue.
+ * Add a job to a queue. Gracefully degrades if Redis is unavailable.
  */
 export async function addJob<T>(
   queueName: string,
@@ -178,6 +206,14 @@ export async function addJob<T>(
     jobId?: string; // For idempotent jobs
   }
 ): Promise<Job<T> | null> {
+  if (!isRedisAvailable()) {
+    queueLogger.debug(
+      { queue: queueName, jobName },
+      'Redis unavailable; skipping job enqueue (operating in degraded queue mode)'
+    );
+    return null;
+  }
+
   try {
     const queue = getQueue(queueName);
     const addPromise = queue.add(jobName, data, {
@@ -189,7 +225,7 @@ export async function addJob<T>(
     });
 
     const timeoutPromise = new Promise<never>((_, reject) =>
-      setTimeout(() => reject(new Error('Queue addJob timed out (Redis unavailable)')), 1000)
+      setTimeout(() => reject(new Error('Queue addJob timed out (Redis unavailable)')), 2000)
     );
 
     const job = await Promise.race([addPromise, timeoutPromise]);

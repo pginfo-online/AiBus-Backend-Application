@@ -41,7 +41,9 @@ export function createApp(): Express {
   );
 
   // 4. CORS configuration
-  const allowedOrigins = env.CORS_ORIGINS.split(',').map((origin) => origin.trim());
+  const allowedOrigins = env.CORS_ORIGINS.split(',')
+    .map((origin) => origin.trim())
+    .filter(Boolean);
   app.use(
     cors({
       origin: (origin, callback) => {

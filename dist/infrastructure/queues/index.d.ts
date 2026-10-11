@@ -13,11 +13,11 @@ export declare function createWorker<T = unknown>(queueName: string, processor: 
  */
 export declare function initializeQueues(): Promise<void>;
 /**
- * Gracefully shut down all workers and queues.
+ * Gracefully shut down all workers, events, queues, and underlying BullMQ Redis connections.
  */
 export declare function shutdownQueues(): Promise<void>;
 /**
- * Add a job to a queue.
+ * Add a job to a queue. Gracefully degrades if Redis is unavailable.
  */
 export declare function addJob<T>(queueName: string, jobName: string, data: T, options?: {
     delay?: number;

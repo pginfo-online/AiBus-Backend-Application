@@ -66,7 +66,8 @@ export class RefundManagementService {
             select: {
               id: true,
               bookingNumber: true,
-              totalAmount: true,
+              totalFare: true,
+              contactName: true,
               status: true,
               journeyDate: true,
             },

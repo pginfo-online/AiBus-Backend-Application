@@ -28,17 +28,24 @@ const envSchema = z.object({
   JWT_ISSUER: z.string().default('aibus'),
 
   // Database — Supabase PostgreSQL
-  DATABASE_URL: z.string().url(),
+  DATABASE_URL: z
+    .string()
+    .min(1)
+    .refine(
+      (url) => url.startsWith('postgresql://') || url.startsWith('postgres://'),
+      { message: 'DATABASE_URL must be a valid PostgreSQL connection URL starting with postgres:// or postgresql://' }
+    ),
   DATABASE_POOL_MIN: z.coerce.number().int().nonnegative().default(2),
   DATABASE_POOL_MAX: z.coerce.number().int().positive().default(10),
 
   // Redis
   REDIS_URL: z.string().default('redis://localhost:6379'),
   REDIS_PASSWORD: z.string().optional(),
-  REDIS_TLS: z.preprocess(
-    (value) => (typeof value === 'string' ? value.toLowerCase() : value),
-    z.enum(['true', 'false']).default('false').transform((value) => value === 'true')
-  ),
+  REDIS_TLS: z.preprocess((value) => {
+    if (typeof value === 'boolean') return value;
+    if (typeof value === 'string') return value.toLowerCase() === 'true';
+    return false;
+  }, z.boolean().default(false)),
   REDIS_KEY_PREFIX: z.string().default('aibus:'),
 
   // BullMQ

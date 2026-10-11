@@ -172,18 +172,20 @@ export class GdsAdapter implements IGdsAdapter {
   ): Promise<void> {
     try {
       const prisma = getPrismaClient();
-      await prisma.providerTransaction.create({
-        data: {
-          providerName: 'GDS',
-          operation,
-          requestPayload: requestPayload ?? {},
-          responsePayload: responsePayload ?? {},
-          responseStatus: responsePayload?.Status ?? (errorMessage ? 500 : 200),
-          durationMs,
-          errorMessage,
-          requestId: `gds-tx-${Date.now()}`,
-        },
-      });
+      if (prisma?.providerTransaction) {
+        await prisma.providerTransaction.create({
+          data: {
+            providerName: 'GDS',
+            operation,
+            requestPayload: requestPayload ?? {},
+            responsePayload: responsePayload ?? {},
+            responseStatus: responsePayload?.Status ?? (errorMessage ? 500 : 200),
+            durationMs,
+            errorMessage,
+            requestId: `gds-tx-${Date.now()}`,
+          },
+        });
+      }
     } catch (err) {
       this.adapterLogger.warn({ err }, 'Could not record provider transaction audit row');
     }

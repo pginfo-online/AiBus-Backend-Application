@@ -29,13 +29,22 @@ const envSchema = zod_1.z.object({
     JWT_REFRESH_EXPIRY: zod_1.z.string().default('7d'),
     JWT_ISSUER: zod_1.z.string().default('aibus'),
     // Database — Supabase PostgreSQL
-    DATABASE_URL: zod_1.z.string().url(),
+    DATABASE_URL: zod_1.z
+        .string()
+        .min(1)
+        .refine((url) => url.startsWith('postgresql://') || url.startsWith('postgres://'), { message: 'DATABASE_URL must be a valid PostgreSQL connection URL starting with postgres:// or postgresql://' }),
     DATABASE_POOL_MIN: zod_1.z.coerce.number().int().nonnegative().default(2),
     DATABASE_POOL_MAX: zod_1.z.coerce.number().int().positive().default(10),
     // Redis
     REDIS_URL: zod_1.z.string().default('redis://localhost:6379'),
     REDIS_PASSWORD: zod_1.z.string().optional(),
-    REDIS_TLS: zod_1.z.preprocess((value) => (typeof value === 'string' ? value.toLowerCase() : value), zod_1.z.enum(['true', 'false']).default('false').transform((value) => value === 'true')),
+    REDIS_TLS: zod_1.z.preprocess((value) => {
+        if (typeof value === 'boolean')
+            return value;
+        if (typeof value === 'string')
+            return value.toLowerCase() === 'true';
+        return false;
+    }, zod_1.z.boolean().default(false)),
     REDIS_KEY_PREFIX: zod_1.z.string().default('aibus:'),
     // BullMQ
     BULL_PREFIX: zod_1.z.string().default('bull'),

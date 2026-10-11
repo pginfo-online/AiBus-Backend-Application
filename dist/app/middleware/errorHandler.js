@@ -40,6 +40,71 @@ function errorHandler(err, req, res, _next) {
         });
         return;
     }
+    // Handle malformed JSON body
+    if (err instanceof SyntaxError && 'body' in err) {
+        logger_1.logger.warn({ requestId, err: err.message }, 'Malformed JSON body in request');
+        res.status(400).json({
+            success: false,
+            error: {
+                code: 'INVALID_JSON',
+                message: 'Malformed JSON payload provided in request body',
+                requestId,
+            },
+        });
+        return;
+    }
+    // Handle payload too large
+    if (err.name === 'PayloadTooLargeError' || err.type === 'entity.too.large') {
+        logger_1.logger.warn({ requestId }, 'Request payload exceeded size limit');
+        res.status(413).json({
+            success: false,
+            error: {
+                code: 'PAYLOAD_TOO_LARGE',
+                message: 'Request payload exceeds maximum allowed size',
+                requestId,
+            },
+        });
+        return;
+    }
+    // Handle CORS rejection
+    if (err.message === 'Origin not allowed by CORS') {
+        logger_1.logger.warn({ requestId, origin: req.headers.origin }, 'CORS request rejected');
+        res.status(403).json({
+            success: false,
+            error: {
+                code: 'CORS_FORBIDDEN',
+                message: 'Origin not allowed by CORS policy',
+                requestId,
+            },
+        });
+        return;
+    }
+    // Handle Prisma known request errors
+    const prismaCode = err.code;
+    if (prismaCode === 'P2002') {
+        logger_1.logger.warn({ requestId, target: err.meta?.target }, 'Prisma unique constraint conflict');
+        res.status(409).json({
+            success: false,
+            error: {
+                code: 'CONFLICT',
+                message: 'A resource with these details already exists',
+                requestId,
+            },
+        });
+        return;
+    }
+    if (prismaCode === 'P2025') {
+        logger_1.logger.warn({ requestId }, 'Prisma record not found');
+        res.status(404).json({
+            success: false,
+            error: {
+                code: 'NOT_FOUND',
+                message: 'Requested resource could not be found',
+                requestId,
+            },
+        });
+        return;
+    }
     // Unexpected error — log full details, return generic message
     logger_1.logger.error({
         requestId,

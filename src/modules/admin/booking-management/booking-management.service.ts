@@ -115,7 +115,8 @@ export class BookingManagementService {
         user: {
           select: {
             id: true,
-            fullName: true,
+            firstName: true,
+            lastName: true,
             email: true,
             phone: true,
             role: true,

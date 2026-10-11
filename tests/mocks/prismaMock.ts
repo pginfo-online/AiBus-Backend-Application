@@ -119,6 +119,12 @@ export function createPrismaMock() {
         return item;
       }),
     },
+    providerTransaction: {
+      create: vi.fn().mockImplementation(async ({ data }) => {
+        return { id: uuidv4(), ...data };
+      }),
+    },
+    $queryRaw: vi.fn().mockImplementation(async () => [{ 1: 1 }]),
     $transaction: vi.fn().mockImplementation(async (callback) => {
       if (typeof callback === 'function') {
         return callback(mockInstance);
