@@ -375,6 +375,17 @@ curl -i https://your-backend.onrender.com/api/v1/buses/6901/chart
   ```
   Do not leave trailing commas or spaces.
 
+### Issue 6: `Error: Cannot find module '/opt/render/project/src/index.js'`
+- **Cause**: Render defaults to running `node index.js` if the **Start Command** field is left default or empty in Render's dashboard.
+- **Solution**:
+  1. In your Render Dashboard, go to your service's **Settings** tab.
+  2. Locate **Start Command** and change it to:
+     ```bash
+     npm run start
+     ```
+     *(or `node dist/server.js`)*.
+  3. The repository also includes a root [index.js](file:///c:/Users/ADMIN/Desktop/AiBus/backend/index.js) and sets `"main": "dist/server.js"` in [package.json](file:///c:/Users/ADMIN/Desktop/AiBus/backend/package.json) so even if Render defaults to `node index.js`, it automatically forwards execution to `dist/server.js`.
+
 ---
 
 ## 10. Step 8: Performance & Security Best Practices
