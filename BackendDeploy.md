@@ -164,9 +164,9 @@ The repository includes a ready-to-use `render.yaml` specification file.
    - **Runtime**: `Node`.
    - **Build Command**:
      ```bash
-     npm install && npm run build
+     npm install --include=dev && npx prisma generate && npm run build
      ```
-     *(Note: `npm run build` runs `prisma generate && tsc` to compile both the Prisma Linux engine and TypeScript code).*
+     *(Note: `--include=dev` ensures build tools like TypeScript and Prisma are installed even when `NODE_ENV=production` is active).*
    - **Start Command**:
      ```bash
      npm run start
@@ -385,6 +385,16 @@ curl -i https://your-backend.onrender.com/api/v1/buses/6901/chart
      ```
      *(or `node dist/server.js`)*.
   3. The repository also includes a root [index.js](file:///c:/Users/ADMIN/Desktop/AiBus/backend/index.js) and sets `"main": "dist/server.js"` in [package.json](file:///c:/Users/ADMIN/Desktop/AiBus/backend/package.json) so even if Render defaults to `node index.js`, it automatically forwards execution to `dist/server.js`.
+
+### Issue 7: `error TS2688: Cannot find type definition file for 'node'`
+- **Cause**: When `NODE_ENV=production` is set in Render's environment variables, default `npm install` skips `devDependencies`, which previously excluded `@types/node` and `typescript`.
+- **Solution**:
+  1. The build-time type definitions (`@types/node`, `@types/express`, etc.) and `typescript` have been moved to `dependencies` in [package.json](file:///c:/Users/ADMIN/Desktop/AiBus/backend/package.json).
+  2. In your Render Dashboard, ensure your **Build Command** is set to:
+     ```bash
+     npm install --include=dev && npx prisma generate && npm run build
+     ```
+     This instructs `npm` to install all necessary compiler dependencies before running `tsc`.
 
 ---
 
