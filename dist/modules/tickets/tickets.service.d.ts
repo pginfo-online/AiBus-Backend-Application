@@ -5,9 +5,13 @@ export declare class TicketsService {
     static getInstance(): TicketsService;
     getGdsBookingDetails(pnr: string, ticketNo: string): Promise<import("../../providers/types").GdsBookingDetailsResponse>;
     getTicketByBookingId(bookingIdentifier: string): Promise<{
+        id: string;
+        bookingId: string;
         ticketNumber: string;
         pnrNumber: string;
-        status: import(".prisma/client").$Enums.TicketStatus;
+        status: "BOOKING_FAILED" | "BOOKING_UNKNOWN" | "PAYMENT_FAILED" | "PAYMENT_PENDING" | "CANCELLATION_FAILED" | "INITIATED" | "HOLD_REQUESTED" | "HELD" | "PAYMENT_SUCCESS" | "BOOKING_REQUESTED" | "CANCELLATION_REQUESTED" | "REFUND_PENDING" | "REFUNDED" | "HOLD_FAILED" | "HOLD_EXPIRED" | import(".prisma/client").$Enums.TicketStatus;
+        pdfUrl: string | null;
+        generatedAt: Date;
         ticket: {
             id: string;
             status: import(".prisma/client").$Enums.TicketStatus;
@@ -141,6 +145,13 @@ export declare class TicketsService {
         gdsDetails: import("../../providers/types").GdsBookingDetailsResponse | null;
     }>;
     getTicketByTicketNumber(ticketNumber: string): Promise<{
+        id: string;
+        bookingId: string;
+        ticketNumber: string;
+        pnrNumber: string;
+        status: "BOOKING_FAILED" | "BOOKING_UNKNOWN" | "PAYMENT_FAILED" | "PAYMENT_PENDING" | "CANCELLATION_FAILED" | "INITIATED" | "HOLD_REQUESTED" | "HELD" | "PAYMENT_SUCCESS" | "BOOKING_REQUESTED" | "CANCELLATION_REQUESTED" | "REFUND_PENDING" | "REFUNDED" | "HOLD_FAILED" | "HOLD_EXPIRED" | import(".prisma/client").$Enums.TicketStatus;
+        pdfUrl: string | null;
+        generatedAt: Date;
         ticket: {
             id: string;
             status: import(".prisma/client").$Enums.TicketStatus;
@@ -273,6 +284,13 @@ export declare class TicketsService {
         };
         gdsDetails: import("../../providers/types").GdsBookingDetailsResponse | null;
     } | {
+        id: string;
+        bookingId: string;
+        ticketNumber: string;
+        pnrNumber: string;
+        status: import(".prisma/client").$Enums.TicketStatus;
+        pdfUrl: string | null;
+        generatedAt: Date;
         ticket: {
             booking: {
                 seats: {

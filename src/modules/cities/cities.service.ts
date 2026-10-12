@@ -94,6 +94,18 @@ export class CitiesService {
       }
     }
 
+    // Deduplicate cities by providerCityId and name
+    const seenCityKeys = new Set<string>();
+    const deduplicatedCities: typeof cities = [];
+    for (const c of cities) {
+      const key = `${c.providerCityId || c.CityId}-${(c.name || c.City || '').toLowerCase().trim()}`;
+      if (!seenCityKeys.has(key)) {
+        seenCityKeys.add(key);
+        deduplicatedCities.push(c);
+      }
+    }
+    cities = deduplicatedCities;
+
     // 3. Filter by query if provided (case-insensitive autocomplete)
     if (query && query.trim()) {
       const q = query.toLowerCase().trim();

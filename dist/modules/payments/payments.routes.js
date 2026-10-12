@@ -14,6 +14,8 @@ paymentsRouter.post('/intent', middleware_1.authenticate, (0, middleware_1.idemp
 paymentsRouter.post('/verify', middleware_1.optionalAuth, (0, middleware_1.idempotencyMiddleware)(), (0, middleware_1.validate)({ body: payments_validation_1.verifyPaymentSchema }), controller.verifyPayment);
 // Payment gateway webhook
 paymentsRouter.post('/webhook', (0, middleware_1.validate)({ body: payments_validation_1.webhookPayloadSchema }), controller.handleWebhook);
+// Controlled webhook simulation (local development & testing only)
+paymentsRouter.post('/simulate-webhook', (0, middleware_1.validate)({ body: payments_validation_1.simulateWebhookSchema }), controller.simulateWebhook);
 // Payment gateway return/redirect URL handler
 paymentsRouter.get('/redirect', controller.handleRedirect);
 paymentsRouter.post('/redirect', controller.handleRedirect);

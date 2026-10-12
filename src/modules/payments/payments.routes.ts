@@ -5,6 +5,7 @@ import {
   createPaymentIntentSchema,
   verifyPaymentSchema,
   webhookPayloadSchema,
+  simulateWebhookSchema,
 } from './payments.validation';
 
 const paymentsRouter = Router();
@@ -33,6 +34,13 @@ paymentsRouter.post(
   '/webhook',
   validate({ body: webhookPayloadSchema }),
   controller.handleWebhook
+);
+
+// Controlled webhook simulation (local development & testing only)
+paymentsRouter.post(
+  '/simulate-webhook',
+  validate({ body: simulateWebhookSchema }),
+  controller.simulateWebhook
 );
 
 // Payment gateway return/redirect URL handler

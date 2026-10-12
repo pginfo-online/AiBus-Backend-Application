@@ -91,8 +91,6 @@ class GdsTransactionClient {
                 throw new errors_1.ProviderError('GDS', msg);
             }
             catch (err) {
-                if (err instanceof errors_1.ProviderError)
-                    throw err;
                 const errorData = err.response?.data;
                 const gdsMsg = errorData?.Error?.Msg ||
                     errorData?.Message ||
@@ -155,8 +153,6 @@ class GdsTransactionClient {
                 throw new errors_1.ProviderError('GDS', msg);
             }
             catch (err) {
-                if (err instanceof errors_1.ProviderError)
-                    throw err;
                 const errorData = err.response?.data;
                 const gdsMsg = errorData?.Error?.Msg ||
                     errorData?.Message ||

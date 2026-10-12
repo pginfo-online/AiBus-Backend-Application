@@ -86,6 +86,8 @@ class BookingsService {
                     contactEmail: input.contactEmail,
                     contactPhone: input.contactPhone,
                     cancellationPolicy: input.cancellationPolicy ?? null,
+                    pickupSnapshot: input.pickupSnapshot ?? null,
+                    dropoffSnapshot: input.dropoffSnapshot ?? null,
                     seats: {
                         create: input.passengers.map((p) => ({
                             seatNo: p.seatNo,
@@ -179,8 +181,8 @@ class BookingsService {
                         data: { status: client_1.HoldStatus.CONVERTED },
                     });
                 }
-                // Generate Ticket record
-                const ticketNumber = `TKT-${booking.bookingNumber}`;
+                // Generate Ticket record using actual 3rd party provider TicketNo (per Transactionapi.md)
+                const ticketNumber = String(bookRes.TicketNo || booking.providerTicketNo || `TKT-${booking.bookingNumber}`);
                 await tx.ticket.create({
                     data: {
                         bookingId: updated.id,
@@ -255,6 +257,7 @@ class BookingsService {
                     payments: true,
                     ticket: true,
                     cancellations: true,
+                    refunds: true,
                 },
             })
             : await prisma.booking.findUnique({
@@ -265,6 +268,7 @@ class BookingsService {
                     payments: true,
                     ticket: true,
                     cancellations: true,
+                    refunds: true,
                 },
             });
         if (!booking) {
@@ -280,6 +284,9 @@ class BookingsService {
                 seats: true,
                 passengers: true,
                 ticket: true,
+                payments: true,
+                cancellations: true,
+                refunds: true,
             },
             orderBy: { createdAt: 'desc' },
         });
@@ -334,15 +341,22 @@ class BookingsService {
                     });
                     // Ensure Ticket record exists (idempotent — only create if not already present)
                     const existingTicket = await tx.ticket.findUnique({ where: { bookingId: localBooking.id } });
+                    const ticketNumber = String(statusRes.TicketNo || localBooking.providerTicketNo || `TKT-${localBooking.bookingNumber}`);
                     if (!existingTicket) {
                         await tx.ticket.create({
                             data: {
                                 bookingId: localBooking.id,
-                                ticketNumber: `TKT-${localBooking.bookingNumber}`,
+                                ticketNumber,
                                 pnrNumber: statusRes.PNRNo || 'N/A',
                                 status: client_1.TicketStatus.ISSUED,
                                 bookingSnapshot: localBooking,
                             },
+                        });
+                    }
+                    else if (statusRes.TicketNo && existingTicket.ticketNumber.startsWith('TKT-')) {
+                        await tx.ticket.update({
+                            where: { id: existingTicket.id },
+                            data: { ticketNumber: String(statusRes.TicketNo) },
                         });
                     }
                 });

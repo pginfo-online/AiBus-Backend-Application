@@ -109,10 +109,6 @@ Schema
 
 
 
-
-
-
-
 3) Search
 
 GET
@@ -163,184 +159,365 @@ Example Value
 Schema
 
 
-
-
-
-
-
 {
-  "success": true,
-  "data": {
-    "ToCityId": 4562,
-    "FromCityId": 4292,
-    "Buses": [
-      {
-        "NonRefundable": false,
-        "MTicket": true,
-        "CompanyId": 3963,
-        "ProvCompId": 0,
-        "ProvId": 15,
-        "RouteBusId": 1,
-        "BusType": {
-          "IsAC": "NON_AC",
-          "Seating": "SEATER",
-          "Make": "NORMAL",
-          "Axle": "SINGLE_AXLE",
-          "Axel": "SINGLE_AXLE"
-        },
-        "Pickups": [
-          {
-            "PickupTime": "2022-06-30T05:00:00.000Z",
-            "PickupArea": "",
-            "PickupName": "Anand rao circle",
-            "PickupCode": "39436"
-          },
-          {
-            "PickupTime": "2022-06-30T07:00:00.000Z",
-            "PickupArea": "",
-            "PickupName": "Silk board",
-            "PickupCode": "44953"
-          }
+    "success": true,
+    "data": {
+        "ToCityId": 4562,
+        "FromCityId": 4292,
+        "Buses": [
+            {
+                "Rank": 0,
+                "IsCovidSafe": false,
+                "HasPGCharges": false,
+                "IsGPS": true,
+                "IsPremium": false,
+                "IsFlexi": false,
+                "NonRefundable": false,
+                "MTicket": false,
+                "v": 4,
+                "CompanyId": 3963,
+                "ProvCompId": 0,
+                "ProvId": 15,
+                "RouteBusId": 1,
+                "BusType": {
+                    "IsAC": "NON_AC",
+                    "Seating": "SEATER",
+                    "Axle": "SINGLE_AXLE",
+                    "Axel": "SINGLE_AXLE",
+                    "Make": "NORMAL"
+                },
+                "Pickups": [
+                    {
+                        "PickupCrossed": false,
+                        "PickupTime": "2026-10-22 11:50:00",
+                        "PickupArea": "",
+                        "PickupName": "Anand Rao Circle",
+                        "PickupCode": "39436"
+                    },
+                    {
+                        "PickupCrossed": false,
+                        "PickupTime": "2026-10-22 12:06:00",
+                        "PickupArea": "",
+                        "PickupName": "Amar Hotel, Opp Bmtc Bus Stand",
+                        "PickupCode": "776"
+                    },
+                    {
+                        "PickupCrossed": false,
+                        "PickupTime": "2026-10-22 12:26:00",
+                        "PickupArea": "",
+                        "PickupName": "Bommanahalli",
+                        "PickupCode": "44955"
+                    },
+                    {
+                        "PickupCrossed": false,
+                        "PickupTime": "2026-10-22 12:36:00",
+                        "PickupArea": "",
+                        "PickupName": "Complex Centre",
+                        "PickupCode": "57573"
+                    },
+                    {
+                        "PickupCrossed": false,
+                        "PickupTime": "2026-10-22 12:46:00",
+                        "PickupArea": "",
+                        "PickupName": "Hosur",
+                        "PickupCode": "44957"
+                    },
+                    {
+                        "PickupCrossed": false,
+                        "PickupTime": "2026-10-22 12:56:00",
+                        "PickupArea": "",
+                        "PickupName": "Santhi Nagar",
+                        "PickupCode": "57918"
+                    },
+                    {
+                        "PickupCrossed": false,
+                        "PickupTime": "2026-10-22 13:06:00",
+                        "PickupArea": "",
+                        "PickupName": "Silk Board",
+                        "PickupCode": "44953"
+                    }
+                ],
+                "Dropoffs": [
+                    {
+                        "DropoffTime": "2026-10-23 00:21:00",
+                        "DropoffName": "Koyambedu",
+                        "DropoffCode": "750"
+                    },
+                    {
+                        "DropoffTime": "2026-10-23 00:21:00",
+                        "DropoffName": "Airport",
+                        "DropoffCode": "81897"
+                    },
+                    {
+                        "DropoffTime": "2026-10-23 00:21:00",
+                        "DropoffName": "Ashok Nagar",
+                        "DropoffCode": "136529"
+                    },
+                    {
+                        "DropoffTime": "2026-10-23 01:21:00",
+                        "DropoffName": "Chennai Central",
+                        "DropoffCode": "746"
+                    }
+                ],
+                "Canc": [
+                    {
+                        "Amt": 0,
+                        "Pct": 100,
+                        "Mins": 0
+                    },
+                    {
+                        "Amt": 0,
+                        "Pct": 70,
+                        "Mins": 240
+                    },
+                    {
+                        "Amt": 0,
+                        "Pct": 45,
+                        "Mins": 300
+                    },
+                    {
+                        "Amt": 0,
+                        "Pct": 25,
+                        "Mins": 480
+                    },
+                    {
+                        "Amt": 0,
+                        "Pct": 0,
+                        "Mins": 720
+                    }
+                ],
+                "Amenities": [
+                    8,
+                    3,
+                    1,
+                    5,
+                    7,
+                    11,
+                    28,
+                    30,
+                    29,
+                    27,
+                    26,
+                    33,
+                    32
+                ],
+                "BusStatus": {
+                    "Availability": 35,
+                    "RouteBusId": 1,
+                    "BaseFares": [
+                        10,
+                        0
+                    ],
+                    "DiscFares": [
+                        10,
+                        0
+                    ],
+                    "CancFares": [
+                        10,
+                        0
+                    ],
+                    "TotalTax": 5.0
+                },
+                "DisplayBusType": "Non A/C, Seater",
+                "BoCRS": 1,
+                "IsGovt": false,
+                "SuretyScore": 75,
+                "Visibility": true,
+                "CommPct": 0,
+                "HasDiscount": false,
+                "DiscountPct": 0,
+                "DiscountAmt": 0,
+                "showTill": "2026-10-22 12:56:00",
+                "CompanyNameWithoutSuffix": "GDS Demo Test",
+                "CompanySuffix": "naveen",
+                "ToName": "Chennai",
+                "FromName": "Bangalore",
+                "ChartCode": "vSDCYTWm5EIekpgIqKE8dQ==|7xJuLAQ5S00rRYJLMIjlNg==",
+                "Duration": "12:05",
+                "BusRemark": "",
+                "BusLabel": "2X2(35) NAC Seater  ",
+                "CompanyName": "GDS Demo Testnaveen",
+                "ArrTime": "2026-10-23 00:21:00",
+                "DeptTime": "2026-10-22 12:16:00",
+                "BusTripId": "15-46754",
+                "TripId": "46754"
+            },
+            {
+                "Rank": 0,
+                "IsCovidSafe": false,
+                "HasPGCharges": false,
+                "IsGPS": false,
+                "IsPremium": true,
+                "IsFlexi": true,
+                "NonRefundable": false,
+                "MTicket": false,
+                "v": 5,
+                "CompanyId": 3963,
+                "ProvCompId": 0,
+                "ProvId": 15,
+                "RouteBusId": 2,
+                "BusType": {
+                    "IsAC": "AC",
+                    "Seating": "SLEEPER",
+                    "Axle": "MULTI_AXLE",
+                    "Axel": "MULTI_AXLE",
+                    "Make": "VOLVO"
+                },
+                "Pickups": [
+                    {
+                        "PickupCrossed": false,
+                        "PickupTime": "2026-10-22 23:05:00",
+                        "PickupArea": "",
+                        "PickupName": "Peenya",
+                        "PickupCode": "74717"
+                    },
+                    {
+                        "PickupCrossed": false,
+                        "PickupTime": "2026-10-22 23:15:00",
+                        "PickupArea": "",
+                        "PickupName": "Race Course Road",
+                        "PickupCode": "57572"
+                    },
+                    {
+                        "PickupCrossed": false,
+                        "PickupTime": "2026-10-23 00:20:00",
+                        "PickupArea": "",
+                        "PickupName": "S.K.Travels (Madiwala)",
+                        "PickupCode": "473"
+                    }
+                ],
+                "Dropoffs": [
+                    {
+                        "DropoffTime": "2026-10-23 09:30:00",
+                        "DropoffName": "Chennai Central",
+                        "DropoffCode": "746"
+                    }
+                ],
+                "Canc": [
+                    {
+                        "Amt": 0,
+                        "Pct": 100,
+                        "Mins": 0
+                    },
+                    {
+                        "Amt": 0,
+                        "Pct": 70,
+                        "Mins": 240
+                    },
+                    {
+                        "Amt": 0,
+                        "Pct": 45,
+                        "Mins": 300
+                    },
+                    {
+                        "Amt": 0,
+                        "Pct": 25,
+                        "Mins": 480
+                    },
+                    {
+                        "Amt": 0,
+                        "Pct": 0,
+                        "Mins": 720
+                    }
+                ],
+                "Amenities": [],
+                "BusStatus": {
+                    "Availability": 36,
+                    "RouteBusId": 2,
+                    "BaseFares": [
+                        100,
+                        0
+                    ],
+                    "DiscFares": [
+                        95,
+                        0
+                    ],
+                    "CancFares": [
+                        100,
+                        0
+                    ],
+                    "TotalTax": 5.0
+                },
+                "DisplayBusType": "A/C, Sleeper, Volvo, Multi Axle",
+                "BoCRS": 1,
+                "IsGovt": false,
+                "SuretyScore": 75,
+                "Visibility": true,
+                "CommPct": 8,
+                "HasDiscount": true,
+                "DiscountPct": 5,
+                "DiscountAmt": 0,
+                "showTill": "2026-10-22 18:00:00",
+                "CompanyNameWithoutSuffix": "GDS Demo Test",
+                "PostponeTill": "2026-10-22",
+                "PreponeTill": "2026-10-22",
+                "ToName": "Chennai",
+                "FromName": "Bangalore",
+                "ChartCode": "WOr21sCJLPmUF2OL_lhj-A==|zTzdbW1A8-fWFEy9Tlnfpg==",
+                "Duration": "10:15",
+                "BusRemark": "",
+                "BusLabel": "2X1(36) AC -Sleeper  Volvo 9600 Multi Axle",
+                "CompanyName": "GDS Demo Test",
+                "ArrTime": "2026-10-23 09:15:00",
+                "DeptTime": "2026-10-22 23:00:00",
+                "BusTripId": "15-33250",
+                "TripId": "33250"
+            }
         ],
-        "Dropoffs": [
-          {
-            "DropoffTime": "2022-06-30T18:00:00.000Z",
-            "DropoffName": "Koyambedu",
-            "DropoffCode": "750"
-          },
+        "AllAmenities": [
+            "Blanket",
+            "Water_Bottle",
+            "Central_TV",
+            "WiFi",
+            "Toilet",
+            "Charging_Point",
+            "Personal_TV",
+            "Snacks",
+            "GPS",
+            "Newspaper",
+            "Emergency_Exit",
+            "Facial_Tissues",
+            "Fire_Extinguisher",
+            "Hammer",
+            "Reading_Light",
+            "Pillow",
+            "Headsets",
+            "Vomiting_Bag",
+            "Novel",
+            "Heater",
+            "CCTV",
+            "Fan",
+            "Water_Bottle_Holder",
+            "First_Aid_Box",
+            "Meal",
+            "Extra_Leg_Space",
+            "Social_Distancing",
+            "Staffs_with_facemask",
+            "Hand_Sanitizer",
+            "Bus_Sanitization",
+            "Thermal_Screening",
+            "Partition_between_sleeper",
+            "Bus_Crew_Covid_Tested",
+            "Passenger_Face_Mask"
         ],
-        "Canc": [
-          {
-            "Amt": 0,
-            "Pct": 100,
-            "Mins": 0
-          },
-          {
-            "Amt": 0,
-            "Pct": 10,
-            "Mins": 600
-          }
+        "SocialDistancingLabels": [
+            "Social Distance",
+            "Face Mask",
+            "Hand Sanitizer",
+            "Bus Sanitization",
+            "Thermal Screening",
+            "Adjacent seat empty",
+            "Covid test for Bus Crew",
+            "Passenger Face Mask"
         ],
-        "Amenities": [
-          5,
-          3,
-          7,
-          8
-        ],
-        "BusStatus": {
-          "Availability": 35,
-          "RouteBusId": 1,
-          "BaseFares": [
-            50,
-            0
-          ],
-          "TotalTax": 0
-        },
-        "Visibility": true,
-        "CommPct": 8,
-        "CompanySuffix": "naveen",
-        "ToName": "Chennai",
-        "FromName": "Bangalore",
-        "ChartCode": "vSDCYTWm5EIekpgIqKE8dQ==|7xJuLAQ5S00rRYJLMIjlNg==",
-        "Duration": "12:0",
-        "BusLabel": "2X2(35) NAC Seater  2 2 pushback non a/c",
-        "CompanyName": "GDS Demo Test",
-        "ArrTime": "2022-06-30T18:00:00.000Z",
-        "DeptTime": "2022-06-30T06:00:00.000Z",
-        "TripId": "15:46754"
-      },
-      {
-        "NonRefundable": false,
-        "MTicket": true,
-        "CompanyId": 3963,
-        "ProvCompId": 0,
-        "ProvId": 15,
-        "RouteBusId": 2,
-        "BusType": {
-          "IsAC": "AC",
-          "Seating": "SEATER_SEMI_SLEEPER",
-          "Make": "MERCEDES",
-          "Axle": "SINGLE_AXLE",
-          "Axel": "SINGLE_AXLE"
-        },
-        "Pickups": [
-          {
-            "PickupTime": "2022-06-30T18:55:00.000Z",
-            "PickupArea": "",
-            "PickupName": "Silk board",
-            "PickupCode": "44953"
-          },
-          {
-            "PickupTime": "2022-06-30T22:00:00.000Z",
-            "PickupArea": "",
-            "PickupName": "Hosur",
-            "PickupCode": "44957"
-          }
-        ],
-        "Dropoffs": [
-          {
-            "DropoffTime": "2022-06-30T04:30:00.000Z",
-            "DropoffName": "Airport",
-            "DropoffCode": "81897"
-          }
-        ],
-        "Canc": [
-          {
-            "Amt": 0,
-            "Pct": 100,
-            "Mins": 0
-          },
-          {
-            "Amt": 0,
-            "Pct": 10,
-            "Mins": 600
-          }
-        ],
-        "Amenities": [],
-        "BusStatus": {
-          "Availability": 60,
-          "RouteBusId": 2,
-          "BaseFares": [
-            3000,
-            0
-          ],
-          "TotalTax": 6
-        },
-        "Visibility": true,
-        "CommPct": 8,
-        "ToName": "Chennai",
-        "FromName": "Bangalore",
-        "ChartCode": "iqDaGmlY4fRXApNFY0rC-Q==|49I-RN-lkDek9TsutLQT7g==",
-        "Duration": "6:30",
-        "BusLabel": "2X2(60) AC -Semisleeper-Sleeper  Mercedes Benz",
-        "CompanyName": "GDS Demo Test",
-        "ArrTime": "2022-06-30T04:30:00.000Z",
-        "DeptTime": "2022-06-30T22:00:00.000Z",
-        "TripId": "15:32982"
-      }
-    ],
-    "AllAmenities": [
-      "Blanket",
-      "Water_Bottle",
-      "TV",
-      "WiFi",
-      "Toilet",
-      "Charging_Point",
-      "Personal_TV",
-      "Snacks",
-      "GPS",
-      "Newspaper",
-      "Emergency_Exit",
-      "Facial_Tissues",
-      "Fire_Extinguisher",
-      "Hammer",
-      "Reading_Light",
-      "Pillow",
-      "Headsets"
-    ],
-    "JourneyDate": "2022-06-30T00:00:00.000Z"
-  }
+        "TotalAvailSeats": 71,
+        "JourneyDate": "2026-10-22",
+        "ToCityName": "Chennai",
+        "FromCityName": "Bengaluru"
+    }
 }
+
+
 
 
 

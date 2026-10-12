@@ -6,13 +6,14 @@
  *   node scripts/simulateWebhook.js --status reject  --txn TXN-AI-123456
  */
 
+require('dotenv').config();
 const crypto = require('crypto');
 const http = require('http');
 
 // Configuration (defaults match backend .env)
 const PORT = process.env.PORT || 3009;
 const HOST = process.env.HOST || 'localhost';
-const SALT_KEY = process.env.PHONEPE_CLIENT_SECRET || '96434309-7796-489d-8924-ab56988a6076';
+const SALT_KEY = process.env.PHONEPE_CLIENT_SECRET || 'OTNhYTFlNjYtNjY1Mi00YzlmLWJiZDQtZDg5YmVhMWQyNWQz';
 const SALT_INDEX = process.env.PHONEPE_CLIENT_VERSION || '1';
 
 // Parse command line arguments

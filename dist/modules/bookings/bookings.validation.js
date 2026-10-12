@@ -28,6 +28,8 @@ exports.createBookingSchema = zod_1.z.object({
     contactPhone: zod_1.z.string().min(1).default('9876543210'),
     passengers: zod_1.z.array(holds_validation_1.passengerHoldSchema).min(1).max(6),
     cancellationPolicy: zod_1.z.any().optional(),
+    pickupSnapshot: zod_1.z.any().optional(),
+    dropoffSnapshot: zod_1.z.any().optional(),
 });
 exports.cancelBookingSchema = zod_1.z.object({
     seatNos: zod_1.z.array(zod_1.z.string().min(1)).min(1, 'At least one seat number is required'),

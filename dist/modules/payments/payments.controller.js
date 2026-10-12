@@ -38,10 +38,25 @@ class PaymentsController {
             next(error);
         }
     };
+    simulateWebhook = async (req, res, next) => {
+        try {
+            const result = await this.paymentsService.simulateWebhook(req.body);
+            response_1.ApiResponse.success(res, result, 'Webhook simulated and processed successfully');
+        }
+        catch (error) {
+            next(error);
+        }
+    };
     handleRedirect = async (req, res, next) => {
         try {
             const merchantTxnId = (req.query.merchantOrderId || req.query.merchantTxnId || req.body?.merchantOrderId || req.body?.merchantTxnId || req.query.transactionId || '');
             const bookingId = (req.query.bookingId || req.body?.bookingId || '');
+            const redirectUrlParam = (req.query.redirectUrl || req.body?.redirectUrl || '');
+            if (redirectUrlParam && (redirectUrlParam.startsWith('aibus://') || redirectUrlParam.startsWith('exp://'))) {
+                const sep = redirectUrlParam.includes('?') ? '&' : '?';
+                res.redirect(`${redirectUrlParam}${sep}merchantTxnId=${encodeURIComponent(merchantTxnId)}&bookingId=${encodeURIComponent(bookingId)}`);
+                return;
+            }
             const frontendUrl = `http://localhost:5173/payment-result?merchantTxnId=${encodeURIComponent(merchantTxnId)}&bookingId=${encodeURIComponent(bookingId)}`;
             res.redirect(frontendUrl);
         }

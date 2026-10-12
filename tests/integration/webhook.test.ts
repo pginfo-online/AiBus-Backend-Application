@@ -260,4 +260,214 @@ describe('PhonePe Webhook Integration Tests (Success & Reject)', () => {
     const payment = await prismaMock.payment.findUnique({ where: { merchantTxnId } });
     expect(payment?.status).toBe('FAILED');
   });
+
+  it('Scenario 3: Controlled Development Webhook Simulator (SUCCESS) -> Confirms booking and issues ticket', async () => {
+    // 1. Create hold
+    const holdRes = await request(app)
+      .post('/api/v1/holds')
+      .send({
+        fromCityId: 4292,
+        toCityId: 4562,
+        journeyDate: '2026-12-10',
+        busId: 6901,
+        pickupId: '44953',
+        dropoffId: '750',
+        contactInfo: {
+          customerName: 'Sim Tester',
+          email: 'sim@example.com',
+          phone: '9876543210',
+          mobile: '9876543210',
+        },
+        passengers: [{
+          seatNo: 'U3',
+          seatTypeId: 2,
+          fare: 1050,
+          gender: 'M',
+          age: 30,
+          name: 'Sim Tester',
+          isAcSeat: true,
+        }],
+      });
+    expect(holdRes.status).toBe(201);
+    const holdId = holdRes.body.data.holdId;
+
+    // 2. Create booking
+    const bookingRes = await request(app)
+      .post('/api/v1/bookings')
+      .set('Authorization', `Bearer ${authToken}`)
+      .send({
+        holdId,
+        fromCityId: 4292,
+        toCityId: 4562,
+        fromCityName: 'Bengaluru',
+        toCityName: 'Chennai',
+        journeyDate: '2026-12-10',
+        busId: 6901,
+        tripId: '15:46754',
+        pickupCode: '44953',
+        pickupLocation: 'Majestic Anand Rao Circle',
+        pickupTime: '2026-12-10 21:00:00',
+        dropoffCode: '750',
+        dropoffLocation: 'Koyambedu',
+        dropoffTime: '2026-12-11 06:00:00',
+        operatorName: 'VRL Travels',
+        busType: 'AC Sleeper',
+        totalFare: 1050,
+        baseFare: 950,
+        serviceTax: 100,
+        contactName: 'Sim Tester',
+        contactEmail: 'sim@example.com',
+        contactPhone: '9876543210',
+        passengers: [{
+          seatNo: 'U3',
+          seatTypeId: 2,
+          fare: 1050,
+          gender: 'M',
+          age: 30,
+          name: 'Sim Tester',
+          isAcSeat: true,
+        }],
+      });
+    expect(bookingRes.status).toBe(201);
+    const bookingId = bookingRes.body.data.id;
+
+    // 3. Create payment intent
+    const intentRes = await request(app)
+      .post('/api/v1/payments/intent')
+      .set('Authorization', `Bearer ${authToken}`)
+      .send({ bookingId, gateway: 'PHONEPE' });
+    expect(intentRes.status).toBe(201);
+    const merchantTxnId = intentRes.body.data.merchantTxnId;
+
+    // 4. Trigger controlled dev webhook simulation with SUCCESS
+    const simRes = await request(app)
+      .post('/api/v1/payments/simulate-webhook')
+      .send({
+        merchantTxnId,
+        status: 'SUCCESS',
+      });
+    expect(simRes.status).toBe(200);
+    expect(simRes.body.success).toBe(true);
+    expect(simRes.body.data.bookingStatus).toBe('CONFIRMED');
+    expect(simRes.body.data.ticket).toBeDefined();
+
+    // 5. Verify booking is CONFIRMED
+    const booking = await prismaMock.booking.findUnique({ where: { id: bookingId } });
+    expect(booking?.status).toBe('CONFIRMED');
+  });
+
+  it('Scenario 4: Controlled Development Webhook Simulator (DECLINED) -> Marks payment and booking FAILED, allows payment retry', async () => {
+    // 1. Create hold
+    const holdRes = await request(app)
+      .post('/api/v1/holds')
+      .send({
+        fromCityId: 4292,
+        toCityId: 4562,
+        journeyDate: '2026-12-10',
+        busId: 6901,
+        pickupId: '44953',
+        dropoffId: '750',
+        contactInfo: {
+          customerName: 'Retry Tester',
+          email: 'retry@example.com',
+          phone: '9876543210',
+          mobile: '9876543210',
+        },
+        passengers: [{
+          seatNo: 'U4',
+          seatTypeId: 2,
+          fare: 1050,
+          gender: 'F',
+          age: 27,
+          name: 'Retry Tester',
+          isAcSeat: true,
+        }],
+      });
+    expect(holdRes.status).toBe(201);
+    const holdId = holdRes.body.data.holdId;
+
+    // 2. Create booking
+    const bookingRes = await request(app)
+      .post('/api/v1/bookings')
+      .set('Authorization', `Bearer ${authToken}`)
+      .send({
+        holdId,
+        fromCityId: 4292,
+        toCityId: 4562,
+        fromCityName: 'Bengaluru',
+        toCityName: 'Chennai',
+        journeyDate: '2026-12-10',
+        busId: 6901,
+        tripId: '15:46754',
+        pickupCode: '44953',
+        pickupLocation: 'Majestic Anand Rao Circle',
+        pickupTime: '2026-12-10 21:00:00',
+        dropoffCode: '750',
+        dropoffLocation: 'Koyambedu',
+        dropoffTime: '2026-12-11 06:00:00',
+        operatorName: 'VRL Travels',
+        busType: 'AC Sleeper',
+        totalFare: 1050,
+        baseFare: 950,
+        serviceTax: 100,
+        contactName: 'Retry Tester',
+        contactEmail: 'retry@example.com',
+        contactPhone: '9876543210',
+        passengers: [{
+          seatNo: 'U4',
+          seatTypeId: 2,
+          fare: 1050,
+          gender: 'F',
+          age: 27,
+          name: 'Retry Tester',
+          isAcSeat: true,
+        }],
+      });
+    expect(bookingRes.status).toBe(201);
+    const bookingId = bookingRes.body.data.id;
+
+    // 3. Create payment intent
+    const intentRes = await request(app)
+      .post('/api/v1/payments/intent')
+      .set('Authorization', `Bearer ${authToken}`)
+      .send({ bookingId, gateway: 'PHONEPE' });
+    expect(intentRes.status).toBe(201);
+    const merchantTxnId = intentRes.body.data.merchantTxnId;
+
+    // 4. Trigger controlled dev webhook simulation with DECLINED
+    const simRes = await request(app)
+      .post('/api/v1/payments/simulate-webhook')
+      .send({
+        merchantTxnId,
+        status: 'DECLINED',
+        reason: 'Customer cancelled transaction',
+      });
+    expect(simRes.status).toBe(200);
+    expect(simRes.body.data.bookingStatus).toBe('PAYMENT_FAILED');
+
+    // 5. Verify payment retry is permitted on the same booking while hold is still active
+    const retryIntentRes = await request(app)
+      .post('/api/v1/payments/intent')
+      .set('Authorization', `Bearer ${authToken}`)
+      .send({ bookingId, gateway: 'PHONEPE' });
+    expect(retryIntentRes.status).toBe(201);
+    expect(retryIntentRes.body.success).toBe(true);
+    expect(retryIntentRes.body.data).toHaveProperty('merchantTxnId');
+  });
+
+  it('Scenario 5: Simulation endpoint is rejected with 403 Forbidden in production environment', async () => {
+    const originalEnv = env.NODE_ENV;
+    (env as any).NODE_ENV = 'production';
+    try {
+      const res = await request(app)
+        .post('/api/v1/payments/simulate-webhook')
+        .send({
+          merchantTxnId: 'TXN-PROD-TEST',
+          status: 'SUCCESS',
+        });
+      expect(res.status).toBe(403);
+    } finally {
+      (env as any).NODE_ENV = originalEnv;
+    }
+  });
 });

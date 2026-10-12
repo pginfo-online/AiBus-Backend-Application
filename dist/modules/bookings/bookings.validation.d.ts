@@ -35,6 +35,8 @@ export declare const createBookingSchema: z.ZodObject<{
         isAcSeat: z.ZodDefault<z.ZodBoolean>;
     }, z.core.$strip>>;
     cancellationPolicy: z.ZodOptional<z.ZodAny>;
+    pickupSnapshot: z.ZodOptional<z.ZodAny>;
+    dropoffSnapshot: z.ZodOptional<z.ZodAny>;
 }, z.core.$strip>;
 export declare const cancelBookingSchema: z.ZodObject<{
     seatNos: z.ZodArray<z.ZodString>;

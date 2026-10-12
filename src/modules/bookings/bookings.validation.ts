@@ -26,6 +26,8 @@ export const createBookingSchema = z.object({
   contactPhone: z.string().min(1).default('9876543210'),
   passengers: z.array(passengerHoldSchema).min(1).max(6),
   cancellationPolicy: z.any().optional(),
+  pickupSnapshot: z.any().optional(),
+  dropoffSnapshot: z.any().optional(),
 });
 
 export const cancelBookingSchema = z.object({

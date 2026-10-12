@@ -68,8 +68,16 @@ class GdsPartnerClient {
                     State: String(item.State || item.state || '').trim(),
                 }))
                     .filter((c) => c.CityId > 0 && c.CityName.length > 0);
-                if (parsedCities.length > 0) {
-                    return parsedCities;
+                const seenCityIds = new Set();
+                const uniqueCities = [];
+                for (const c of parsedCities) {
+                    if (!seenCityIds.has(c.CityId)) {
+                        seenCityIds.add(c.CityId);
+                        uniqueCities.push(c);
+                    }
+                }
+                if (uniqueCities.length > 0) {
+                    return uniqueCities;
                 }
                 throw new Error('CityList returned 0 cities from GDS');
             }

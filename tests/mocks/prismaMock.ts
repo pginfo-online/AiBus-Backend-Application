@@ -30,10 +30,12 @@ export function createPrismaMock() {
       findUnique: vi.fn().mockImplementation(async ({ where }) => {
         const b = bookings.get(where.id);
         if (!b) return null;
+        const ticketItem = Array.from(tickets.values()).find((t) => t.bookingId === b.id);
         return {
           ...b,
           seats: b.seats || [],
           passengers: b.passengers || [],
+          ticket: ticketItem || null,
           payments: Array.from(payments.values()).filter((p) => p.bookingId === b.id),
         };
       }),
@@ -65,11 +67,17 @@ export function createPrismaMock() {
         return null;
       }),
       findUnique: vi.fn().mockImplementation(async ({ where }) => {
+        let p;
         if (where.merchantTxnId) {
-          const p = Array.from(payments.values()).find((item) => item.merchantTxnId === where.merchantTxnId);
-          if (p) return { ...p, booking: bookings.get(p.bookingId) };
+          p = Array.from(payments.values()).find((item) => item.merchantTxnId === where.merchantTxnId);
+        } else if (where.id) {
+          p = payments.get(where.id);
         }
-        return payments.get(where.id) || null;
+        if (p) {
+          const b = bookings.get(p.bookingId);
+          return { ...p, booking: b };
+        }
+        return null;
       }),
       create: vi.fn().mockImplementation(async ({ data }) => {
         const item = { id: uuidv4(), ...data };

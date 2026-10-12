@@ -116,17 +116,23 @@ export function startBookingReconciliationWorker() {
           },
         });
 
-        // Create Ticket record idempotently
+        // Create Ticket record idempotently using actual 3rd party provider TicketNo
         const existingTicket = await tx.ticket.findUnique({ where: { bookingId } });
+        const ticketNumber = String(statusResponse.TicketNo || booking.providerTicketNo || booking.bookingNumber);
         if (!existingTicket) {
           await tx.ticket.create({
             data: {
               bookingId,
-              ticketNumber: `TKT-${booking.bookingNumber}`,
-              pnrNumber: statusResponse.PNRNo || 'N/A',
+              ticketNumber,
+              pnrNumber: statusResponse.PNRNo || booking.providerPnrNo || 'N/A',
               status: TicketStatus.ISSUED,
               bookingSnapshot: booking as any,
             },
+          });
+        } else if (statusResponse.TicketNo && existingTicket.ticketNumber.startsWith('TKT-')) {
+          await tx.ticket.update({
+            where: { id: existingTicket.id },
+            data: { ticketNumber: String(statusResponse.TicketNo) },
           });
         }
       });

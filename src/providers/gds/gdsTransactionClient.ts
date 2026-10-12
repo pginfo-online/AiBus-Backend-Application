@@ -117,7 +117,6 @@ export class GdsTransactionClient {
         const msg = data?.Message || data?.Error?.Msg || 'Failed to hold seats with provider';
         throw new ProviderError('GDS', msg);
       } catch (err: any) {
-        if (err instanceof ProviderError) throw err;
         const errorData = err.response?.data;
         const gdsMsg =
           errorData?.Error?.Msg ||
@@ -189,7 +188,6 @@ export class GdsTransactionClient {
         const msg = data?.Message || data?.Error?.Msg || 'Failed to book seats with provider';
         throw new ProviderError('GDS', msg);
       } catch (err: any) {
-        if (err instanceof ProviderError) throw err;
         const errorData = err.response?.data;
         const gdsMsg =
           errorData?.Error?.Msg ||
