@@ -319,6 +319,7 @@ export class BookingsService {
             payments: true,
             ticket: true,
             cancellations: true,
+            refunds: true,
           },
         })
       : await prisma.booking.findUnique({
@@ -329,6 +330,7 @@ export class BookingsService {
             payments: true,
             ticket: true,
             cancellations: true,
+            refunds: true,
           },
         });
 
@@ -347,6 +349,9 @@ export class BookingsService {
         seats: true,
         passengers: true,
         ticket: true,
+        payments: true,
+        cancellations: true,
+        refunds: true,
       },
       orderBy: { createdAt: 'desc' },
     });

@@ -8,8 +8,8 @@ const payments_validation_1 = require("./payments.validation");
 const paymentsRouter = (0, express_1.Router)();
 exports.paymentsRouter = paymentsRouter;
 const controller = new payments_controller_1.PaymentsController();
-// Create payment intent
-paymentsRouter.post('/intent', middleware_1.optionalAuth, (0, middleware_1.idempotencyMiddleware)(), (0, middleware_1.validate)({ body: payments_validation_1.createPaymentIntentSchema }), controller.createPaymentIntent);
+// Create payment intent — requires authentication (only confirmed users may pay)
+paymentsRouter.post('/intent', middleware_1.authenticate, (0, middleware_1.idempotencyMiddleware)(), (0, middleware_1.validate)({ body: payments_validation_1.createPaymentIntentSchema }), controller.createPaymentIntent);
 // Verify payment
 paymentsRouter.post('/verify', middleware_1.optionalAuth, (0, middleware_1.idempotencyMiddleware)(), (0, middleware_1.validate)({ body: payments_validation_1.verifyPaymentSchema }), controller.verifyPayment);
 // Payment gateway webhook

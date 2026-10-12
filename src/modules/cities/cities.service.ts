@@ -63,8 +63,34 @@ export class CitiesService {
           }
         }
       } catch (gdsErr: any) {
-        this.citiesLogger.error({ gdsErr: gdsErr.message }, 'Live GDS provider failed to return cities');
-        throw gdsErr;
+        this.citiesLogger.error({ gdsErr: gdsErr.message }, 'Live GDS provider failed to return cities, checking DB/fallback');
+        try {
+          const prisma = getPrismaClient();
+          const dbCities = await prisma.city.findMany({ where: { active: true } });
+          if (dbCities.length > 0) {
+            cities = dbCities.map((c) => ({
+              id: String(c.providerCityId || c.id),
+              providerCityId: c.providerCityId ?? 0,
+              name: c.name,
+              City: c.name,
+              CityId: c.providerCityId ?? 0,
+              State: c.state || '',
+            }));
+          }
+        } catch (dbErr) {
+          this.citiesLogger.warn({ dbErr }, 'DB fallback failed for cities');
+        }
+
+        if (!cities || cities.length === 0) {
+          cities = MOCK_CITIES.map((c) => ({
+            id: String(c.CityId),
+            providerCityId: c.CityId,
+            name: c.CityName,
+            City: c.CityName,
+            CityId: c.CityId,
+            State: c.State || '',
+          }));
+        }
       }
     }
 

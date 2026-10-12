@@ -14,7 +14,9 @@
     "prisma:studio": "prisma studio",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:coverage": "vitest run --coverage"
+    "test:coverage": "vitest run --coverage",
+    "test:webhook": "node scripts/simulateWebhook.js",
+    "test:webhook:e2e": "vitest run tests/integration/webhook.test.ts"
   },
   "engines": {
     "node": ">=18.0.0"

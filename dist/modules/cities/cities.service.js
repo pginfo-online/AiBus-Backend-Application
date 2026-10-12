@@ -6,6 +6,7 @@ const database_1 = require("../../infrastructure/database");
 const redis_1 = require("../../infrastructure/redis");
 const constants_1 = require("../../shared/constants");
 const logger_1 = require("../../infrastructure/logger");
+const gdsMockData_1 = require("../../providers/gds/gdsMockData");
 class CitiesService {
     static instance;
     gdsAdapter;
@@ -60,8 +61,34 @@ class CitiesService {
                 }
             }
             catch (gdsErr) {
-                this.citiesLogger.error({ gdsErr: gdsErr.message }, 'Live GDS provider failed to return cities');
-                throw gdsErr;
+                this.citiesLogger.error({ gdsErr: gdsErr.message }, 'Live GDS provider failed to return cities, checking DB/fallback');
+                try {
+                    const prisma = (0, database_1.getPrismaClient)();
+                    const dbCities = await prisma.city.findMany({ where: { active: true } });
+                    if (dbCities.length > 0) {
+                        cities = dbCities.map((c) => ({
+                            id: String(c.providerCityId || c.id),
+                            providerCityId: c.providerCityId ?? 0,
+                            name: c.name,
+                            City: c.name,
+                            CityId: c.providerCityId ?? 0,
+                            State: c.state || '',
+                        }));
+                    }
+                }
+                catch (dbErr) {
+                    this.citiesLogger.warn({ dbErr }, 'DB fallback failed for cities');
+                }
+                if (!cities || cities.length === 0) {
+                    cities = gdsMockData_1.MOCK_CITIES.map((c) => ({
+                        id: String(c.CityId),
+                        providerCityId: c.CityId,
+                        name: c.CityName,
+                        City: c.CityName,
+                        CityId: c.CityId,
+                        State: c.State || '',
+                    }));
+                }
             }
         }
         // 3. Filter by query if provided (case-insensitive autocomplete)

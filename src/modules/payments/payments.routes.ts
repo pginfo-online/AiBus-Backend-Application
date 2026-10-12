@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { PaymentsController } from './payments.controller';
-import { validate, optionalAuth, idempotencyMiddleware } from '../../app/middleware';
+import { validate, optionalAuth, authenticate, idempotencyMiddleware } from '../../app/middleware';
 import {
   createPaymentIntentSchema,
   verifyPaymentSchema,
@@ -10,10 +10,10 @@ import {
 const paymentsRouter = Router();
 const controller = new PaymentsController();
 
-// Create payment intent
+// Create payment intent — requires authentication (only confirmed users may pay)
 paymentsRouter.post(
   '/intent',
-  optionalAuth,
+  authenticate,
   idempotencyMiddleware(),
   validate({ body: createPaymentIntentSchema }),
   controller.createPaymentIntent

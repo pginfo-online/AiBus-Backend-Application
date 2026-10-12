@@ -12,12 +12,25 @@ vi.mock('../../src/infrastructure/database', () => ({
 }));
 
 import { createApp } from '../../src/app';
+import jwt from 'jsonwebtoken';
+import { env } from '../../src/config/env';
 
 describe('End-to-End Travel Reservation Lifecycle', () => {
   const app = createApp();
   let holdId: string;
   let bookingId: string;
   let merchantTxnId: string;
+
+  const authToken = jwt.sign(
+    {
+      sub: '00000000-0000-0000-0000-000000000001',
+      email: 'rahul.verma@example.com',
+      role: 'CUSTOMER',
+      jti: 'test-token-id',
+    },
+    env.JWT_ACCESS_SECRET,
+    { issuer: env.JWT_ISSUER, expiresIn: '1h' }
+  );
 
   it('Step 1: Search buses between two cities', async () => {
     const res = await request(app).get('/api/v1/search?fromCityId=4292&toCityId=4562&journeyDate=2026-12-10');
@@ -107,7 +120,10 @@ describe('End-to-End Travel Reservation Lifecycle', () => {
       ],
     };
 
-    const res = await request(app).post('/api/v1/bookings').send(bookingPayload);
+    const res = await request(app)
+      .post('/api/v1/bookings')
+      .set('Authorization', `Bearer ${authToken}`)
+      .send(bookingPayload);
     expect(res.status).toBe(201);
     expect(res.body.success).toBe(true);
     expect(res.body.data).toHaveProperty('id');
@@ -119,6 +135,7 @@ describe('End-to-End Travel Reservation Lifecycle', () => {
   it('Step 5: Create payment intent for booking', async () => {
     const res = await request(app)
       .post('/api/v1/payments/intent')
+      .set('Authorization', `Bearer ${authToken}`)
       .send({ bookingId, gateway: 'PHONEPE' });
 
     expect(res.status).toBe(201);
@@ -165,6 +182,7 @@ describe('End-to-End Travel Reservation Lifecycle', () => {
   it('Step 9: Cancel seats and queue refund', async () => {
     const res = await request(app)
       .post(`/api/v1/cancellations/${bookingId}`)
+      .set('Authorization', `Bearer ${authToken}`)
       .send({
         seatNos: ['L1'],
         reason: 'Change of travel plan',

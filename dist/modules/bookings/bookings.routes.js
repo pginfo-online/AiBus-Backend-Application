@@ -8,8 +8,8 @@ const bookings_validation_1 = require("./bookings.validation");
 const bookingsRouter = (0, express_1.Router)();
 exports.bookingsRouter = bookingsRouter;
 const controller = new bookings_controller_1.BookingsController();
-// Create booking (allows guest or authenticated user)
-bookingsRouter.post('/', middleware_1.optionalAuth, (0, middleware_1.validate)({ body: bookings_validation_1.createBookingSchema }), controller.createBooking);
+// Create booking — REQUIRES authentication to prevent unauthorized bookings
+bookingsRouter.post('/', middleware_1.authenticate, (0, middleware_1.validate)({ body: bookings_validation_1.createBookingSchema }), controller.createBooking);
 // Get current user's bookings (authenticated)
 bookingsRouter.get('/my-bookings', middleware_1.authenticate, controller.getUserBookings);
 // Check booking status against Hold ID or Booking ID (Mantis GDS /ota/bookingstatusv2)

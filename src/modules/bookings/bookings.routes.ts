@@ -6,8 +6,8 @@ import { createBookingSchema } from './bookings.validation';
 const bookingsRouter = Router();
 const controller = new BookingsController();
 
-// Create booking (allows guest or authenticated user)
-bookingsRouter.post('/', optionalAuth, validate({ body: createBookingSchema }), controller.createBooking);
+// Create booking — REQUIRES authentication to prevent unauthorized bookings
+bookingsRouter.post('/', authenticate, validate({ body: createBookingSchema }), controller.createBooking);
 
 // Get current user's bookings (authenticated)
 bookingsRouter.get('/my-bookings', authenticate, controller.getUserBookings);

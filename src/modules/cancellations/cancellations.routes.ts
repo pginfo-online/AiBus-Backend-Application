@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { CancellationsController } from './cancellations.controller';
-import { optionalAuth, validate, idempotencyMiddleware } from '../../app/middleware';
+import { optionalAuth, authenticate, validate, idempotencyMiddleware } from '../../app/middleware';
 import { cancelBookingSchema } from '../bookings/bookings.validation';
 
 const cancellationsRouter = Router();
@@ -10,16 +10,16 @@ const controller = new CancellationsController();
 cancellationsRouter.get('/iscancellable', optionalAuth, controller.checkIsCancellableDirect);
 cancellationsRouter.post('/iscancellable', optionalAuth, controller.checkIsCancellableDirect);
 
-// Direct Mantis GDS CancelSeats query by TicketNo, SeatNos, PNR
-cancellationsRouter.post('/cancelseats', optionalAuth, idempotencyMiddleware(), controller.cancelSeatsDirect);
+// Direct Mantis GDS CancelSeats query by TicketNo, SeatNos, PNR — requires auth
+cancellationsRouter.post('/cancelseats', authenticate, idempotencyMiddleware(), controller.cancelSeatsDirect);
 
 // Check if booking is cancellable and view refund calculation by booking ID
 cancellationsRouter.get('/:bookingId/check', optionalAuth, controller.checkCancellability);
 
-// Cancel seats with idempotency protection
+// Cancel seats with idempotency protection — requires authentication
 cancellationsRouter.post(
   '/:bookingId',
-  optionalAuth,
+  authenticate,
   idempotencyMiddleware(),
   validate({ body: cancelBookingSchema }),
   controller.cancelSeats
