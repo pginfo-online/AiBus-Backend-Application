@@ -55,7 +55,7 @@ class TicketsService {
                 // Continue with database record if provider details query fails
             }
         }
-        // Prioritize actual 3rd party Ticket Number (e.g. 502627948) per Transactionapi.md
+        // Prioritize actual 3rd party Ticket Number (e.g. 502627948, 502627910) per Transactionapi.md
         let ticketNo = booking.providerTicketNo ||
             gdsDetails?.TicketNo ||
             (booking.ticket?.ticketNumber && !booking.ticket.ticketNumber.startsWith('TKT-') ? booking.ticket.ticketNumber : null) ||
@@ -65,18 +65,54 @@ class TicketsService {
             gdsDetails?.PNRNo ||
             booking.ticket?.pnrNumber ||
             'N/A';
+        // Synchronize booking provider fields if live GDS details provided them
+        if (gdsDetails?.TicketNo && !booking.providerTicketNo) {
+            try {
+                await prisma.booking.update({
+                    where: { id: booking.id },
+                    data: {
+                        providerTicketNo: String(gdsDetails.TicketNo),
+                        ...(gdsDetails.PNRNo && !booking.providerPnrNo ? { providerPnrNo: String(gdsDetails.PNRNo) } : {}),
+                    },
+                });
+                booking.providerTicketNo = String(gdsDetails.TicketNo);
+                if (gdsDetails.PNRNo)
+                    booking.providerPnrNo = String(gdsDetails.PNRNo);
+                ticketNo = String(gdsDetails.TicketNo);
+            }
+            catch {
+                // Safe ignore
+            }
+        }
         // Synchronize ticket record if it previously held synthetic TKT- prefix
-        if (booking.ticket && booking.providerTicketNo && booking.ticket.ticketNumber.startsWith('TKT-')) {
+        if (booking.ticket && ticketNo && booking.ticket.ticketNumber.startsWith('TKT-')) {
             try {
                 await prisma.ticket.update({
                     where: { id: booking.ticket.id },
-                    data: { ticketNumber: booking.providerTicketNo },
+                    data: { ticketNumber: String(ticketNo) },
                 });
-                booking.ticket.ticketNumber = booking.providerTicketNo;
-                ticketNo = booking.providerTicketNo;
+                booking.ticket.ticketNumber = String(ticketNo);
             }
             catch {
                 // Safe ignore on race
+            }
+        }
+        // Create ticket record if missing for confirmed booking
+        if (!booking.ticket && booking.status === 'CONFIRMED' && ticketNo && !ticketNo.startsWith('TKT-')) {
+            try {
+                const created = await prisma.ticket.create({
+                    data: {
+                        bookingId: booking.id,
+                        ticketNumber: String(ticketNo),
+                        pnrNumber: String(pnrNo),
+                        status: 'ISSUED',
+                        bookingSnapshot: booking,
+                    },
+                });
+                booking.ticket = created;
+            }
+            catch {
+                // Safe ignore
             }
         }
         const status = booking.ticket?.status || (booking.status === 'CONFIRMED' ? 'ISSUED' : booking.status);
