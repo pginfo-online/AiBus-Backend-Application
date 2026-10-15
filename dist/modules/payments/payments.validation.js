@@ -4,9 +4,9 @@ exports.simulateWebhookSchema = exports.webhookPayloadSchema = exports.verifyPay
 const zod_1 = require("zod");
 exports.createPaymentIntentSchema = zod_1.z.object({
     bookingId: zod_1.z.string().uuid('Valid bookingId is required'),
-    gateway: zod_1.z.enum(['PHONEPE', 'RAZORPAY', 'MOCK']).default('PHONEPE'),
+    gateway: zod_1.z.enum(['PHONEPE', 'RAZORPAY', 'AUTO', 'MOCK']).default('AUTO'),
     redirectUrl: zod_1.z.string().optional(),
-    paymentMode: zod_1.z.enum(['UPI', 'CARD', 'NETBANKING', 'ALL']).optional(),
+    paymentMode: zod_1.z.enum(['UPI', 'CARD', 'NETBANKING', 'WALLET', 'ALL']).optional(),
 });
 exports.verifyPaymentSchema = zod_1.z.object({
     bookingId: zod_1.z.string().uuid(),

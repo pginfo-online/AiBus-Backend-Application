@@ -21,8 +21,8 @@ export declare const listPaymentsQuerySchema: z.ZodObject<{
         amount: "amount";
     }>>>;
     sortOrder: z.ZodDefault<z.ZodOptional<z.ZodEnum<{
-        asc: "asc";
         desc: "desc";
+        asc: "asc";
     }>>>;
 }, z.core.$strict>;
 export declare const paymentIdParamsSchema: z.ZodObject<{

@@ -19,8 +19,8 @@ export declare const listOperatorsQuerySchema: z.ZodObject<{
         totalRevenue: "totalRevenue";
     }>>>;
     sortOrder: z.ZodDefault<z.ZodOptional<z.ZodEnum<{
-        asc: "asc";
         desc: "desc";
+        asc: "asc";
     }>>>;
 }, z.core.$strict>;
 export declare const operatorIdParamsSchema: z.ZodObject<{

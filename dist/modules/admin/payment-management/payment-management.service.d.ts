@@ -28,6 +28,7 @@ export declare class PaymentManagementService {
             amount: Prisma.Decimal;
             currency: string;
             gateway: string;
+            paymentMethod: string | null;
             gatewayOrderId: string | null;
             gatewayPaymentId: string | null;
             gatewaySignature: string | null;
@@ -108,6 +109,8 @@ export declare class PaymentManagementService {
             status: import(".prisma/client").$Enums.BookingStatus;
             createdAt: Date;
             updatedAt: Date;
+            agentId: string | null;
+            userType: string;
             bookingNumber: string;
             providerName: string;
             providerHoldId: string | null;
@@ -156,6 +159,7 @@ export declare class PaymentManagementService {
         amount: Prisma.Decimal;
         currency: string;
         gateway: string;
+        paymentMethod: string | null;
         gatewayOrderId: string | null;
         gatewayPaymentId: string | null;
         gatewaySignature: string | null;

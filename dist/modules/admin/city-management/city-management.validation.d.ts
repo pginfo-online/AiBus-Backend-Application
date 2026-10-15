@@ -15,8 +15,8 @@ export declare const listCitiesQuerySchema: z.ZodObject<{
         active: "active";
     }>>>;
     sortOrder: z.ZodDefault<z.ZodOptional<z.ZodEnum<{
-        asc: "asc";
         desc: "desc";
+        asc: "asc";
     }>>>;
 }, z.core.$strict>;
 export declare const cityIdParamsSchema: z.ZodObject<{

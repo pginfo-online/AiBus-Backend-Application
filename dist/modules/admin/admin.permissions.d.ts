@@ -17,6 +17,7 @@ export declare const AdminPermission: {
     readonly PAYMENTS_LIST: "payments:list";
     readonly PAYMENTS_VIEW: "payments:view";
     readonly PAYMENTS_RECONCILE: "payments:reconcile";
+    readonly PAYMENT_GATEWAYS_MANAGE: "payments:gateways_manage";
     readonly REFUNDS_LIST: "refunds:list";
     readonly REFUNDS_VIEW: "refunds:view";
     readonly REFUNDS_PROCESS: "refunds:process";
@@ -43,6 +44,16 @@ export declare const AdminPermission: {
     readonly REPORTS_EXPORT: "reports:export";
     readonly PROVIDERS_VIEW: "providers:view";
     readonly PROVIDERS_MANAGE: "providers:manage";
+    readonly AGENTS_LIST: "agents:list";
+    readonly AGENTS_VIEW: "agents:view";
+    readonly AGENTS_KYC_REVIEW: "agents:kyc_review";
+    readonly AGENTS_SUSPEND: "agents:suspend";
+    readonly AGENTS_CREDIT_MANAGE: "agents:credit_manage";
+    readonly COMMISSIONS_LIST: "commissions:list";
+    readonly COMMISSIONS_MANAGE: "commissions:manage";
+    readonly LEDGER_VIEW: "ledger:view";
+    readonly LEDGER_RECONCILE: "ledger:reconcile";
+    readonly LEDGER_ADJUST: "ledger:adjust";
 };
 export type AdminPermissionType = typeof AdminPermission[keyof typeof AdminPermission];
 /**

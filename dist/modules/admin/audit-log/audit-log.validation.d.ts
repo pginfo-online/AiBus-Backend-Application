@@ -15,8 +15,8 @@ export declare const listAuditLogsQuerySchema: z.ZodObject<{
         action: "action";
     }>>>;
     sortOrder: z.ZodDefault<z.ZodOptional<z.ZodEnum<{
-        asc: "asc";
         desc: "desc";
+        asc: "asc";
     }>>>;
 }, z.core.$strict>;
 export declare const auditLogIdParamsSchema: z.ZodObject<{

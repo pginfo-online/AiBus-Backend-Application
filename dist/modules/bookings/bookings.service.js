@@ -8,6 +8,7 @@ const constants_1 = require("../../shared/constants");
 const errors_1 = require("../../shared/errors");
 const logger_1 = require("../../infrastructure/logger");
 const client_1 = require("@prisma/client");
+const commission_1 = require("../../infrastructure/commission");
 class BookingsService {
     static instance;
     gdsAdapter;
@@ -21,8 +22,35 @@ class BookingsService {
         }
         return BookingsService.instance;
     }
-    async createBooking(input, userId) {
+    async createBooking(input, userId, explicitAgentId) {
         const prisma = (0, database_1.getPrismaClient)();
+        // Determine agent context
+        let agentId = explicitAgentId || null;
+        if (!agentId && userId && prisma.agentStaff) {
+            const staff = await prisma.agentStaff.findFirst({
+                where: { userId, isActive: true },
+                include: { agent: true },
+            });
+            if (staff?.agent) {
+                if (staff.agent.status !== client_1.AgentStatus.APPROVED) {
+                    throw new errors_1.AuthorizationError(`Agent account is not approved to create bookings. Current status: ${staff.agent.status}`);
+                }
+                agentId = staff.agent.id;
+            }
+        }
+        // Resolve B2B commission if agent booking
+        let commissionResult = null;
+        if (agentId) {
+            commissionResult = await (0, commission_1.resolveCommission)({
+                agentId,
+                grossFare: Number(input.totalFare),
+                baseFare: Number(input.baseFare),
+                fromCityId: input.fromCityId,
+                toCityId: input.toCityId,
+                operatorName: input.operatorName,
+                journeyDate: input.journeyDate,
+            });
+        }
         // 1. Verify hold exists if a valid UUID holdId was provided
         let providerHoldId = `HOLD-GDS-${Date.now()}`;
         let holdRecordId = null;
@@ -55,11 +83,13 @@ class BookingsService {
         }
         // 2. Generate unique booking number
         const bookingNumber = this.generateBookingNumber();
-        // 3. Persist Booking, Seats, Passengers in atomic transaction
+        // 3. Persist Booking, Seats, Passengers, and CommissionSnapshot in atomic transaction
         const booking = await prisma.$transaction(async (tx) => {
             const createdBooking = await tx.booking.create({
                 data: {
                     userId: userId ?? null,
+                    agentId: agentId ?? null,
+                    userType: agentId ? 'AGENT' : 'CUSTOMER',
                     bookingNumber,
                     status: client_1.BookingStatus.HELD,
                     providerName: 'GDS',
@@ -114,6 +144,22 @@ class BookingsService {
                     passengers: true,
                 },
             });
+            // Save immutable CommissionSnapshot for B2B booking
+            if (agentId && commissionResult) {
+                await tx.commissionSnapshot.create({
+                    data: {
+                        bookingId: createdBooking.id,
+                        agentId,
+                        ruleId: commissionResult.ruleId,
+                        ruleSnapshot: commissionResult.ruleSnapshot ? commissionResult.ruleSnapshot : {},
+                        grossFare: input.totalFare,
+                        baseFareForCommission: input.baseFare,
+                        commissionRate: commissionResult.commissionRate,
+                        commissionAmt: commissionResult.commissionAmt,
+                        netFare: commissionResult.netFare,
+                    },
+                });
+            }
             // Link hold to booking if holdRecordId exists
             if (holdRecordId) {
                 await tx.seatHold.update({
@@ -278,8 +324,17 @@ class BookingsService {
     }
     async getUserBookings(userId) {
         const prisma = (0, database_1.getPrismaClient)();
+        const staff = prisma.agentStaff
+            ? await prisma.agentStaff.findFirst({
+                where: { userId, isActive: true },
+                select: { agentId: true },
+            })
+            : null;
+        const where = staff?.agentId
+            ? { agentId: staff.agentId }
+            : { userId };
         return prisma.booking.findMany({
-            where: { userId },
+            where,
             include: {
                 seats: true,
                 passengers: true,
@@ -287,6 +342,7 @@ class BookingsService {
                 payments: true,
                 cancellations: true,
                 refunds: true,
+                commissionSnapshot: true,
             },
             orderBy: { createdAt: 'desc' },
         });

@@ -11,7 +11,8 @@ class BookingsController {
     createBooking = async (req, res, next) => {
         try {
             const userId = req.user?.sub;
-            const booking = await this.bookingsService.createBooking(req.body, userId);
+            const agentId = req.agentId;
+            const booking = await this.bookingsService.createBooking(req.body, userId, agentId);
             response_1.ApiResponse.created(res, booking, 'Booking initiated successfully');
         }
         catch (error) {

@@ -29,4 +29,14 @@ export declare function addJob<T>(queueName: string, jobName: string, data: T, o
     };
     jobId?: string;
 }): Promise<Job<T> | null>;
+/**
+ * Schedule a recurring/cron job using BullMQ JobScheduler. Gracefully degrades if Redis is unavailable.
+ */
+export declare function scheduleRecurringJob<T>(queueName: string, schedulerId: string, repeatOpts: {
+    pattern?: string;
+    every?: number;
+}, jobTemplate?: {
+    name?: string;
+    data?: T;
+}): Promise<void>;
 //# sourceMappingURL=index.d.ts.map

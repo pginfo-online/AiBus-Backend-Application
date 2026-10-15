@@ -5,7 +5,7 @@ export declare class BookingsService {
     private bookingLogger;
     private constructor();
     static getInstance(): BookingsService;
-    createBooking(input: CreateBookingInput, userId?: string): Promise<{
+    createBooking(input: CreateBookingInput, userId?: string, explicitAgentId?: string): Promise<{
         seats: {
             id: string;
             bookingId: string;
@@ -36,6 +36,8 @@ export declare class BookingsService {
         status: import(".prisma/client").$Enums.BookingStatus;
         createdAt: Date;
         updatedAt: Date;
+        agentId: string | null;
+        userType: string;
         bookingNumber: string;
         providerName: string;
         providerHoldId: string | null;
@@ -106,6 +108,8 @@ export declare class BookingsService {
         status: import(".prisma/client").$Enums.BookingStatus;
         createdAt: Date;
         updatedAt: Date;
+        agentId: string | null;
+        userType: string;
         bookingNumber: string;
         providerName: string;
         providerHoldId: string | null;
@@ -161,10 +165,10 @@ export declare class BookingsService {
             createdAt: Date;
             updatedAt: Date;
             bookingId: string;
+            storageKey: string | null;
             ticketNumber: string;
             pnrNumber: string;
             pdfUrl: string | null;
-            storageKey: string | null;
             bookingSnapshot: import("@prisma/client/runtime/library").JsonValue;
             generatedAt: Date;
         } | null;
@@ -180,6 +184,7 @@ export declare class BookingsService {
             amount: import("@prisma/client/runtime/library").Decimal;
             currency: string;
             gateway: string;
+            paymentMethod: string | null;
             gatewayOrderId: string | null;
             gatewayPaymentId: string | null;
             gatewaySignature: string | null;
@@ -241,6 +246,8 @@ export declare class BookingsService {
         status: import(".prisma/client").$Enums.BookingStatus;
         createdAt: Date;
         updatedAt: Date;
+        agentId: string | null;
+        userType: string;
         bookingNumber: string;
         providerName: string;
         providerHoldId: string | null;
@@ -296,12 +303,27 @@ export declare class BookingsService {
             createdAt: Date;
             updatedAt: Date;
             bookingId: string;
+            storageKey: string | null;
             ticketNumber: string;
             pnrNumber: string;
             pdfUrl: string | null;
-            storageKey: string | null;
             bookingSnapshot: import("@prisma/client/runtime/library").JsonValue;
             generatedAt: Date;
+        } | null;
+        commissionSnapshot: {
+            id: string;
+            createdAt: Date;
+            agentId: string;
+            bookingId: string;
+            ruleId: string | null;
+            ruleSnapshot: import("@prisma/client/runtime/library").JsonValue;
+            grossFare: import("@prisma/client/runtime/library").Decimal;
+            baseFareForCommission: import("@prisma/client/runtime/library").Decimal;
+            commissionRate: import("@prisma/client/runtime/library").Decimal;
+            commissionAmt: import("@prisma/client/runtime/library").Decimal;
+            netFare: import("@prisma/client/runtime/library").Decimal;
+            reversedAt: Date | null;
+            reversalAmt: import("@prisma/client/runtime/library").Decimal | null;
         } | null;
         payments: {
             metadata: import("@prisma/client/runtime/library").JsonValue | null;
@@ -315,6 +337,7 @@ export declare class BookingsService {
             amount: import("@prisma/client/runtime/library").Decimal;
             currency: string;
             gateway: string;
+            paymentMethod: string | null;
             gatewayOrderId: string | null;
             gatewayPaymentId: string | null;
             gatewaySignature: string | null;
@@ -376,6 +399,8 @@ export declare class BookingsService {
         status: import(".prisma/client").$Enums.BookingStatus;
         createdAt: Date;
         updatedAt: Date;
+        agentId: string | null;
+        userType: string;
         bookingNumber: string;
         providerName: string;
         providerHoldId: string | null;

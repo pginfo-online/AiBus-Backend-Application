@@ -120,10 +120,10 @@ export declare class UserManagementService {
                 createdAt: Date;
                 updatedAt: Date;
                 bookingId: string;
+                storageKey: string | null;
                 ticketNumber: string;
                 pnrNumber: string;
                 pdfUrl: string | null;
-                storageKey: string | null;
                 bookingSnapshot: Prisma.JsonValue;
                 generatedAt: Date;
             } | null;
@@ -139,6 +139,7 @@ export declare class UserManagementService {
                 amount: Prisma.Decimal;
                 currency: string;
                 gateway: string;
+                paymentMethod: string | null;
                 gatewayOrderId: string | null;
                 gatewayPaymentId: string | null;
                 gatewaySignature: string | null;
@@ -164,6 +165,8 @@ export declare class UserManagementService {
             status: import(".prisma/client").$Enums.BookingStatus;
             createdAt: Date;
             updatedAt: Date;
+            agentId: string | null;
+            userType: string;
             bookingNumber: string;
             providerName: string;
             providerHoldId: string | null;
@@ -218,6 +221,7 @@ export declare class UserManagementService {
             amount: Prisma.Decimal;
             currency: string;
             gateway: string;
+            paymentMethod: string | null;
             gatewayOrderId: string | null;
             gatewayPaymentId: string | null;
             gatewaySignature: string | null;

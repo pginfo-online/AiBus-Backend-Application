@@ -8,6 +8,7 @@ const constants_1 = require("../../shared/constants");
 const errors_1 = require("../../shared/errors");
 const logger_1 = require("../../infrastructure/logger");
 const client_1 = require("@prisma/client");
+const ledger_1 = require("../../infrastructure/ledger");
 class CancellationsService {
     static instance;
     gdsAdapter;
@@ -69,11 +70,11 @@ class CancellationsService {
         const booking = isUuid
             ? await prisma.booking.findUnique({
                 where: { id: bookingIdentifier },
-                include: { seats: true, payments: true },
+                include: { seats: true, payments: true, commissionSnapshot: true },
             })
             : await prisma.booking.findUnique({
                 where: { bookingNumber: bookingIdentifier },
-                include: { seats: true, payments: true },
+                include: { seats: true, payments: true, commissionSnapshot: true },
             });
         if (!booking) {
             throw new errors_1.NotFoundError('Booking not found');
@@ -101,7 +102,19 @@ class CancellationsService {
             if (cancelRes.Status !== 1) {
                 throw new errors_1.ProviderError('GDS', cancelRes.Message || 'Failed to cancel seats with provider');
             }
-            // 3. Atomically update DB records
+            const refundAmount = Number(cancelRes.RefundAmount ?? 0);
+            let commissionReversal = 0;
+            let netRefundToAgent = refundAmount;
+            if (booking.agentId && booking.commissionSnapshot) {
+                const totalBookingFare = Number(booking.totalFare);
+                const origCommission = Number(booking.commissionSnapshot.commissionAmt);
+                if (totalBookingFare > 0) {
+                    commissionReversal = Math.round(((refundAmount / totalBookingFare) * origCommission) * 100) / 100;
+                }
+                netRefundToAgent = Math.max(0, refundAmount - commissionReversal);
+            }
+            const isAgentBooking = Boolean(booking.agentId);
+            // 3. Atomically update DB records & financials
             const cancellationResult = await prisma.$transaction(async (tx) => {
                 // Record cancellation
                 const cancellation = await tx.cancellation.create({
@@ -115,7 +128,7 @@ class CancellationsService {
                         providerNewPnrNo: cancelRes.NewPNRNo ? String(cancelRes.NewPNRNo) : null,
                         chargePct: Number(cancelRes.ChargePct ?? 0),
                         chargeAmt: Number(cancelRes.ChargeAmt ?? cancelRes.CancellationCharge ?? 0),
-                        refundAmount: Number(cancelRes.RefundAmount ?? 0),
+                        refundAmount,
                         totalFare: Number(cancelRes.TotalFare || booking.totalFare),
                         reason,
                     },
@@ -136,26 +149,73 @@ class CancellationsService {
                         paymentId: payment?.id ?? null,
                         cancellationId: cancellation.id,
                         userId: userId ?? booking.userId ?? null,
-                        amount: Number(cancelRes.RefundAmount ?? 0),
-                        status: client_1.RefundStatus.PENDING,
-                        destination: client_1.RefundDestination.ORIGINAL_PAYMENT_METHOD,
-                        reason: reason || 'Customer requested seat cancellation',
+                        amount: refundAmount,
+                        status: isAgentBooking ? client_1.RefundStatus.COMPLETED : client_1.RefundStatus.PENDING,
+                        destination: isAgentBooking ? client_1.RefundDestination.WALLET : client_1.RefundDestination.ORIGINAL_PAYMENT_METHOD,
+                        reason: reason || 'Seat cancellation processed',
+                        completedAt: isAgentBooking ? new Date() : null,
                     },
                 });
-                return { cancellation, refund, providerResponse: cancelRes };
+                // If agent booking: credit agent wallet and post balanced double-entry ledger reversals
+                if (booking.agentId) {
+                    await tx.agentWallet.update({
+                        where: { agentId: booking.agentId },
+                        data: {
+                            cashBalance: { increment: netRefundToAgent },
+                            totalRefunds: { increment: refundAmount },
+                            version: { increment: 1 },
+                        },
+                    });
+                    const idempotencyPrefix = `CANCEL-${cancellation.id}-${Date.now()}`;
+                    const ledgerLines = (0, ledger_1.buildRefundLines)({
+                        bookingId: booking.id,
+                        cancellationId: cancellation.id,
+                        agentId: booking.agentId,
+                        refundAmount,
+                        commissionReversal,
+                        idempotencyPrefix,
+                    });
+                    const ledgerData = (0, ledger_1.buildLedgerPostingData)({
+                        agentId: booking.agentId,
+                        bookingId: booking.id,
+                        cancellationId: cancellation.id,
+                        referenceId: booking.bookingNumber,
+                        createdBy: userId || 'SYSTEM',
+                        lines: ledgerLines,
+                    });
+                    await tx.ledgerEntry.createMany({ data: ledgerData, skipDuplicates: true });
+                    if (booking.commissionSnapshot && commissionReversal > 0) {
+                        await tx.commissionSnapshot.update({
+                            where: { id: booking.commissionSnapshot.id },
+                            data: {
+                                reversedAt: new Date(),
+                                reversalAmt: commissionReversal,
+                            },
+                        });
+                    }
+                }
+                return {
+                    cancellation,
+                    refund,
+                    providerResponse: cancelRes,
+                    commissionReversal,
+                    netRefundToAgent: isAgentBooking ? netRefundToAgent : undefined,
+                };
             });
-            // 4. Enqueue refund processing job
-            try {
-                await (0, queues_1.addJob)(constants_1.QueueName.REFUND_PROCESSING, 'process-refund', {
-                    refundId: cancellationResult.refund.id,
-                    bookingId: booking.id,
-                    amount: Number(cancelRes.RefundAmount ?? 0),
-                });
+            // 4. Enqueue gateway refund processing job only for customer credit-card/UPI payments
+            if (!isAgentBooking && refundAmount > 0) {
+                try {
+                    await (0, queues_1.addJob)(constants_1.QueueName.REFUND_PROCESSING, 'process-refund', {
+                        refundId: cancellationResult.refund.id,
+                        bookingId: booking.id,
+                        amount: refundAmount,
+                    });
+                }
+                catch (queueErr) {
+                    this.cancelLogger.warn({ queueErr }, 'Failed to queue refund processing job');
+                }
             }
-            catch (queueErr) {
-                this.cancelLogger.warn({ queueErr }, 'Failed to queue refund processing job');
-            }
-            this.cancelLogger.info({ bookingId: booking.id, refundAmount: cancelRes.RefundAmount }, 'Cancellation successful and refund queued');
+            this.cancelLogger.info({ bookingId: booking.id, refundAmount, isAgentBooking }, 'Cancellation completed and financials settled');
             return cancellationResult;
         }
         catch (err) {

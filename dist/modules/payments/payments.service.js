@@ -1,4 +1,37 @@
 "use strict";
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
 var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
@@ -13,6 +46,8 @@ const bookings_service_1 = require("../bookings/bookings.service");
 const errors_1 = require("../../shared/errors");
 const logger_1 = require("../../infrastructure/logger");
 const client_1 = require("@prisma/client");
+const ledger_1 = require("../../infrastructure/ledger");
+const payments_1 = require("../../infrastructure/payments");
 const paymentLogger = logger_1.logger.child({ module: 'payments-service' });
 exports.devSimulationStore = new Map();
 // ---------------------------------------------------------------------------
@@ -242,81 +277,105 @@ class PaymentsService {
         if (!eligibleStatuses.includes(booking.status)) {
             throw new errors_1.ValidationError(`Cannot initiate payment for booking in status ${booking.status}`);
         }
-        // Verify seat hold is still active if present
+        // Verify seat hold validity and enforce cutoff threshold (redBus / AbhiBus practice)
         const latestHold = await prisma.seatHold.findFirst({
             where: { bookingId: booking.id },
             orderBy: { createdAt: 'desc' },
         });
-        if (latestHold && new Date(latestHold.expiresAt).getTime() < Date.now()) {
-            throw new errors_1.ValidationError('Seat hold has expired. Please reselect your seats.');
+        if (latestHold) {
+            const now = Date.now();
+            const expiresAt = new Date(latestHold.expiresAt).getTime();
+            if (expiresAt < now) {
+                throw new errors_1.ValidationError('Seat hold has expired. Please reselect your seats.');
+            }
+            const cutoffMs = (env_1.env.PAYMENT_HOLD_CUTOFF_SECONDS || 90) * 1000;
+            if (expiresAt - now < cutoffMs) {
+                throw new errors_1.ValidationError(`Seat hold is expiring in less than ${env_1.env.PAYMENT_HOLD_CUTOFF_SECONDS || 90} seconds. Please reselect your seats to ensure successful confirmation.`);
+            }
         }
-        // Idempotency: return existing PENDING payment if one exists
+        const amount = Number(booking.totalFare);
+        // Idempotency: return existing PENDING payment if matching gateway and not expired
         const existingPayment = await prisma.payment.findFirst({
             where: { bookingId: booking.id, status: client_1.PaymentStatus.PENDING },
             orderBy: { createdAt: 'desc' },
         });
-        const merchantTxnId = existingPayment?.merchantTxnId || `TXN-${booking.bookingNumber}-${Date.now()}`;
-        const amount = Number(booking.totalFare);
-        const amountInPaise = Math.round(amount * 100);
-        // Track initial state in development simulation store
-        if (env_1.isDevelopment || env_1.isTest) {
-            if (!exports.devSimulationStore.has(merchantTxnId)) {
-                exports.devSimulationStore.set(merchantTxnId, {
-                    merchantTxnId,
-                    status: 'PENDING',
-                });
-            }
+        if (existingPayment &&
+            (!input.gateway || input.gateway === 'AUTO' || existingPayment.gateway === input.gateway)) {
+            const meta = existingPayment.metadata || {};
+            return {
+                paymentId: existingPayment.id,
+                merchantTxnId: existingPayment.merchantTxnId,
+                amount,
+                currency: 'INR',
+                gateway: existingPayment.gateway,
+                paymentUrl: meta.paymentUrl ||
+                    `${env_1.env.PHONEPE_REDIRECT_URL || 'http://localhost:5173/payment-result'}?bookingId=${booking.id}&merchantTxnId=${existingPayment.merchantTxnId}`,
+                upiIntentUrl: meta.upiIntentUrl,
+                gatewayOrderId: existingPayment.gatewayOrderId,
+                sdkPayload: meta.sdkPayload,
+            };
         }
-        // Default redirect to web frontend or deep link scheme
-        const baseRedirect = input.redirectUrl ||
-            env_1.env.PHONEPE_REDIRECT_URL ||
-            'http://localhost:5173/payment-result';
-        const redirectUrlWithParams = `${baseRedirect}${baseRedirect.includes('?') ? '&' : '?'}bookingId=${booking.id}&merchantTxnId=${merchantTxnId}`;
-        // Initiate PhonePe V2 checkout
-        const checkoutResult = await initiatePhonePeCheckout({
-            merchantOrderId: merchantTxnId,
-            amountInPaise,
-            redirectUrl: redirectUrlWithParams,
-            paymentMode: input.paymentMode,
-        });
-        let paymentId = existingPayment?.id;
-        if (!existingPayment) {
-            // Create payment record
-            const payment = await prisma.payment.create({
-                data: {
-                    bookingId: booking.id,
-                    userId: userId ?? booking.userId ?? null,
-                    amount,
-                    currency: 'INR',
-                    status: client_1.PaymentStatus.PENDING,
-                    gateway: input.gateway || 'PHONEPE',
-                    merchantTxnId,
-                    gatewayOrderId: checkoutResult.orderId,
-                },
-            });
-            paymentId = payment.id;
-            // Update booking status to PAYMENT_PENDING
-            await prisma.booking.update({
-                where: { id: booking.id },
-                data: { status: client_1.BookingStatus.PAYMENT_PENDING },
-            });
-        }
-        else if (booking.status === client_1.BookingStatus.PAYMENT_FAILED) {
-            // Allow retry on existing booking
-            await prisma.booking.update({
-                where: { id: booking.id },
-                data: { status: client_1.BookingStatus.PAYMENT_PENDING },
-            });
-        }
-        paymentLogger.info({ bookingId: booking.id, paymentId, merchantTxnId, amount, orderId: checkoutResult.orderId }, 'PhonePe V2 Payment intent created');
-        return {
-            paymentId: paymentId || `PAY-${Date.now()}`,
-            merchantTxnId,
+        // Call PaymentOrchestrator to generate intent with automatic failover
+        const orchestrator = payments_1.PaymentOrchestrator.getInstance();
+        const intentResult = await orchestrator.createPaymentIntentWithFallback({
+            bookingId: booking.id,
+            bookingNumber: booking.bookingNumber,
             amount,
             currency: 'INR',
-            gateway: input.gateway || 'PHONEPE',
-            paymentUrl: checkoutResult.redirectUrl,
-            gatewayOrderId: checkoutResult.orderId,
+            customerName: booking.contactName,
+            customerEmail: booking.contactEmail,
+            customerPhone: booking.contactPhone,
+            paymentMode: input.paymentMode,
+            redirectUrl: input.redirectUrl,
+        }, input.gateway);
+        // Track initial state in development simulation store
+        if (env_1.isDevelopment || env_1.isTest) {
+            exports.devSimulationStore.set(intentResult.merchantTxnId, {
+                merchantTxnId: intentResult.merchantTxnId,
+                status: 'PENDING',
+            });
+        }
+        // Create payment record
+        const payment = await prisma.payment.create({
+            data: {
+                bookingId: booking.id,
+                userId: userId ?? booking.userId ?? null,
+                amount,
+                currency: 'INR',
+                status: client_1.PaymentStatus.PENDING,
+                gateway: intentResult.gateway,
+                paymentMethod: input.paymentMode,
+                merchantTxnId: intentResult.merchantTxnId,
+                gatewayOrderId: intentResult.gatewayOrderId,
+                metadata: {
+                    paymentUrl: intentResult.paymentUrl,
+                    upiIntentUrl: intentResult.upiIntentUrl,
+                    sdkPayload: intentResult.sdkPayload,
+                },
+            },
+        });
+        // Update booking status to PAYMENT_PENDING
+        await prisma.booking.update({
+            where: { id: booking.id },
+            data: { status: client_1.BookingStatus.PAYMENT_PENDING },
+        });
+        paymentLogger.info({
+            bookingId: booking.id,
+            paymentId: payment.id,
+            gateway: intentResult.gateway,
+            merchantTxnId: intentResult.merchantTxnId,
+            amount,
+        }, 'Payment intent created successfully via orchestrator');
+        return {
+            paymentId: payment.id,
+            merchantTxnId: intentResult.merchantTxnId,
+            amount,
+            currency: 'INR',
+            gateway: intentResult.gateway,
+            paymentUrl: intentResult.paymentUrl,
+            upiIntentUrl: intentResult.upiIntentUrl,
+            gatewayOrderId: intentResult.gatewayOrderId,
+            sdkPayload: intentResult.sdkPayload,
         };
     }
     async verifyPayment(input) {
@@ -355,20 +414,26 @@ class PaymentsService {
             };
         }
         // -----------------------------------------------------------------------
-        // CRITICAL: Server-side payment verification via PhonePe Status Check API
+        // CRITICAL: Server-side payment verification via PaymentOrchestrator
         // -----------------------------------------------------------------------
+        const gateway = payment.gateway || 'RAZORPAY';
+        const orchestrator = payments_1.PaymentOrchestrator.getInstance();
         let gatewayVerification;
         try {
-            gatewayVerification = await checkPhonePePaymentStatus(input.merchantTxnId, input);
+            gatewayVerification = await orchestrator.verifyPayment(gateway, {
+                merchantTxnId: input.merchantTxnId,
+                gatewayOrderId: input.gatewayOrderId || payment.gatewayOrderId || undefined,
+                gatewayPaymentId: input.gatewayPaymentId || undefined,
+                gatewaySignature: input.gatewaySignature || undefined,
+            });
         }
         catch (gatewayErr) {
-            paymentLogger.warn({ merchantTxnId: input.merchantTxnId, err: gatewayErr.message }, 'PhonePe status check failed — returning PAYMENT_PENDING for retry');
+            paymentLogger.warn({ merchantTxnId: input.merchantTxnId, gateway, err: gatewayErr.message }, 'Payment status check failed — returning PAYMENT_PENDING for retry');
             return { status: 'PENDING', payment, booking: currentBooking };
         }
-        paymentLogger.info({ merchantTxnId: input.merchantTxnId, state: gatewayVerification.state, success: gatewayVerification.success }, 'PhonePe gateway verification result');
+        paymentLogger.info({ merchantTxnId: input.merchantTxnId, gateway, status: gatewayVerification.status, success: gatewayVerification.success }, 'Payment gateway verification result');
         // Handle pending status
-        if (gatewayVerification.state === 'PENDING' ||
-            gatewayVerification.state === 'PAYMENT_INITIATED') {
+        if (gatewayVerification.status === 'PENDING') {
             return { status: 'PENDING', payment, booking: currentBooking };
         }
         // Handle payment failure
@@ -383,8 +448,8 @@ class PaymentsService {
                     data: { status: client_1.BookingStatus.PAYMENT_FAILED },
                 }),
             ]);
-            paymentLogger.warn({ merchantTxnId: input.merchantTxnId, state: gatewayVerification.state }, 'Payment failed or declined');
-            throw new errors_1.PaymentFailedError('Payment failed or was declined by issuing bank');
+            paymentLogger.warn({ merchantTxnId: input.merchantTxnId, gateway, reason: gatewayVerification.failureReason }, 'Payment failed or declined');
+            throw new errors_1.PaymentFailedError(gatewayVerification.failureReason || 'Payment failed or was declined by issuing bank');
         }
         // -----------------------------------------------------------------------
         // Payment SUCCESS: mark payment, then call GDS BookSeats
@@ -394,10 +459,49 @@ class PaymentsService {
             where: { id: payment.bookingId, status: client_1.BookingStatus.PAYMENT_PENDING },
             data: { status: client_1.BookingStatus.PAYMENT_SUCCESS },
         });
-        // If updateResult.count === 0, another request already claimed it — return current state
+        // If updateResult.count === 0, another request already claimed it
         if (updateResult.count === 0) {
-            paymentLogger.warn({ bookingId: payment.bookingId }, 'Booking already being processed by another request (concurrent verification)');
             const latestBooking = await prisma.booking.findUnique({ where: { id: payment.bookingId } });
+            // Edge-case duplicate debit handling (redBus / AbhiBus practice)
+            if (latestBooking && latestBooking.status === client_1.BookingStatus.CONFIRMED) {
+                paymentLogger.warn({ bookingId: payment.bookingId, merchantTxnId: payment.merchantTxnId }, 'DUPLICATE PAYMENT DETECTED: Booking already confirmed; queuing automated refund');
+                await prisma.payment.update({
+                    where: { id: payment.id },
+                    data: {
+                        status: client_1.PaymentStatus.PROCESSING,
+                        gatewayPaymentId: gatewayVerification.gatewayPaymentId || input.gatewayPaymentId,
+                    },
+                });
+                try {
+                    const { addJob } = await Promise.resolve().then(() => __importStar(require('../../infrastructure/queues')));
+                    const refund = await prisma.refund.create({
+                        data: {
+                            bookingId: payment.bookingId,
+                            paymentId: payment.id,
+                            userId: payment.userId,
+                            amount: Number(payment.amount),
+                            status: 'PENDING',
+                            reason: 'Automated refund for duplicate payment attempt',
+                        },
+                    });
+                    await addJob('refund-processing', 'process-refund', {
+                        refundId: refund.id,
+                        bookingId: payment.bookingId,
+                        amount: Number(payment.amount),
+                        gatewayPaymentId: gatewayVerification.gatewayPaymentId || input.gatewayPaymentId,
+                        merchantTxnId: payment.merchantTxnId,
+                    });
+                }
+                catch (qErr) {
+                    paymentLogger.error({ qErr }, 'Failed to queue automated refund for duplicate payment');
+                }
+                return {
+                    status: 'SUCCESS',
+                    payment,
+                    booking: latestBooking,
+                };
+            }
+            paymentLogger.warn({ bookingId: payment.bookingId }, 'Booking already being processed by another request (concurrent verification)');
             return {
                 status: latestBooking?.status === client_1.BookingStatus.CONFIRMED ? 'SUCCESS' : 'PENDING',
                 payment,
@@ -409,9 +513,9 @@ class PaymentsService {
             where: { id: payment.id },
             data: {
                 status: client_1.PaymentStatus.SUCCESS,
-                gatewayOrderId: input.gatewayOrderId ?? gatewayVerification.transactionId ?? `ORDER-${Date.now()}`,
-                gatewayPaymentId: input.gatewayPaymentId ?? gatewayVerification.transactionId ?? `PAY-${Date.now()}`,
-                gatewaySignature: input.gatewaySignature ?? 'VERIFIED_VIA_STATUS_API',
+                gatewayOrderId: input.gatewayOrderId ?? gatewayVerification.gatewayOrderId ?? payment.gatewayOrderId,
+                gatewayPaymentId: input.gatewayPaymentId ?? gatewayVerification.gatewayPaymentId ?? `PAY-${Date.now()}`,
+                gatewaySignature: input.gatewaySignature ?? 'VERIFIED',
                 webhookVerified: true,
             },
         });
@@ -580,6 +684,95 @@ class PaymentsService {
         }
     }
     /**
+     * Razorpay Webhook Ingestion & Processing
+     * Verifies cryptographic HMAC SHA256 signature and processes captured/failed events
+     */
+    async handleRazorpayWebhook(rawBody, headers) {
+        const prisma = (0, database_1.getPrismaClient)();
+        const orchestrator = payments_1.PaymentOrchestrator.getInstance();
+        const razorpayAdapter = orchestrator.getAdapter('RAZORPAY');
+        const bodyString = typeof rawBody === 'string' ? rawBody : JSON.stringify(rawBody);
+        const isValid = razorpayAdapter.verifyWebhookSignature(bodyString, headers);
+        const eventId = `wh_rzp_${Date.now()}_${Math.random().toString(36).substring(7)}`;
+        // Persist webhook event for audit and idempotency
+        const webhookEvent = await prisma.webhookEvent.create({
+            data: {
+                eventId,
+                gateway: 'RAZORPAY',
+                eventType: 'PAYMENT_STATUS_UPDATE',
+                payload: { raw: bodyString },
+                signature: headers['x-razorpay-signature'] || undefined,
+                verified: isValid,
+            },
+        });
+        if (!isValid && !env_1.isDevelopment && !env_1.isTest) {
+            await prisma.webhookEvent.update({
+                where: { id: webhookEvent.id },
+                data: { processingError: 'Razorpay webhook signature verification failed' },
+            });
+            paymentLogger.error({ eventId }, 'Rejected unverified Razorpay webhook in production');
+            return { status: 'REJECTED', reason: 'Invalid signature' };
+        }
+        try {
+            const parsed = razorpayAdapter.parseWebhookPayload(bodyString);
+            paymentLogger.info({ eventId, eventType: parsed.eventType, merchantTxnId: parsed.merchantTxnId }, 'Processing Razorpay webhook event');
+            if (parsed.merchantTxnId) {
+                // Look up payment by merchantTxnId or gatewayOrderId
+                let payment = await prisma.payment.findUnique({
+                    where: { merchantTxnId: parsed.merchantTxnId },
+                });
+                if (!payment && parsed.gatewayOrderId) {
+                    payment = await prisma.payment.findFirst({
+                        where: { gatewayOrderId: parsed.gatewayOrderId },
+                    });
+                }
+                if (payment) {
+                    if (parsed.status === 'SUCCESS') {
+                        await this.verifyPayment({
+                            bookingId: payment.bookingId,
+                            merchantTxnId: payment.merchantTxnId,
+                            gatewayOrderId: parsed.gatewayOrderId || payment.gatewayOrderId || undefined,
+                            gatewayPaymentId: parsed.gatewayPaymentId,
+                        }).catch((err) => {
+                            paymentLogger.warn({ err: err.message, merchantTxnId: payment?.merchantTxnId }, 'verifyPayment from Razorpay webhook encountered non-blocking warning');
+                        });
+                    }
+                    else if (parsed.status === 'FAILED') {
+                        if (payment.status === client_1.PaymentStatus.PENDING) {
+                            await prisma.$transaction([
+                                prisma.payment.update({
+                                    where: { id: payment.id },
+                                    data: { status: client_1.PaymentStatus.FAILED },
+                                }),
+                                prisma.booking.update({
+                                    where: { id: payment.bookingId, status: client_1.BookingStatus.PAYMENT_PENDING },
+                                    data: { status: client_1.BookingStatus.PAYMENT_FAILED },
+                                }),
+                            ]);
+                            paymentLogger.warn({ merchantTxnId: payment.merchantTxnId }, 'Payment marked FAILED via Razorpay webhook');
+                        }
+                    }
+                }
+                else {
+                    paymentLogger.warn({ merchantTxnId: parsed.merchantTxnId }, 'Razorpay webhook received for unknown merchantTxnId');
+                }
+            }
+            await prisma.webhookEvent.update({
+                where: { id: webhookEvent.id },
+                data: { processed: true, processedAt: new Date() },
+            });
+            return { status: 'OK' };
+        }
+        catch (err) {
+            await prisma.webhookEvent.update({
+                where: { id: webhookEvent.id },
+                data: { processingError: err.message },
+            });
+            paymentLogger.error({ err: err.message, eventId }, 'Razorpay webhook processing error');
+            throw err;
+        }
+    }
+    /**
      * Controlled Webhook Simulator for Local Development & Testing
      * Only active when NODE_ENV !== 'production'.
      * Constructs valid PhonePe signed webhook payload and exercises production webhook handler.
@@ -658,6 +851,138 @@ class PaymentsService {
             booking: updatedBooking,
             bookingStatus: updatedBooking?.status,
             ticket: ticket || updatedBooking?.ticket,
+        };
+    }
+    /**
+     * B2B Agent Wallet Debit Payment
+     * Deducts net fare (grossFare - commissionAmt) from agent wallet with optimistic concurrency,
+     * posts balanced double-entry ledger entries, and confirms booking.
+     */
+    async payWithWallet(bookingId, agentId, userId) {
+        const prisma = (0, database_1.getPrismaClient)();
+        const booking = await prisma.booking.findUnique({
+            where: { id: bookingId },
+            include: {
+                commissionSnapshot: true,
+            },
+        });
+        if (!booking) {
+            throw new errors_1.NotFoundError('Booking not found');
+        }
+        if (booking.agentId !== agentId) {
+            throw new errors_1.AuthorizationError('Booking does not belong to this agent organization');
+        }
+        if (booking.status === client_1.BookingStatus.CONFIRMED) {
+            return { success: true, booking, message: 'Booking is already confirmed' };
+        }
+        if (booking.status !== client_1.BookingStatus.HELD && booking.status !== client_1.BookingStatus.PAYMENT_PENDING) {
+            throw new errors_1.ValidationError(`Cannot pay for booking in status ${booking.status}`);
+        }
+        // Verify hold validity if hold exists
+        const latestHold = await prisma.seatHold.findFirst({
+            where: { bookingId: booking.id },
+            orderBy: { createdAt: 'desc' },
+        });
+        if (latestHold && new Date(latestHold.expiresAt).getTime() < Date.now()) {
+            throw new errors_1.ValidationError('Seat hold has expired. Please reselect your seats.');
+        }
+        // Fetch and validate agent wallet
+        const wallet = await prisma.agentWallet.findUnique({
+            where: { agentId },
+        });
+        if (!wallet) {
+            throw new errors_1.NotFoundError('Agent wallet not found');
+        }
+        if (wallet.isFrozen) {
+            throw new errors_1.AuthorizationError(`Agent wallet is frozen: ${wallet.frozenReason || 'Contact platform administration'}`);
+        }
+        const grossFare = Number(booking.totalFare);
+        const commissionAmt = booking.commissionSnapshot ? Number(booking.commissionSnapshot.commissionAmt) : 0;
+        const netFare = Math.max(0, grossFare - commissionAmt);
+        const cashBal = Number(wallet.cashBalance);
+        const creditLimit = Number(wallet.creditLimit);
+        const creditUsed = Number(wallet.creditUsed);
+        const availableCredit = Math.max(0, creditLimit - creditUsed);
+        const totalAvailable = cashBal + availableCredit;
+        if (totalAvailable < netFare) {
+            throw new errors_1.ValidationError(`Insufficient funds. Required: ₹${netFare.toFixed(2)}, Available: ₹${totalAvailable.toFixed(2)} (Cash: ₹${cashBal.toFixed(2)}, Credit: ₹${availableCredit.toFixed(2)})`);
+        }
+        // Execute atomic wallet debit + double-entry ledger posting + payment creation
+        const txResult = await prisma.$transaction(async (tx) => {
+            let newCash = cashBal;
+            let newCreditUsed = creditUsed;
+            if (cashBal >= netFare) {
+                newCash = cashBal - netFare;
+            }
+            else {
+                const shortfall = netFare - cashBal;
+                newCash = 0;
+                newCreditUsed = creditUsed + shortfall;
+            }
+            // Optimistic locking update
+            const updateResult = await tx.agentWallet.updateMany({
+                where: { id: wallet.id, version: wallet.version },
+                data: {
+                    cashBalance: newCash,
+                    creditUsed: newCreditUsed,
+                    totalSpent: { increment: netFare },
+                    totalCommission: { increment: commissionAmt },
+                    version: { increment: 1 },
+                },
+            });
+            if (updateResult.count === 0) {
+                throw new errors_1.ConflictError('Concurrent wallet modification detected. Please try again.');
+            }
+            // Post double-entry balanced ledger batch
+            const idempotencyPrefix = `BOOKING-${booking.id}-${Date.now()}`;
+            const ledgerLines = (0, ledger_1.buildBookingPaymentLines)({
+                bookingId: booking.id,
+                agentId,
+                netFare,
+                commissionAmt,
+                grossFare,
+                idempotencyPrefix,
+            });
+            const ledgerData = (0, ledger_1.buildLedgerPostingData)({
+                agentId,
+                bookingId: booking.id,
+                referenceId: booking.bookingNumber,
+                createdBy: userId || 'AGENT',
+                lines: ledgerLines,
+            });
+            await tx.ledgerEntry.createMany({ data: ledgerData, skipDuplicates: true });
+            // Create Payment record
+            const merchantTxnId = `WALLET-${booking.bookingNumber}-${Date.now()}`;
+            const payment = await tx.payment.create({
+                data: {
+                    bookingId: booking.id,
+                    userId: userId ?? booking.userId ?? null,
+                    merchantTxnId,
+                    amount: netFare,
+                    status: client_1.PaymentStatus.SUCCESS,
+                    paymentMethod: 'WALLET',
+                    paidAt: new Date(),
+                },
+            });
+            // Update booking to PAYMENT_SUCCESS
+            await tx.booking.update({
+                where: { id: booking.id },
+                data: {
+                    status: client_1.BookingStatus.PAYMENT_SUCCESS,
+                    version: { increment: 1 },
+                },
+            });
+            return { payment, netFare, commissionAmt };
+        });
+        paymentLogger.info({ bookingId: booking.id, agentId, netFare: txResult.netFare }, 'Agent wallet debited and ledger posted — confirming booking');
+        // Confirm booking with upstream provider
+        const confirmedBooking = await this.bookingsService.confirmBooking(booking.id);
+        return {
+            success: true,
+            booking: confirmedBooking,
+            payment: txResult.payment,
+            netFarePaid: txResult.netFare,
+            commissionEarned: txResult.commissionAmt,
         };
     }
     /**

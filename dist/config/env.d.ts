@@ -48,6 +48,15 @@ declare const envSchema: z.ZodObject<{
     }>>;
     PHONEPE_CALLBACK_URL: z.ZodOptional<z.ZodString>;
     PHONEPE_REDIRECT_URL: z.ZodOptional<z.ZodString>;
+    RAZORPAY_KEY_ID: z.ZodOptional<z.ZodString>;
+    RAZORPAY_KEY_SECRET: z.ZodOptional<z.ZodString>;
+    RAZORPAY_WEBHOOK_SECRET: z.ZodOptional<z.ZodString>;
+    PAYMENT_PRIMARY_GATEWAY: z.ZodDefault<z.ZodEnum<{
+        RAZORPAY: "RAZORPAY";
+        PHONEPE: "PHONEPE";
+        AUTO: "AUTO";
+    }>>;
+    PAYMENT_HOLD_CUTOFF_SECONDS: z.ZodDefault<z.ZodCoercedNumber<unknown>>;
     CLOUDINARY_CLOUD_NAME: z.ZodOptional<z.ZodString>;
     CLOUDINARY_API_KEY: z.ZodOptional<z.ZodString>;
     CLOUDINARY_API_SECRET: z.ZodOptional<z.ZodString>;
@@ -90,6 +99,8 @@ export declare const env: {
     GDS_CONNECT_TIMEOUT_MS: number;
     PHONEPE_CLIENT_VERSION: string;
     PHONEPE_ENVIRONMENT: "SANDBOX" | "PRODUCTION";
+    PAYMENT_PRIMARY_GATEWAY: "RAZORPAY" | "PHONEPE" | "AUTO";
+    PAYMENT_HOLD_CUTOFF_SECONDS: number;
     RATE_LIMIT_WINDOW_MS: number;
     RATE_LIMIT_MAX_REQUESTS: number;
     AUTH_RATE_LIMIT_WINDOW_MS: number;
@@ -105,6 +116,9 @@ export declare const env: {
     PHONEPE_CLIENT_SECRET?: string | undefined;
     PHONEPE_CALLBACK_URL?: string | undefined;
     PHONEPE_REDIRECT_URL?: string | undefined;
+    RAZORPAY_KEY_ID?: string | undefined;
+    RAZORPAY_KEY_SECRET?: string | undefined;
+    RAZORPAY_WEBHOOK_SECRET?: string | undefined;
     CLOUDINARY_CLOUD_NAME?: string | undefined;
     CLOUDINARY_API_KEY?: string | undefined;
     CLOUDINARY_API_SECRET?: string | undefined;

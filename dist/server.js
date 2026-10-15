@@ -8,6 +8,7 @@ const database_1 = require("./infrastructure/database");
 const redis_1 = require("./infrastructure/redis");
 const queues_1 = require("./infrastructure/queues");
 const jobs_1 = require("./jobs");
+const payments_1 = require("./infrastructure/payments");
 // ---------------------------------------------------------------------------
 // Server lifecycle management — bootstrap and graceful shutdown
 // ---------------------------------------------------------------------------
@@ -50,7 +51,15 @@ async function bootstrap() {
         catch (redisErr) {
             serverLogger.warn({ err: redisErr }, 'Redis connection failed; continuing in degraded mode');
         }
-        // 3. Initialize Express application
+        // 3. Initialize Payment Orchestrator (loads/seeds gateway configurations)
+        try {
+            await payments_1.PaymentOrchestrator.getInstance().initialize();
+            serverLogger.info('Payment Orchestrator initialized successfully');
+        }
+        catch (payErr) {
+            serverLogger.warn({ err: payErr.message }, 'Payment Orchestrator initialization error (will retry dynamically on demand)');
+        }
+        // 4. Initialize Express application
         const app = (0, app_1.createApp)();
         // 4. Start HTTP server
         const server = app.listen(env_1.env.PORT, env_1.env.HOST, () => {

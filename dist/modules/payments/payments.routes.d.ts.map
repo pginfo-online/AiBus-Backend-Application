@@ -1,1 +1,1 @@
-{"version":3,"file":"payments.routes.d.ts","sourceRoot":"","sources":["../../../src/modules/payments/payments.routes.ts"],"names":[],"mappings":"AAUA,QAAA,MAAM,cAAc,4CAAW,CAAC;AAuChC,OAAO,EAAE,cAAc,EAAE,CAAC;AAC1B,eAAe,cAAc,CAAC"}
+{"version":3,"file":"payments.routes.d.ts","sourceRoot":"","sources":["../../../src/modules/payments/payments.routes.ts"],"names":[],"mappings":"AAWA,QAAA,MAAM,cAAc,4CAAW,CAAC;AAgEhC,OAAO,EAAE,cAAc,EAAE,CAAC;AAC1B,eAAe,cAAc,CAAC"}

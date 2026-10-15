@@ -18,6 +18,18 @@ class PaymentsController {
             next(error);
         }
     };
+    payWithWallet = async (req, res, next) => {
+        try {
+            const bookingId = req.body.bookingId;
+            const agentId = req.agentId;
+            const userId = req.user?.sub;
+            const result = await this.paymentsService.payWithWallet(bookingId, agentId, userId);
+            response_1.ApiResponse.success(res, result, 'Wallet payment successful and booking confirmed');
+        }
+        catch (error) {
+            next(error);
+        }
+    };
     verifyPayment = async (req, res, next) => {
         try {
             const result = await this.paymentsService.verifyPayment(req.body);
@@ -32,6 +44,16 @@ class PaymentsController {
             const rawBody = req.body.response;
             const xVerify = req.headers['x-verify'];
             const result = await this.paymentsService.handleWebhook(rawBody, xVerify);
+            response_1.ApiResponse.success(res, result);
+        }
+        catch (error) {
+            next(error);
+        }
+    };
+    handleRazorpayWebhook = async (req, res, next) => {
+        try {
+            const rawBody = req.rawBody || req.body;
+            const result = await this.paymentsService.handleRazorpayWebhook(rawBody, req.headers);
             response_1.ApiResponse.success(res, result);
         }
         catch (error) {

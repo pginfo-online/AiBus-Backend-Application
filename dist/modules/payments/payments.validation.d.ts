@@ -2,12 +2,14 @@ import { z } from 'zod';
 export declare const createPaymentIntentSchema: z.ZodObject<{
     bookingId: z.ZodString;
     gateway: z.ZodDefault<z.ZodEnum<{
-        PHONEPE: "PHONEPE";
         RAZORPAY: "RAZORPAY";
+        PHONEPE: "PHONEPE";
+        AUTO: "AUTO";
         MOCK: "MOCK";
     }>>;
     redirectUrl: z.ZodOptional<z.ZodString>;
     paymentMode: z.ZodOptional<z.ZodEnum<{
+        WALLET: "WALLET";
         ALL: "ALL";
         UPI: "UPI";
         CARD: "CARD";

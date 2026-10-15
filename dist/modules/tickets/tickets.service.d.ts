@@ -18,10 +18,10 @@ export declare class TicketsService {
             createdAt: Date;
             updatedAt: Date;
             bookingId: string;
+            storageKey: string | null;
             ticketNumber: string;
             pnrNumber: string;
             pdfUrl: string | null;
-            storageKey: string | null;
             bookingSnapshot: import("@prisma/client/runtime/library").JsonValue;
             generatedAt: Date;
         } | null;
@@ -44,10 +44,10 @@ export declare class TicketsService {
                 createdAt: Date;
                 updatedAt: Date;
                 bookingId: string;
+                storageKey: string | null;
                 ticketNumber: string;
                 pnrNumber: string;
                 pdfUrl: string | null;
-                storageKey: string | null;
                 bookingSnapshot: import("@prisma/client/runtime/library").JsonValue;
                 generatedAt: Date;
             } | null;
@@ -63,6 +63,7 @@ export declare class TicketsService {
                 amount: import("@prisma/client/runtime/library").Decimal;
                 currency: string;
                 gateway: string;
+                paymentMethod: string | null;
                 gatewayOrderId: string | null;
                 gatewayPaymentId: string | null;
                 gatewaySignature: string | null;
@@ -106,6 +107,8 @@ export declare class TicketsService {
             status: import(".prisma/client").$Enums.BookingStatus;
             createdAt: Date;
             updatedAt: Date;
+            agentId: string | null;
+            userType: string;
             bookingNumber: string;
             providerName: string;
             providerHoldId: string | null;
@@ -158,10 +161,10 @@ export declare class TicketsService {
             createdAt: Date;
             updatedAt: Date;
             bookingId: string;
+            storageKey: string | null;
             ticketNumber: string;
             pnrNumber: string;
             pdfUrl: string | null;
-            storageKey: string | null;
             bookingSnapshot: import("@prisma/client/runtime/library").JsonValue;
             generatedAt: Date;
         } | null;
@@ -184,10 +187,10 @@ export declare class TicketsService {
                 createdAt: Date;
                 updatedAt: Date;
                 bookingId: string;
+                storageKey: string | null;
                 ticketNumber: string;
                 pnrNumber: string;
                 pdfUrl: string | null;
-                storageKey: string | null;
                 bookingSnapshot: import("@prisma/client/runtime/library").JsonValue;
                 generatedAt: Date;
             } | null;
@@ -203,6 +206,7 @@ export declare class TicketsService {
                 amount: import("@prisma/client/runtime/library").Decimal;
                 currency: string;
                 gateway: string;
+                paymentMethod: string | null;
                 gatewayOrderId: string | null;
                 gatewayPaymentId: string | null;
                 gatewaySignature: string | null;
@@ -246,6 +250,8 @@ export declare class TicketsService {
             status: import(".prisma/client").$Enums.BookingStatus;
             createdAt: Date;
             updatedAt: Date;
+            agentId: string | null;
+            userType: string;
             bookingNumber: string;
             providerName: string;
             providerHoldId: string | null;
@@ -317,6 +323,7 @@ export declare class TicketsService {
                     amount: import("@prisma/client/runtime/library").Decimal;
                     currency: string;
                     gateway: string;
+                    paymentMethod: string | null;
                     gatewayOrderId: string | null;
                     gatewayPaymentId: string | null;
                     gatewaySignature: string | null;
@@ -360,6 +367,8 @@ export declare class TicketsService {
                 status: import(".prisma/client").$Enums.BookingStatus;
                 createdAt: Date;
                 updatedAt: Date;
+                agentId: string | null;
+                userType: string;
                 bookingNumber: string;
                 providerName: string;
                 providerHoldId: string | null;
@@ -402,10 +411,10 @@ export declare class TicketsService {
             createdAt: Date;
             updatedAt: Date;
             bookingId: string;
+            storageKey: string | null;
             ticketNumber: string;
             pnrNumber: string;
             pdfUrl: string | null;
-            storageKey: string | null;
             bookingSnapshot: import("@prisma/client/runtime/library").JsonValue;
             generatedAt: Date;
         };
@@ -434,6 +443,7 @@ export declare class TicketsService {
                 amount: import("@prisma/client/runtime/library").Decimal;
                 currency: string;
                 gateway: string;
+                paymentMethod: string | null;
                 gatewayOrderId: string | null;
                 gatewayPaymentId: string | null;
                 gatewaySignature: string | null;
@@ -477,6 +487,8 @@ export declare class TicketsService {
             status: import(".prisma/client").$Enums.BookingStatus;
             createdAt: Date;
             updatedAt: Date;
+            agentId: string | null;
+            userType: string;
             bookingNumber: string;
             providerName: string;
             providerHoldId: string | null;
@@ -514,6 +526,10 @@ export declare class TicketsService {
             cancelledAt: Date | null;
         };
         gdsDetails: import("../../providers/types").GdsBookingDetailsResponse | null;
+    }>;
+    generateTicketPdfBuffer(bookingIdentifier: string): Promise<{
+        buffer: Buffer;
+        fileName: string;
     }>;
 }
 //# sourceMappingURL=tickets.service.d.ts.map

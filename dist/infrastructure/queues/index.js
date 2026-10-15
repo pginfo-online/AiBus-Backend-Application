@@ -5,6 +5,7 @@ exports.createWorker = createWorker;
 exports.initializeQueues = initializeQueues;
 exports.shutdownQueues = shutdownQueues;
 exports.addJob = addJob;
+exports.scheduleRecurringJob = scheduleRecurringJob;
 const bullmq_1 = require("bullmq");
 const redis_1 = require("../redis");
 const env_1 = require("../../config/env");
@@ -188,6 +189,26 @@ async function addJob(queueName, jobName, data, options) {
     catch (err) {
         queueLogger.warn({ queue: queueName, jobName, err: err.message }, 'Failed to enqueue job; continuing with degraded queue status');
         return null;
+    }
+}
+/**
+ * Schedule a recurring/cron job using BullMQ JobScheduler. Gracefully degrades if Redis is unavailable.
+ */
+async function scheduleRecurringJob(queueName, schedulerId, repeatOpts, jobTemplate) {
+    if (!(0, redis_1.isRedisAvailable)()) {
+        queueLogger.debug({ queue: queueName, schedulerId }, 'Redis unavailable; skipping recurring job scheduling');
+        return;
+    }
+    try {
+        const queue = getQueue(queueName);
+        await queue.upsertJobScheduler(schedulerId, repeatOpts, {
+            name: jobTemplate?.name || schedulerId,
+            data: (jobTemplate?.data ?? {}),
+        });
+        queueLogger.info({ queue: queueName, schedulerId, repeatOpts }, 'Recurring job scheduled successfully');
+    }
+    catch (err) {
+        queueLogger.warn({ queue: queueName, schedulerId, err: err.message }, 'Failed to schedule recurring job; continuing');
     }
 }
 //# sourceMappingURL=index.js.map

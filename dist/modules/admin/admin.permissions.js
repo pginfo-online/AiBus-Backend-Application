@@ -30,6 +30,7 @@ exports.AdminPermission = {
     PAYMENTS_LIST: 'payments:list',
     PAYMENTS_VIEW: 'payments:view',
     PAYMENTS_RECONCILE: 'payments:reconcile',
+    PAYMENT_GATEWAYS_MANAGE: 'payments:gateways_manage',
     // Refunds
     REFUNDS_LIST: 'refunds:list',
     REFUNDS_VIEW: 'refunds:view',
@@ -66,6 +67,19 @@ exports.AdminPermission = {
     // Providers
     PROVIDERS_VIEW: 'providers:view',
     PROVIDERS_MANAGE: 'providers:manage',
+    // Agents (B2B)
+    AGENTS_LIST: 'agents:list',
+    AGENTS_VIEW: 'agents:view',
+    AGENTS_KYC_REVIEW: 'agents:kyc_review',
+    AGENTS_SUSPEND: 'agents:suspend',
+    AGENTS_CREDIT_MANAGE: 'agents:credit_manage',
+    // Commissions
+    COMMISSIONS_LIST: 'commissions:list',
+    COMMISSIONS_MANAGE: 'commissions:manage',
+    // Ledger & Reconciliation
+    LEDGER_VIEW: 'ledger:view',
+    LEDGER_RECONCILE: 'ledger:reconcile',
+    LEDGER_ADJUST: 'ledger:adjust',
 };
 /**
  * Default permission mapping per role.
@@ -158,6 +172,17 @@ const ROLE_PERMISSIONS = {
         exports.AdminPermission.REPORTS_EXPORT,
         exports.AdminPermission.PROVIDERS_VIEW,
         exports.AdminPermission.SYSTEM_HEALTH,
+        exports.AdminPermission.AGENTS_LIST,
+        exports.AdminPermission.AGENTS_VIEW,
+        exports.AdminPermission.AGENTS_KYC_REVIEW,
+        exports.AdminPermission.AGENTS_SUSPEND,
+        exports.AdminPermission.AGENTS_CREDIT_MANAGE,
+        exports.AdminPermission.COMMISSIONS_LIST,
+        exports.AdminPermission.COMMISSIONS_MANAGE,
+        exports.AdminPermission.LEDGER_VIEW,
+        exports.AdminPermission.LEDGER_RECONCILE,
+        exports.AdminPermission.LEDGER_ADJUST,
+        exports.AdminPermission.PAYMENT_GATEWAYS_MANAGE,
     ]),
     [constants_1.UserRole.SUPER_ADMIN]: new Set(Object.values(exports.AdminPermission)),
 };

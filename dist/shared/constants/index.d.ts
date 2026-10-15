@@ -176,6 +176,7 @@ export declare const QueueName: {
     readonly PROVIDER_HEALTH: "provider-health";
     readonly HOLD_EXPIRY_CLEANUP: "hold-expiry-cleanup";
     readonly AUDIT_LOG: "audit-log";
+    readonly LEDGER_RECONCILIATION: "ledger-reconciliation";
 };
 /** HTTP timeout defaults */
 export declare const Timeouts: {

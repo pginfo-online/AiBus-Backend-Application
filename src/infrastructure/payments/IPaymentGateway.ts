@@ -17,6 +17,7 @@ export interface PaymentIntentParams {
   redirectUrl?: string;
   notes?: Record<string, string>;
   isTopup?: boolean;
+  merchantTxnId?: string;
 }
 
 export interface PaymentIntentResult {

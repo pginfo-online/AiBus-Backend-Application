@@ -16,9 +16,11 @@ export declare class PaymentsService {
         merchantTxnId: string;
         amount: number;
         currency: string;
-        gateway: "PHONEPE" | "RAZORPAY" | "MOCK";
-        paymentUrl: string;
-        gatewayOrderId: string;
+        gateway: string;
+        paymentUrl: any;
+        upiIntentUrl: any;
+        gatewayOrderId: string | null;
+        sdkPayload: any;
     }>;
     verifyPayment(input: VerifyPaymentInput): Promise<{
         status: string;
@@ -30,6 +32,8 @@ export declare class PaymentsService {
                 status: import(".prisma/client").$Enums.BookingStatus;
                 createdAt: Date;
                 updatedAt: Date;
+                agentId: string | null;
+                userType: string;
                 bookingNumber: string;
                 providerName: string;
                 providerHoldId: string | null;
@@ -78,6 +82,7 @@ export declare class PaymentsService {
             amount: import("@prisma/client/runtime/library").Decimal;
             currency: string;
             gateway: string;
+            paymentMethod: string | null;
             gatewayOrderId: string | null;
             gatewayPaymentId: string | null;
             gatewaySignature: string | null;
@@ -92,6 +97,8 @@ export declare class PaymentsService {
             status: import(".prisma/client").$Enums.BookingStatus;
             createdAt: Date;
             updatedAt: Date;
+            agentId: string | null;
+            userType: string;
             bookingNumber: string;
             providerName: string;
             providerHoldId: string | null;
@@ -142,6 +149,7 @@ export declare class PaymentsService {
             amount: import("@prisma/client/runtime/library").Decimal;
             currency: string;
             gateway: string;
+            paymentMethod: string | null;
             gatewayOrderId: string | null;
             gatewayPaymentId: string | null;
             gatewaySignature: string | null;
@@ -180,6 +188,8 @@ export declare class PaymentsService {
             status: import(".prisma/client").$Enums.BookingStatus;
             createdAt: Date;
             updatedAt: Date;
+            agentId: string | null;
+            userType: string;
             bookingNumber: string;
             providerName: string;
             providerHoldId: string | null;
@@ -237,6 +247,17 @@ export declare class PaymentsService {
         note?: undefined;
     }>;
     /**
+     * Razorpay Webhook Ingestion & Processing
+     * Verifies cryptographic HMAC SHA256 signature and processes captured/failed events
+     */
+    handleRazorpayWebhook(rawBody: string | any, headers: Record<string, string | string[] | undefined>): Promise<{
+        status: string;
+        reason: string;
+    } | {
+        status: string;
+        reason?: undefined;
+    }>;
+    /**
      * Controlled Webhook Simulator for Local Development & Testing
      * Only active when NODE_ENV !== 'production'.
      * Constructs valid PhonePe signed webhook payload and exercises production webhook handler.
@@ -268,6 +289,7 @@ export declare class PaymentsService {
             amount: import("@prisma/client/runtime/library").Decimal;
             currency: string;
             gateway: string;
+            paymentMethod: string | null;
             gatewayOrderId: string | null;
             gatewayPaymentId: string | null;
             gatewaySignature: string | null;
@@ -282,10 +304,10 @@ export declare class PaymentsService {
                 createdAt: Date;
                 updatedAt: Date;
                 bookingId: string;
+                storageKey: string | null;
                 ticketNumber: string;
                 pnrNumber: string;
                 pdfUrl: string | null;
-                storageKey: string | null;
                 bookingSnapshot: import("@prisma/client/runtime/library").JsonValue;
                 generatedAt: Date;
             } | null;
@@ -296,6 +318,8 @@ export declare class PaymentsService {
             status: import(".prisma/client").$Enums.BookingStatus;
             createdAt: Date;
             updatedAt: Date;
+            agentId: string | null;
+            userType: string;
             bookingNumber: string;
             providerName: string;
             providerHoldId: string | null;
@@ -339,13 +363,180 @@ export declare class PaymentsService {
             createdAt: Date;
             updatedAt: Date;
             bookingId: string;
+            storageKey: string | null;
             ticketNumber: string;
             pnrNumber: string;
             pdfUrl: string | null;
-            storageKey: string | null;
             bookingSnapshot: import("@prisma/client/runtime/library").JsonValue;
             generatedAt: Date;
         } | null | undefined;
+    }>;
+    /**
+     * B2B Agent Wallet Debit Payment
+     * Deducts net fare (grossFare - commissionAmt) from agent wallet with optimistic concurrency,
+     * posts balanced double-entry ledger entries, and confirms booking.
+     */
+    payWithWallet(bookingId: string, agentId: string, userId?: string): Promise<{
+        success: boolean;
+        booking: {
+            commissionSnapshot: {
+                id: string;
+                createdAt: Date;
+                agentId: string;
+                bookingId: string;
+                ruleId: string | null;
+                ruleSnapshot: import("@prisma/client/runtime/library").JsonValue;
+                grossFare: import("@prisma/client/runtime/library").Decimal;
+                baseFareForCommission: import("@prisma/client/runtime/library").Decimal;
+                commissionRate: import("@prisma/client/runtime/library").Decimal;
+                commissionAmt: import("@prisma/client/runtime/library").Decimal;
+                netFare: import("@prisma/client/runtime/library").Decimal;
+                reversedAt: Date | null;
+                reversalAmt: import("@prisma/client/runtime/library").Decimal | null;
+            } | null;
+        } & {
+            version: number;
+            userId: string | null;
+            id: string;
+            status: import(".prisma/client").$Enums.BookingStatus;
+            createdAt: Date;
+            updatedAt: Date;
+            agentId: string | null;
+            userType: string;
+            bookingNumber: string;
+            providerName: string;
+            providerHoldId: string | null;
+            providerTicketNo: string | null;
+            providerPnrNo: string | null;
+            fromCityId: number;
+            toCityId: number;
+            fromCityName: string;
+            toCityName: string;
+            journeyDate: string;
+            busId: number;
+            tripId: string;
+            pickupCode: string;
+            pickupLocation: string;
+            pickupTime: string;
+            dropoffCode: string;
+            dropoffLocation: string;
+            dropoffTime: string;
+            operatorName: string;
+            busType: string;
+            totalFare: import("@prisma/client/runtime/library").Decimal;
+            baseFare: import("@prisma/client/runtime/library").Decimal;
+            serviceTax: import("@prisma/client/runtime/library").Decimal;
+            operatorGst: import("@prisma/client/runtime/library").Decimal;
+            convenienceFee: import("@prisma/client/runtime/library").Decimal;
+            discountAmount: import("@prisma/client/runtime/library").Decimal;
+            contactName: string;
+            contactEmail: string;
+            contactPhone: string;
+            cancellationPolicy: import("@prisma/client/runtime/library").JsonValue | null;
+            pickupSnapshot: import("@prisma/client/runtime/library").JsonValue | null;
+            dropoffSnapshot: import("@prisma/client/runtime/library").JsonValue | null;
+            idempotencyKey: string | null;
+            confirmedAt: Date | null;
+            cancelledAt: Date | null;
+        };
+        message: string;
+        payment?: undefined;
+        netFarePaid?: undefined;
+        commissionEarned?: undefined;
+    } | {
+        success: boolean;
+        booking: {
+            seats: {
+                id: string;
+                bookingId: string;
+                seatNo: string;
+                seatTypeId: number;
+                fareTotal: import("@prisma/client/runtime/library").Decimal;
+                fareBase: import("@prisma/client/runtime/library").Decimal;
+                fareTax: import("@prisma/client/runtime/library").Decimal;
+                deck: number;
+                row: number;
+                column: number;
+            }[];
+            passengers: {
+                name: string;
+                id: string;
+                bookingId: string;
+                seatNo: string;
+                seatTypeId: number;
+                age: number;
+                gender: string;
+                fare: import("@prisma/client/runtime/library").Decimal;
+                isAcSeat: boolean;
+            }[];
+        } & {
+            version: number;
+            userId: string | null;
+            id: string;
+            status: import(".prisma/client").$Enums.BookingStatus;
+            createdAt: Date;
+            updatedAt: Date;
+            agentId: string | null;
+            userType: string;
+            bookingNumber: string;
+            providerName: string;
+            providerHoldId: string | null;
+            providerTicketNo: string | null;
+            providerPnrNo: string | null;
+            fromCityId: number;
+            toCityId: number;
+            fromCityName: string;
+            toCityName: string;
+            journeyDate: string;
+            busId: number;
+            tripId: string;
+            pickupCode: string;
+            pickupLocation: string;
+            pickupTime: string;
+            dropoffCode: string;
+            dropoffLocation: string;
+            dropoffTime: string;
+            operatorName: string;
+            busType: string;
+            totalFare: import("@prisma/client/runtime/library").Decimal;
+            baseFare: import("@prisma/client/runtime/library").Decimal;
+            serviceTax: import("@prisma/client/runtime/library").Decimal;
+            operatorGst: import("@prisma/client/runtime/library").Decimal;
+            convenienceFee: import("@prisma/client/runtime/library").Decimal;
+            discountAmount: import("@prisma/client/runtime/library").Decimal;
+            contactName: string;
+            contactEmail: string;
+            contactPhone: string;
+            cancellationPolicy: import("@prisma/client/runtime/library").JsonValue | null;
+            pickupSnapshot: import("@prisma/client/runtime/library").JsonValue | null;
+            dropoffSnapshot: import("@prisma/client/runtime/library").JsonValue | null;
+            idempotencyKey: string | null;
+            confirmedAt: Date | null;
+            cancelledAt: Date | null;
+        };
+        payment: {
+            metadata: import("@prisma/client/runtime/library").JsonValue | null;
+            userId: string | null;
+            id: string;
+            status: import(".prisma/client").$Enums.PaymentStatus;
+            createdAt: Date;
+            updatedAt: Date;
+            idempotencyKey: string | null;
+            bookingId: string;
+            amount: import("@prisma/client/runtime/library").Decimal;
+            currency: string;
+            gateway: string;
+            paymentMethod: string | null;
+            gatewayOrderId: string | null;
+            gatewayPaymentId: string | null;
+            gatewaySignature: string | null;
+            merchantTxnId: string;
+            webhookVerified: boolean;
+            attempts: number;
+        };
+        netFarePaid: number;
+        commissionEarned: number;
+        message?: undefined;
     }>;
     /**
      * Get current dev simulation status for a transaction (dev/test only)

@@ -4,6 +4,7 @@ exports.TicketsService = void 0;
 const database_1 = require("../../infrastructure/database");
 const errors_1 = require("../../shared/errors");
 const gdsAdapter_1 = require("../../providers/gds/gdsAdapter");
+const ticketPdfGenerator_1 = require("../../infrastructure/pdf/ticketPdfGenerator");
 class TicketsService {
     static instance;
     gdsAdapter;
@@ -253,6 +254,39 @@ class TicketsService {
             booking: ticket.booking,
             gdsDetails,
         };
+    }
+    async generateTicketPdfBuffer(bookingIdentifier) {
+        const details = await this.getTicketByBookingId(bookingIdentifier);
+        const booking = details.booking;
+        if (!booking) {
+            throw new errors_1.NotFoundError('Booking record not found for PDF generation');
+        }
+        const pdfData = {
+            bookingNumber: booking.bookingNumber,
+            ticketNumber: String(details.ticketNumber),
+            pnrNumber: String(details.pnrNumber),
+            operatorName: booking.operatorName,
+            busType: booking.busType,
+            journeyDate: booking.journeyDate,
+            fromCityName: booking.fromCityName,
+            toCityName: booking.toCityName,
+            pickupLocation: booking.pickupLocation,
+            pickupTime: booking.pickupTime,
+            dropoffLocation: booking.dropoffLocation,
+            dropoffTime: booking.dropoffTime,
+            totalFare: Number(booking.totalFare),
+            contactName: booking.contactName,
+            contactPhone: booking.contactPhone,
+            passengers: (booking.passengers || []).map((p) => ({
+                name: p.name,
+                age: p.age,
+                gender: p.gender,
+                seatNo: p.seatNo,
+            })),
+        };
+        const buffer = await (0, ticketPdfGenerator_1.generateTicketPdf)(pdfData);
+        const fileName = `AiBus-Ticket-${details.ticketNumber || booking.bookingNumber}.pdf`;
+        return { buffer, fileName };
     }
 }
 exports.TicketsService = TicketsService;

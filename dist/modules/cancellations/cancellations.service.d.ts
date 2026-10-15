@@ -68,6 +68,8 @@ export declare class CancellationsService {
             completedAt: Date | null;
         };
         providerResponse: import("../../providers/types").GdsCancelResponse;
+        commissionReversal: number;
+        netRefundToAgent: number | undefined;
     }>;
 }
 //# sourceMappingURL=cancellations.service.d.ts.map
