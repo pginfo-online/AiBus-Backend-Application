@@ -9,10 +9,12 @@ import {
   ValidationError,
   ConflictError,
   ProviderError,
+  AuthorizationError,
 } from '../../shared/errors';
 import { logger } from '../../infrastructure/logger';
 import { CreateBookingInput } from './bookings.validation';
-import { BookingStatus, HoldStatus, TicketStatus } from '@prisma/client';
+import { BookingStatus, HoldStatus, TicketStatus, AgentStatus } from '@prisma/client';
+import { resolveCommission } from '../../infrastructure/commission';
 
 export class BookingsService {
   private static instance: BookingsService;
@@ -30,8 +32,43 @@ export class BookingsService {
     return BookingsService.instance;
   }
 
-  public async createBooking(input: CreateBookingInput, userId?: string) {
+  public async createBooking(
+    input: CreateBookingInput,
+    userId?: string,
+    explicitAgentId?: string
+  ) {
     const prisma = getPrismaClient();
+
+    // Determine agent context
+    let agentId: string | null = explicitAgentId || null;
+    if (!agentId && userId && prisma.agentStaff) {
+      const staff = await prisma.agentStaff.findFirst({
+        where: { userId, isActive: true },
+        include: { agent: true },
+      });
+      if (staff?.agent) {
+        if (staff.agent.status !== AgentStatus.APPROVED) {
+          throw new AuthorizationError(
+            `Agent account is not approved to create bookings. Current status: ${staff.agent.status}`
+          );
+        }
+        agentId = staff.agent.id;
+      }
+    }
+
+    // Resolve B2B commission if agent booking
+    let commissionResult = null;
+    if (agentId) {
+      commissionResult = await resolveCommission({
+        agentId,
+        grossFare: Number(input.totalFare),
+        baseFare: Number(input.baseFare),
+        fromCityId: input.fromCityId,
+        toCityId: input.toCityId,
+        operatorName: input.operatorName,
+        journeyDate: input.journeyDate,
+      });
+    }
 
     // 1. Verify hold exists if a valid UUID holdId was provided
     let providerHoldId = `HOLD-GDS-${Date.now()}`;
@@ -70,11 +107,13 @@ export class BookingsService {
     // 2. Generate unique booking number
     const bookingNumber = this.generateBookingNumber();
 
-    // 3. Persist Booking, Seats, Passengers in atomic transaction
+    // 3. Persist Booking, Seats, Passengers, and CommissionSnapshot in atomic transaction
     const booking = await prisma.$transaction(async (tx) => {
       const createdBooking = await tx.booking.create({
         data: {
           userId: userId ?? null,
+          agentId: agentId ?? null,
+          userType: agentId ? 'AGENT' : 'CUSTOMER',
           bookingNumber,
           status: BookingStatus.HELD,
           providerName: 'GDS',
@@ -129,6 +168,23 @@ export class BookingsService {
           passengers: true,
         },
       });
+
+      // Save immutable CommissionSnapshot for B2B booking
+      if (agentId && commissionResult) {
+        await tx.commissionSnapshot.create({
+          data: {
+            bookingId: createdBooking.id,
+            agentId,
+            ruleId: commissionResult.ruleId,
+            ruleSnapshot: commissionResult.ruleSnapshot ? (commissionResult.ruleSnapshot as any) : {},
+            grossFare: input.totalFare,
+            baseFareForCommission: input.baseFare,
+            commissionRate: commissionResult.commissionRate,
+            commissionAmt: commissionResult.commissionAmt,
+            netFare: commissionResult.netFare,
+          },
+        });
+      }
 
       // Link hold to booking if holdRecordId exists
       if (holdRecordId) {
@@ -345,8 +401,20 @@ export class BookingsService {
 
   public async getUserBookings(userId: string) {
     const prisma = getPrismaClient();
+
+    const staff = prisma.agentStaff
+      ? await prisma.agentStaff.findFirst({
+          where: { userId, isActive: true },
+          select: { agentId: true },
+        })
+      : null;
+
+    const where = staff?.agentId
+      ? { agentId: staff.agentId }
+      : { userId };
+
     return prisma.booking.findMany({
-      where: { userId },
+      where,
       include: {
         seats: true,
         passengers: true,
@@ -354,6 +422,7 @@ export class BookingsService {
         payments: true,
         cancellations: true,
         refunds: true,
+        commissionSnapshot: true,
       },
       orderBy: { createdAt: 'desc' },
     });

@@ -242,3 +242,39 @@ export async function addJob<T>(
     return null;
   }
 }
+
+/**
+ * Schedule a recurring/cron job using BullMQ JobScheduler. Gracefully degrades if Redis is unavailable.
+ */
+export async function scheduleRecurringJob<T>(
+  queueName: string,
+  schedulerId: string,
+  repeatOpts: { pattern?: string; every?: number },
+  jobTemplate?: { name?: string; data?: T }
+): Promise<void> {
+  if (!isRedisAvailable()) {
+    queueLogger.debug(
+      { queue: queueName, schedulerId },
+      'Redis unavailable; skipping recurring job scheduling'
+    );
+    return;
+  }
+
+  try {
+    const queue = getQueue(queueName);
+    await queue.upsertJobScheduler(
+      schedulerId,
+      repeatOpts as any,
+      {
+        name: jobTemplate?.name || schedulerId,
+        data: (jobTemplate?.data ?? {}) as any,
+      }
+    );
+    queueLogger.info({ queue: queueName, schedulerId, repeatOpts }, 'Recurring job scheduled successfully');
+  } catch (err: any) {
+    queueLogger.warn(
+      { queue: queueName, schedulerId, err: err.message },
+      'Failed to schedule recurring job; continuing'
+    );
+  }
+}

@@ -5,6 +5,7 @@ import { connectDatabase, disconnectDatabase } from './infrastructure/database';
 import { connectRedis, disconnectRedis, isRedisAvailable } from './infrastructure/redis';
 import { shutdownQueues } from './infrastructure/queues';
 import { initializeWorkers } from './jobs';
+import { PaymentOrchestrator } from './infrastructure/payments';
 
 // ---------------------------------------------------------------------------
 // Server lifecycle management — bootstrap and graceful shutdown
@@ -57,7 +58,18 @@ async function bootstrap() {
       );
     }
 
-    // 3. Initialize Express application
+    // 3. Initialize Payment Orchestrator (loads/seeds gateway configurations)
+    try {
+      await PaymentOrchestrator.getInstance().initialize();
+      serverLogger.info('Payment Orchestrator initialized successfully');
+    } catch (payErr: any) {
+      serverLogger.warn(
+        { err: payErr.message },
+        'Payment Orchestrator initialization error (will retry dynamically on demand)'
+      );
+    }
+
+    // 4. Initialize Express application
     const app = createApp();
 
     // 4. Start HTTP server

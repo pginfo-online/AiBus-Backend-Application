@@ -45,4 +45,19 @@ export class TicketsController {
       next(error);
     }
   };
+
+  public downloadTicketPdf = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+    try {
+      const rawId = req.params.bookingId || req.params.id;
+      const identifier = Array.isArray(rawId) ? rawId[0] : String(rawId || '');
+      const { buffer, fileName } = await this.ticketsService.generateTicketPdfBuffer(identifier);
+
+      res.setHeader('Content-Type', 'application/pdf');
+      res.setHeader('Content-Disposition', `inline; filename="${fileName}"`);
+      res.setHeader('Content-Length', buffer.length);
+      res.end(buffer);
+    } catch (error) {
+      next(error);
+    }
+  };
 }

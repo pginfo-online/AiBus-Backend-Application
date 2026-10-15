@@ -24,6 +24,29 @@ import { AuditLogController } from './audit-log/audit-log.controller';
 import { SystemConfigController } from './system-config/system-config.controller';
 import { ReportController } from './report/report.controller';
 import { ProviderManagementController } from './provider-management/provider-management.controller';
+import { AgentManagementController } from './agent-management/agent-management.controller';
+import { CommissionManagementController } from './commission-management/commission-management.controller';
+import { LedgerManagementController } from './ledger-management/ledger-management.controller';
+import { PaymentGatewayAdminController } from './payment-gateways/payment-gateways.controller';
+
+// B2B Validation Schemas
+import {
+  listAgentsQuerySchema,
+  agentIdParamsSchema,
+  kycReviewBodySchema,
+  suspendAgentBodySchema,
+  updateCreditLimitBodySchema,
+} from './agent-management/agent-management.validation';
+import {
+  listCommissionRulesQuerySchema,
+  ruleIdParamsSchema,
+  createCommissionRuleBodySchema,
+  updateCommissionRuleBodySchema,
+} from './commission-management/commission-management.validation';
+import {
+  listLedgerQuerySchema,
+  manualAdjustmentBodySchema,
+} from './ledger-management/ledger-management.validation';
 
 // Validation Schemas
 import {
@@ -290,6 +313,40 @@ paymentsRouter.post(
   payments.reconcilePayment
 );
 adminRouter.use('/payments', paymentsRouter);
+
+// ---------------------------------------------------------------------------
+// 4b. Payment Gateway Management & Dynamic Multi-PG Orchestration
+// ---------------------------------------------------------------------------
+const paymentGateways = new PaymentGatewayAdminController();
+const paymentGatewaysRouter = Router();
+
+paymentGatewaysRouter.get(
+  '/',
+  authorizePermission(AdminPermission.PAYMENT_GATEWAYS_MANAGE),
+  paymentGateways.listGateways
+);
+
+paymentGatewaysRouter.get(
+  '/metrics',
+  authorizePermission(AdminPermission.PAYMENT_GATEWAYS_MANAGE),
+  paymentGateways.getGatewayMetrics
+);
+
+paymentGatewaysRouter.patch(
+  '/:gateway',
+  authorizePermission(AdminPermission.PAYMENT_GATEWAYS_MANAGE),
+  adminAudit('payment-gateways'),
+  paymentGateways.updateGateway
+);
+
+paymentGatewaysRouter.post(
+  '/:gateway/toggle',
+  authorizePermission(AdminPermission.PAYMENT_GATEWAYS_MANAGE),
+  adminAudit('payment-gateways'),
+  paymentGateways.toggleGateway
+);
+
+adminRouter.use('/payment-gateways', paymentGatewaysRouter);
 
 // ---------------------------------------------------------------------------
 // 5. Refund Management
@@ -703,5 +760,121 @@ providersRouter.get(
   providers.getTransactionById
 );
 adminRouter.use('/providers', providersRouter);
+
+// ---------------------------------------------------------------------------
+// 15. B2B Agent Management Router (/api/v1/admin/agents)
+// ---------------------------------------------------------------------------
+const agentsAdminRouter = Router();
+const agentAdmin = AgentManagementController.getInstance();
+
+agentsAdminRouter.get(
+  '/',
+  authorizePermission(AdminPermission.AGENTS_LIST),
+  validate({ query: listAgentsQuerySchema }),
+  agentAdmin.listAgents
+);
+agentsAdminRouter.get(
+  '/:agentId',
+  authorizePermission(AdminPermission.AGENTS_VIEW),
+  validate({ params: agentIdParamsSchema }),
+  agentAdmin.getAgentDetails
+);
+agentsAdminRouter.post(
+  '/:agentId/kyc-review',
+  authorizePermission(AdminPermission.AGENTS_KYC_REVIEW),
+  adminAudit('agent-management'),
+  validate({ params: agentIdParamsSchema, body: kycReviewBodySchema }),
+  agentAdmin.reviewKyc
+);
+agentsAdminRouter.post(
+  '/:agentId/suspend',
+  authorizePermission(AdminPermission.AGENTS_SUSPEND),
+  adminAudit('agent-management'),
+  validate({ params: agentIdParamsSchema, body: suspendAgentBodySchema }),
+  agentAdmin.suspendAgent
+);
+agentsAdminRouter.post(
+  '/:agentId/reactivate',
+  authorizePermission(AdminPermission.AGENTS_SUSPEND),
+  adminAudit('agent-management'),
+  validate({ params: agentIdParamsSchema }),
+  agentAdmin.reactivateAgent
+);
+agentsAdminRouter.patch(
+  '/:agentId/credit-limit',
+  authorizePermission(AdminPermission.AGENTS_CREDIT_MANAGE),
+  adminAudit('agent-management'),
+  validate({ params: agentIdParamsSchema, body: updateCreditLimitBodySchema }),
+  agentAdmin.updateCreditLimit
+);
+adminRouter.use('/agents', agentsAdminRouter);
+
+// ---------------------------------------------------------------------------
+// 16. Commission Management Router (/api/v1/admin/commissions)
+// ---------------------------------------------------------------------------
+const commissionsRouter = Router();
+const commissions = CommissionManagementController.getInstance();
+
+commissionsRouter.get(
+  '/rules',
+  authorizePermission(AdminPermission.COMMISSIONS_LIST),
+  validate({ query: listCommissionRulesQuerySchema }),
+  commissions.listRules
+);
+commissionsRouter.post(
+  '/rules',
+  authorizePermission(AdminPermission.COMMISSIONS_MANAGE),
+  adminAudit('commission-management'),
+  validate({ body: createCommissionRuleBodySchema }),
+  commissions.createRule
+);
+commissionsRouter.patch(
+  '/rules/:ruleId',
+  authorizePermission(AdminPermission.COMMISSIONS_MANAGE),
+  adminAudit('commission-management'),
+  validate({ params: ruleIdParamsSchema, body: updateCommissionRuleBodySchema }),
+  commissions.updateRule
+);
+commissionsRouter.post(
+  '/rules/:ruleId/toggle',
+  authorizePermission(AdminPermission.COMMISSIONS_MANAGE),
+  adminAudit('commission-management'),
+  validate({ params: ruleIdParamsSchema }),
+  commissions.toggleRuleStatus
+);
+commissionsRouter.delete(
+  '/rules/:ruleId',
+  authorizePermission(AdminPermission.COMMISSIONS_MANAGE),
+  adminAudit('commission-management'),
+  validate({ params: ruleIdParamsSchema }),
+  commissions.deleteRule
+);
+adminRouter.use('/commissions', commissionsRouter);
+
+// ---------------------------------------------------------------------------
+// 17. Ledger & Platform Reconciliation Router (/api/v1/admin/ledger)
+// ---------------------------------------------------------------------------
+const ledgerRouter = Router();
+const ledgerAdmin = LedgerManagementController.getInstance();
+
+ledgerRouter.get(
+  '/entries',
+  authorizePermission(AdminPermission.LEDGER_VIEW),
+  validate({ query: listLedgerQuerySchema }),
+  ledgerAdmin.listLedgerEntries
+);
+ledgerRouter.get(
+  '/reconciliation',
+  authorizePermission(AdminPermission.LEDGER_RECONCILE),
+  ledgerAdmin.getReconciliationReport
+);
+ledgerRouter.post(
+  '/adjustments',
+  authorizePermission(AdminPermission.LEDGER_ADJUST),
+  adminAudit('ledger-management'),
+  validate({ body: manualAdjustmentBodySchema }),
+  ledgerAdmin.createManualAdjustment
+);
+adminRouter.use('/ledger', ledgerRouter);
 
 export default adminRouter;

@@ -5,6 +5,7 @@ import { QueueName } from '../../shared/constants';
 import { NotFoundError, ValidationError, ProviderError } from '../../shared/errors';
 import { logger } from '../../infrastructure/logger';
 import { BookingStatus, CancellationStatus, RefundStatus, RefundDestination } from '@prisma/client';
+import { buildRefundLines, buildLedgerPostingData } from '../../infrastructure/ledger';
 
 export class CancellationsService {
   private static instance: CancellationsService;
@@ -85,11 +86,11 @@ export class CancellationsService {
     const booking = isUuid
       ? await prisma.booking.findUnique({
           where: { id: bookingIdentifier },
-          include: { seats: true, payments: true },
+          include: { seats: true, payments: true, commissionSnapshot: true },
         })
       : await prisma.booking.findUnique({
           where: { bookingNumber: bookingIdentifier },
-          include: { seats: true, payments: true },
+          include: { seats: true, payments: true, commissionSnapshot: true },
         });
 
     if (!booking) {
@@ -125,7 +126,22 @@ export class CancellationsService {
         throw new ProviderError('GDS', cancelRes.Message || 'Failed to cancel seats with provider');
       }
 
-      // 3. Atomically update DB records
+      const refundAmount = Number(cancelRes.RefundAmount ?? 0);
+      let commissionReversal = 0;
+      let netRefundToAgent = refundAmount;
+
+      if (booking.agentId && booking.commissionSnapshot) {
+        const totalBookingFare = Number(booking.totalFare);
+        const origCommission = Number(booking.commissionSnapshot.commissionAmt);
+        if (totalBookingFare > 0) {
+          commissionReversal = Math.round(((refundAmount / totalBookingFare) * origCommission) * 100) / 100;
+        }
+        netRefundToAgent = Math.max(0, refundAmount - commissionReversal);
+      }
+
+      const isAgentBooking = Boolean(booking.agentId);
+
+      // 3. Atomically update DB records & financials
       const cancellationResult = await prisma.$transaction(async (tx) => {
         // Record cancellation
         const cancellation = await tx.cancellation.create({
@@ -139,7 +155,7 @@ export class CancellationsService {
             providerNewPnrNo: cancelRes.NewPNRNo ? String(cancelRes.NewPNRNo) : null,
             chargePct: Number(cancelRes.ChargePct ?? 0),
             chargeAmt: Number(cancelRes.ChargeAmt ?? cancelRes.CancellationCharge ?? 0),
-            refundAmount: Number(cancelRes.RefundAmount ?? 0),
+            refundAmount,
             totalFare: Number(cancelRes.TotalFare || booking.totalFare),
             reason,
           },
@@ -162,30 +178,82 @@ export class CancellationsService {
             paymentId: payment?.id ?? null,
             cancellationId: cancellation.id,
             userId: userId ?? booking.userId ?? null,
-            amount: Number(cancelRes.RefundAmount ?? 0),
-            status: RefundStatus.PENDING,
-            destination: RefundDestination.ORIGINAL_PAYMENT_METHOD,
-            reason: reason || 'Customer requested seat cancellation',
+            amount: refundAmount,
+            status: isAgentBooking ? RefundStatus.COMPLETED : RefundStatus.PENDING,
+            destination: isAgentBooking ? RefundDestination.WALLET : RefundDestination.ORIGINAL_PAYMENT_METHOD,
+            reason: reason || 'Seat cancellation processed',
+            completedAt: isAgentBooking ? new Date() : null,
           },
         });
 
-        return { cancellation, refund, providerResponse: cancelRes };
+        // If agent booking: credit agent wallet and post balanced double-entry ledger reversals
+        if (booking.agentId) {
+          await tx.agentWallet.update({
+            where: { agentId: booking.agentId },
+            data: {
+              cashBalance: { increment: netRefundToAgent },
+              totalRefunds: { increment: refundAmount },
+              version: { increment: 1 },
+            },
+          });
+
+          const idempotencyPrefix = `CANCEL-${cancellation.id}-${Date.now()}`;
+          const ledgerLines = buildRefundLines({
+            bookingId: booking.id,
+            cancellationId: cancellation.id,
+            agentId: booking.agentId,
+            refundAmount,
+            commissionReversal,
+            idempotencyPrefix,
+          });
+
+          const ledgerData = buildLedgerPostingData({
+            agentId: booking.agentId,
+            bookingId: booking.id,
+            cancellationId: cancellation.id,
+            referenceId: booking.bookingNumber,
+            createdBy: userId || 'SYSTEM',
+            lines: ledgerLines,
+          });
+
+          await tx.ledgerEntry.createMany({ data: ledgerData, skipDuplicates: true });
+
+          if (booking.commissionSnapshot && commissionReversal > 0) {
+            await tx.commissionSnapshot.update({
+              where: { id: booking.commissionSnapshot.id },
+              data: {
+                reversedAt: new Date(),
+                reversalAmt: commissionReversal,
+              },
+            });
+          }
+        }
+
+        return {
+          cancellation,
+          refund,
+          providerResponse: cancelRes,
+          commissionReversal,
+          netRefundToAgent: isAgentBooking ? netRefundToAgent : undefined,
+        };
       });
 
-      // 4. Enqueue refund processing job
-      try {
-        await addJob(QueueName.REFUND_PROCESSING, 'process-refund', {
-          refundId: cancellationResult.refund.id,
-          bookingId: booking.id,
-          amount: Number(cancelRes.RefundAmount ?? 0),
-        });
-      } catch (queueErr) {
-        this.cancelLogger.warn({ queueErr }, 'Failed to queue refund processing job');
+      // 4. Enqueue gateway refund processing job only for customer credit-card/UPI payments
+      if (!isAgentBooking && refundAmount > 0) {
+        try {
+          await addJob(QueueName.REFUND_PROCESSING, 'process-refund', {
+            refundId: cancellationResult.refund.id,
+            bookingId: booking.id,
+            amount: refundAmount,
+          });
+        } catch (queueErr) {
+          this.cancelLogger.warn({ queueErr }, 'Failed to queue refund processing job');
+        }
       }
 
       this.cancelLogger.info(
-        { bookingId: booking.id, refundAmount: cancelRes.RefundAmount },
-        'Cancellation successful and refund queued'
+        { bookingId: booking.id, refundAmount, isAgentBooking },
+        'Cancellation completed and financials settled'
       );
 
       return cancellationResult;

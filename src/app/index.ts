@@ -18,6 +18,7 @@ import paymentsRoutes from '../modules/payments/payments.routes';
 import cancellationsRoutes from '../modules/cancellations/cancellations.routes';
 import ticketsRoutes from '../modules/tickets/tickets.routes';
 import adminRoutes from '../modules/admin/admin.routes';
+import agentsRoutes from '../modules/agents/agents.routes';
 import { pinoHttp } from 'pino-http';
 import { logger } from '../infrastructure/logger';
 import swaggerUi from 'swagger-ui-express';
@@ -114,6 +115,7 @@ export function createApp(): Express {
   app.use(`${apiPrefix}/cancellations`, cancellationsRoutes);
   app.use(`${apiPrefix}/tickets`, ticketsRoutes);
   app.use(`${apiPrefix}/admin`, adminRoutes);
+  app.use(`${apiPrefix}/agents`, agentsRoutes);
 
   // Frontend aliases (/api/bus/* & /api/cities etc.)
   app.use('/api/bus/cities', citiesRoutes);

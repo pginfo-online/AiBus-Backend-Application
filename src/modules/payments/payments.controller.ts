@@ -19,6 +19,18 @@ export class PaymentsController {
     }
   };
 
+  public payWithWallet = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+    try {
+      const bookingId = req.body.bookingId;
+      const agentId = (req as any).agentId;
+      const userId = (req as any).user?.sub;
+      const result = await this.paymentsService.payWithWallet(bookingId, agentId, userId);
+      ApiResponse.success(res, result, 'Wallet payment successful and booking confirmed');
+    } catch (error) {
+      next(error);
+    }
+  };
+
   public verifyPayment = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     try {
       const result = await this.paymentsService.verifyPayment(req.body);
@@ -33,6 +45,16 @@ export class PaymentsController {
       const rawBody = req.body.response;
       const xVerify = req.headers['x-verify'] as string | undefined;
       const result = await this.paymentsService.handleWebhook(rawBody, xVerify);
+      ApiResponse.success(res, result);
+    } catch (error) {
+      next(error);
+    }
+  };
+
+  public handleRazorpayWebhook = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+    try {
+      const rawBody = (req as any).rawBody || req.body;
+      const result = await this.paymentsService.handleRazorpayWebhook(rawBody, req.headers as any);
       ApiResponse.success(res, result);
     } catch (error) {
       next(error);

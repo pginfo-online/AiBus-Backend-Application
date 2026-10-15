@@ -30,6 +30,7 @@ export const AdminPermission = {
   PAYMENTS_LIST: 'payments:list',
   PAYMENTS_VIEW: 'payments:view',
   PAYMENTS_RECONCILE: 'payments:reconcile',
+  PAYMENT_GATEWAYS_MANAGE: 'payments:gateways_manage',
 
   // Refunds
   REFUNDS_LIST: 'refunds:list',
@@ -76,6 +77,22 @@ export const AdminPermission = {
   // Providers
   PROVIDERS_VIEW: 'providers:view',
   PROVIDERS_MANAGE: 'providers:manage',
+
+  // Agents (B2B)
+  AGENTS_LIST: 'agents:list',
+  AGENTS_VIEW: 'agents:view',
+  AGENTS_KYC_REVIEW: 'agents:kyc_review',
+  AGENTS_SUSPEND: 'agents:suspend',
+  AGENTS_CREDIT_MANAGE: 'agents:credit_manage',
+
+  // Commissions
+  COMMISSIONS_LIST: 'commissions:list',
+  COMMISSIONS_MANAGE: 'commissions:manage',
+
+  // Ledger & Reconciliation
+  LEDGER_VIEW: 'ledger:view',
+  LEDGER_RECONCILE: 'ledger:reconcile',
+  LEDGER_ADJUST: 'ledger:adjust',
 } as const;
 
 export type AdminPermissionType = typeof AdminPermission[keyof typeof AdminPermission];
@@ -171,6 +188,17 @@ const ROLE_PERMISSIONS: Record<string, Set<AdminPermissionType>> = {
     AdminPermission.REPORTS_EXPORT,
     AdminPermission.PROVIDERS_VIEW,
     AdminPermission.SYSTEM_HEALTH,
+    AdminPermission.AGENTS_LIST,
+    AdminPermission.AGENTS_VIEW,
+    AdminPermission.AGENTS_KYC_REVIEW,
+    AdminPermission.AGENTS_SUSPEND,
+    AdminPermission.AGENTS_CREDIT_MANAGE,
+    AdminPermission.COMMISSIONS_LIST,
+    AdminPermission.COMMISSIONS_MANAGE,
+    AdminPermission.LEDGER_VIEW,
+    AdminPermission.LEDGER_RECONCILE,
+    AdminPermission.LEDGER_ADJUST,
+    AdminPermission.PAYMENT_GATEWAYS_MANAGE,
   ]),
   [UserRole.SUPER_ADMIN]: new Set<AdminPermissionType>(
     Object.values(AdminPermission)

@@ -229,6 +229,7 @@ export const QueueName = {
   PROVIDER_HEALTH: 'provider-health',
   HOLD_EXPIRY_CLEANUP: 'hold-expiry-cleanup',
   AUDIT_LOG: 'audit-log',
+  LEDGER_RECONCILIATION: 'ledger-reconciliation',
 } as const;
 
 /** HTTP timeout defaults */

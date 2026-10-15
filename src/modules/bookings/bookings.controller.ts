@@ -12,7 +12,8 @@ export class BookingsController {
   public createBooking = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     try {
       const userId = (req as any).user?.sub;
-      const booking = await this.bookingsService.createBooking(req.body, userId);
+      const agentId = (req as any).agentId;
+      const booking = await this.bookingsService.createBooking(req.body, userId, agentId);
       ApiResponse.created(res, booking, 'Booking initiated successfully');
     } catch (error) {
       next(error);

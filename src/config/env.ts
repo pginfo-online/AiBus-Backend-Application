@@ -68,6 +68,15 @@ const envSchema = z.object({
   PHONEPE_CALLBACK_URL: z.string().optional(),
   PHONEPE_REDIRECT_URL: z.string().optional(),
 
+  // Razorpay Payment Gateway
+  RAZORPAY_KEY_ID: z.string().optional(),
+  RAZORPAY_KEY_SECRET: z.string().optional(),
+  RAZORPAY_WEBHOOK_SECRET: z.string().optional(),
+
+  // Payment Orchestration & Smart Routing Defaults
+  PAYMENT_PRIMARY_GATEWAY: z.enum(['RAZORPAY', 'PHONEPE', 'AUTO']).default('RAZORPAY'),
+  PAYMENT_HOLD_CUTOFF_SECONDS: z.coerce.number().int().positive().default(90), // 90s cutoff before hold expiry
+
   // Cloudinary
   CLOUDINARY_CLOUD_NAME: z.string().optional(),
   CLOUDINARY_API_KEY: z.string().optional(),

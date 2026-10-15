@@ -7,6 +7,8 @@ import { GdsAdapter } from '../providers/gds/gdsAdapter';
 import { logger } from '../infrastructure/logger';
 import { BookingStatus, HoldStatus, PaymentStatus, RefundStatus, TicketStatus } from '@prisma/client';
 import { env } from '../config/env';
+import { LedgerManagementService } from '../modules/admin/ledger-management/ledger-management.service';
+import { PaymentOrchestrator } from '../infrastructure/payments';
 
 const workerLogger = logger.child({ module: 'background-workers' });
 
@@ -219,7 +221,7 @@ export function startHoldExpiryWorker() {
 
 /**
  * 3. Refund Processing Worker
- * Dispatches refunds to PhonePe gateway and updates database records
+ * Dispatches refunds to payment gateway (Razorpay / PhonePe) and updates database records
  */
 export function startRefundWorker() {
   return createWorker(QueueName.REFUND_PROCESSING, async (job) => {
@@ -256,14 +258,17 @@ export function startRefundWorker() {
 
     const originalTxnId = merchantTxnId || refund.payment?.merchantTxnId;
     const originalPaymentId = gatewayPaymentId || refund.payment?.gatewayPaymentId;
+    const targetGateway = (refund.payment?.gateway as any) || 'RAZORPAY';
 
-    // Attempt PhonePe refund
-    if (originalTxnId) {
+    if (originalTxnId || originalPaymentId) {
       const merchantRefundId = `REF-${refundId.slice(0, 8)}-${Date.now()}`;
-      const refundResult = await callPhonePeRefund({
+      const orchestrator = PaymentOrchestrator.getInstance();
+      const refundResult = await orchestrator.processRefund(targetGateway, {
         merchantRefundId,
-        originalMerchantTxnId: originalTxnId,
+        originalMerchantTxnId: originalTxnId || merchantRefundId,
+        gatewayPaymentId: originalPaymentId || undefined,
         amount,
+        reason: 'AiBus booking cancellation/refund',
       });
 
       if (refundResult.success) {
@@ -272,7 +277,7 @@ export function startRefundWorker() {
             where: { id: refundId },
             data: {
               status: RefundStatus.COMPLETED,
-              gatewayRefundId: refundResult.refundId || merchantRefundId,
+              gatewayRefundId: refundResult.gatewayRefundId || merchantRefundId,
               completedAt: new Date(),
             },
           });
@@ -298,7 +303,10 @@ export function startRefundWorker() {
           }
         });
 
-        workerLogger.info({ refundId, amount, refundResult }, 'Refund successfully processed via PhonePe');
+        workerLogger.info(
+          { refundId, amount, gateway: refundResult.gateway, gatewayRefundId: refundResult.gatewayRefundId },
+          'Refund successfully processed via gateway'
+        );
       } else {
         // Refund API failed — mark as FAILED; BullMQ will retry
         await prisma.refund.update({
@@ -306,10 +314,10 @@ export function startRefundWorker() {
           data: { status: RefundStatus.FAILED },
         });
         workerLogger.error(
-          { refundId, code: refundResult.code },
-          'PhonePe refund API returned failure — will retry'
+          { refundId, gateway: targetGateway, code: refundResult.code, message: refundResult.message },
+          'Gateway refund API returned failure — will retry'
         );
-        throw new Error(`PhonePe refund failed with code: ${refundResult.code}`);
+        throw new Error(`${targetGateway} refund failed with code: ${refundResult.code}`);
       }
     } else {
       // No payment transaction ID to refund against — mark as FAILED for manual review
@@ -345,6 +353,108 @@ export function startNotificationWorkers() {
 }
 
 /**
+ * 5. Ticket Generation Worker
+ * Generates branded PDF ticket and persists access URL
+ */
+export function startTicketGenerationWorker() {
+  return createWorker(QueueName.TICKET_GENERATION, async (job) => {
+    const { bookingId } = job.data as { bookingId: string };
+    const prisma = getPrismaClient();
+
+    workerLogger.info({ bookingId }, 'Generating ticket PDF in background worker...');
+
+    const booking = await prisma.booking.findUnique({
+      where: { id: bookingId },
+      include: {
+        passengers: true,
+        seats: true,
+        ticket: true,
+      },
+    });
+
+    if (!booking || !booking.ticket) {
+      workerLogger.warn({ bookingId }, 'Booking or ticket record not found for PDF generation');
+      return;
+    }
+
+    if (booking.ticket.pdfUrl && booking.ticket.status === TicketStatus.ISSUED) {
+      workerLogger.info({ bookingId }, 'Ticket PDF already issued (idempotent)');
+      return;
+    }
+
+    const ticketPdfUrl = `/api/${env.API_VERSION}/tickets/booking/${booking.id}/pdf`;
+
+    await prisma.ticket.update({
+      where: { id: booking.ticket.id },
+      data: {
+        pdfUrl: ticketPdfUrl,
+        status: TicketStatus.ISSUED,
+        generatedAt: new Date(),
+      },
+    });
+
+    workerLogger.info({ bookingId, ticketPdfUrl }, 'Ticket PDF generation complete');
+  });
+}
+
+/**
+ * 6. Daily Ledger Reconciliation Worker
+ * Audits all agent wallet cash balances against the sum of double-entry ledger journal postings
+ * Emits alert logs whenever an un-reconciled discrepancy is detected
+ */
+export function startLedgerReconciliationWorker() {
+  return createWorker(QueueName.LEDGER_RECONCILIATION, async (job) => {
+    workerLogger.info({ jobId: job.id }, 'Starting scheduled agent ledger reconciliation audit...');
+    const ledgerManagementService = LedgerManagementService.getInstance();
+    const report = await ledgerManagementService.getReconciliationReport();
+
+    if (report.discrepantAgents > 0) {
+      const discrepancies = report.agents
+        .filter((a) => a.reconciliationStatus === 'DISCREPANCY_DETECTED')
+        .map((a) => ({
+          agentId: a.agentId,
+          businessName: a.businessName,
+          walletBalance: a.currentBalance,
+          ledgerSum: a.calculatedBalance,
+          discrepancy: a.discrepancy,
+        }));
+
+      workerLogger.error(
+        {
+          totalAudited: report.totalAgentsAudited,
+          discrepantCount: report.discrepantAgents,
+          discrepancies,
+        },
+        'CRITICAL FINANCIAL AUDIT ALERT: Discrepancy detected between AgentWallet balance and double-entry LedgerEntries!'
+      );
+    } else {
+      workerLogger.info(
+        {
+          totalAudited: report.totalAgentsAudited,
+          matchedAgents: report.matchedAgents,
+        },
+        'Agent ledger reconciliation audit SUCCESS: 100% of agent wallets match double-entry ledger journal.'
+      );
+    }
+  });
+}
+
+export async function scheduleDailyReconciliationJob() {
+  try {
+    const { scheduleRecurringJob } = await import('../infrastructure/queues');
+    await scheduleRecurringJob(
+      QueueName.LEDGER_RECONCILIATION,
+      'daily-ledger-reconciliation',
+      { pattern: '0 2 * * *' }, // Daily at 02:00 AM UTC
+      { name: 'daily-ledger-reconciliation', data: {} }
+    );
+    workerLogger.info('Daily ledger reconciliation job scheduled (02:00 UTC)');
+  } catch (err: any) {
+    workerLogger.warn({ err: err.message }, 'Failed to schedule daily ledger reconciliation cron job');
+  }
+}
+
+/**
  * Initialize all application background workers
  */
 export function initializeWorkers() {
@@ -353,6 +463,9 @@ export function initializeWorkers() {
     startHoldExpiryWorker();
     startRefundWorker();
     startNotificationWorkers();
+    startTicketGenerationWorker();
+    startLedgerReconciliationWorker();
+    scheduleDailyReconciliationJob();
     workerLogger.info('All BullMQ background workers initialized');
   } catch (err) {
     workerLogger.warn({ err }, 'Could not initialize workers (Redis may be in disconnected mode)');

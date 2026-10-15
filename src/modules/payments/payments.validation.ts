@@ -2,9 +2,9 @@ import { z } from 'zod';
 
 export const createPaymentIntentSchema = z.object({
   bookingId: z.string().uuid('Valid bookingId is required'),
-  gateway: z.enum(['PHONEPE', 'RAZORPAY', 'MOCK']).default('PHONEPE'),
+  gateway: z.enum(['PHONEPE', 'RAZORPAY', 'AUTO', 'MOCK']).default('AUTO'),
   redirectUrl: z.string().optional(),
-  paymentMode: z.enum(['UPI', 'CARD', 'NETBANKING', 'ALL']).optional(),
+  paymentMode: z.enum(['UPI', 'CARD', 'NETBANKING', 'WALLET', 'ALL']).optional(),
 });
 
 export const verifyPaymentSchema = z.object({

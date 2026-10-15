@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { PaymentsController } from './payments.controller';
 import { validate, optionalAuth, authenticate, idempotencyMiddleware } from '../../app/middleware';
+import { requireAgentContext, requireAgentKycApproved } from '../agents/agents.middleware';
 import {
   createPaymentIntentSchema,
   verifyPaymentSchema,
@@ -10,6 +11,16 @@ import {
 
 const paymentsRouter = Router();
 const controller = new PaymentsController();
+
+// B2B Agent Wallet Payment — requires authenticated approved agent context
+paymentsRouter.post(
+  '/wallet-pay',
+  authenticate,
+  requireAgentContext,
+  requireAgentKycApproved,
+  idempotencyMiddleware(),
+  controller.payWithWallet
+);
 
 // Create payment intent — requires authentication (only confirmed users may pay)
 paymentsRouter.post(
@@ -29,11 +40,26 @@ paymentsRouter.post(
   controller.verifyPayment
 );
 
-// Payment gateway webhook
+// Payment gateway webhook (PhonePe)
 paymentsRouter.post(
   '/webhook',
   validate({ body: webhookPayloadSchema }),
   controller.handleWebhook
+);
+paymentsRouter.post(
+  '/webhook/phonepe',
+  validate({ body: webhookPayloadSchema }),
+  controller.handleWebhook
+);
+
+// Payment gateway webhook (Razorpay)
+paymentsRouter.post(
+  '/webhook/razorpay',
+  controller.handleRazorpayWebhook
+);
+paymentsRouter.post(
+  '/razorpay-webhook',
+  controller.handleRazorpayWebhook
 );
 
 // Controlled webhook simulation (local development & testing only)

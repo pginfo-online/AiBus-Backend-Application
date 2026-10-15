@@ -1,6 +1,7 @@
 import { getPrismaClient } from '../../infrastructure/database';
 import { NotFoundError } from '../../shared/errors';
 import { GdsAdapter } from '../../providers/gds/gdsAdapter';
+import { generateTicketPdf, TicketPdfData } from '../../infrastructure/pdf/ticketPdfGenerator';
 
 export class TicketsService {
   private static instance: TicketsService;
@@ -280,5 +281,43 @@ export class TicketsService {
       booking: ticket.booking,
       gdsDetails,
     };
+  }
+
+  public async generateTicketPdfBuffer(
+    bookingIdentifier: string
+  ): Promise<{ buffer: Buffer; fileName: string }> {
+    const details = await this.getTicketByBookingId(bookingIdentifier);
+    const booking = details.booking as any;
+    if (!booking) {
+      throw new NotFoundError('Booking record not found for PDF generation');
+    }
+
+    const pdfData: TicketPdfData = {
+      bookingNumber: booking.bookingNumber,
+      ticketNumber: String(details.ticketNumber),
+      pnrNumber: String(details.pnrNumber),
+      operatorName: booking.operatorName,
+      busType: booking.busType,
+      journeyDate: booking.journeyDate,
+      fromCityName: booking.fromCityName,
+      toCityName: booking.toCityName,
+      pickupLocation: booking.pickupLocation,
+      pickupTime: booking.pickupTime,
+      dropoffLocation: booking.dropoffLocation,
+      dropoffTime: booking.dropoffTime,
+      totalFare: Number(booking.totalFare),
+      contactName: booking.contactName,
+      contactPhone: booking.contactPhone,
+      passengers: (booking.passengers || []).map((p: any) => ({
+        name: p.name,
+        age: p.age,
+        gender: p.gender,
+        seatNo: p.seatNo,
+      })),
+    };
+
+    const buffer = await generateTicketPdf(pdfData);
+    const fileName = `AiBus-Ticket-${details.ticketNumber || booking.bookingNumber}.pdf`;
+    return { buffer, fileName };
   }
 }
