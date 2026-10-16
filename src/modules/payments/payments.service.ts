@@ -1132,8 +1132,8 @@ export class PaymentsService {
           merchantTxnId,
           amount: netFare,
           status: PaymentStatus.SUCCESS,
+          gateway: 'WALLET',
           paymentMethod: 'WALLET',
-          paidAt: new Date(),
         },
       });
 

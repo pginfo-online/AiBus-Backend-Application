@@ -960,8 +960,8 @@ class PaymentsService {
                     merchantTxnId,
                     amount: netFare,
                     status: client_1.PaymentStatus.SUCCESS,
+                    gateway: 'WALLET',
                     paymentMethod: 'WALLET',
-                    paidAt: new Date(),
                 },
             });
             // Update booking to PAYMENT_SUCCESS
