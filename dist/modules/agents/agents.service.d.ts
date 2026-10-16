@@ -1,0 +1,393 @@
+import { AgentKycDocType, Prisma } from '@prisma/client';
+import { RegisterAgentInput, AddBankAccountInput, InviteStaffInput, UpdateStaffRoleInput, InitiateTopupInput, UpdateAgentProfileInput } from './agents.validation';
+export declare class AgentsService {
+    private static instance;
+    private authService;
+    private constructor();
+    static getInstance(): AgentsService;
+    registerAgent(input: RegisterAgentInput): Promise<{
+        agent: any;
+        user: any;
+        tokens: any;
+    }>;
+    getAgentForUser(userId: string): Promise<any>;
+    getAgentById(agentId: string): Promise<{
+        kycDocuments: {
+            id: string;
+            createdAt: Date;
+            agentId: string;
+            docType: import(".prisma/client").$Enums.AgentKycDocType;
+            fileUrl: string;
+            storageKey: string;
+            verifiedAt: Date | null;
+            verifiedBy: string | null;
+            rejectedAt: Date | null;
+            rejectReason: string | null;
+        }[];
+        wallet: {
+            version: number;
+            id: string;
+            createdAt: Date;
+            updatedAt: Date;
+            agentId: string;
+            cashBalance: Prisma.Decimal;
+            creditLimit: Prisma.Decimal;
+            creditUsed: Prisma.Decimal;
+            isFrozen: boolean;
+            frozenReason: string | null;
+            frozenAt: Date | null;
+            frozenBy: string | null;
+            totalTopups: Prisma.Decimal;
+            totalSpent: Prisma.Decimal;
+            totalCommission: Prisma.Decimal;
+            totalRefunds: Prisma.Decimal;
+        } | null;
+        staff: ({
+            user: {
+                passwordHash: string;
+                id: string;
+                email: string;
+                firstName: string;
+                lastName: string;
+                phone: string | null;
+                role: import(".prisma/client").$Enums.UserRole;
+                status: import(".prisma/client").$Enums.UserStatus;
+                emailVerified: boolean;
+                phoneVerified: boolean;
+                walletBalance: Prisma.Decimal;
+                createdAt: Date;
+                updatedAt: Date;
+            };
+        } & {
+            userId: string;
+            id: string;
+            role: import(".prisma/client").$Enums.AgentStaffRole;
+            agentId: string;
+            permissions: Prisma.JsonValue | null;
+            isActive: boolean;
+            invitedAt: Date;
+            joinedAt: Date | null;
+        })[];
+        bankAccounts: {
+            id: string;
+            createdAt: Date;
+            updatedAt: Date;
+            agentId: string;
+            verifiedAt: Date | null;
+            accountHolderName: string;
+            accountNumber: string;
+            ifscCode: string;
+            bankName: string;
+            isVerified: boolean;
+            isPrimary: boolean;
+            withdrawFreezeUntil: Date | null;
+        }[];
+    } & {
+        id: string;
+        email: string;
+        phone: string;
+        status: import(".prisma/client").$Enums.AgentStatus;
+        createdAt: Date;
+        updatedAt: Date;
+        city: string;
+        state: string;
+        businessName: string;
+        contactPersonName: string;
+        businessAddress: string;
+        pincode: string | null;
+        logoUrl: string | null;
+        gstNumber: string | null;
+        panNumber: string | null;
+        rejectionReason: string | null;
+        approvedAt: Date | null;
+        approvedBy: string | null;
+        suspendedAt: Date | null;
+        suspendedReason: string | null;
+    }>;
+    updateProfile(agentId: string, input: UpdateAgentProfileInput): Promise<any>;
+    submitKycDocument(agentId: string, docType: AgentKycDocType, fileUrl: string, storageKey: string): Promise<{
+        id: string;
+        createdAt: Date;
+        agentId: string;
+        docType: import(".prisma/client").$Enums.AgentKycDocType;
+        fileUrl: string;
+        storageKey: string;
+        verifiedAt: Date | null;
+        verifiedBy: string | null;
+        rejectedAt: Date | null;
+        rejectReason: string | null;
+    }>;
+    getKycStatus(agentId: string): Promise<{
+        agentId: string;
+        status: import(".prisma/client").$Enums.AgentStatus;
+        rejectionReason: string | null;
+        approvedAt: Date | null;
+        documents: {
+            id: string;
+            createdAt: Date;
+            agentId: string;
+            docType: import(".prisma/client").$Enums.AgentKycDocType;
+            fileUrl: string;
+            storageKey: string;
+            verifiedAt: Date | null;
+            verifiedBy: string | null;
+            rejectedAt: Date | null;
+            rejectReason: string | null;
+        }[];
+    }>;
+    addBankAccount(agentId: string, input: AddBankAccountInput): Promise<{
+        id: string;
+        createdAt: Date;
+        updatedAt: Date;
+        agentId: string;
+        verifiedAt: Date | null;
+        accountHolderName: string;
+        accountNumber: string;
+        ifscCode: string;
+        bankName: string;
+        isVerified: boolean;
+        isPrimary: boolean;
+        withdrawFreezeUntil: Date | null;
+    }>;
+    listBankAccounts(agentId: string): Promise<{
+        id: string;
+        createdAt: Date;
+        updatedAt: Date;
+        agentId: string;
+        verifiedAt: Date | null;
+        accountHolderName: string;
+        accountNumber: string;
+        ifscCode: string;
+        bankName: string;
+        isVerified: boolean;
+        isPrimary: boolean;
+        withdrawFreezeUntil: Date | null;
+    }[]>;
+    inviteStaff(agentId: string, input: InviteStaffInput): Promise<{
+        staff: {
+            userId: string;
+            id: string;
+            role: import(".prisma/client").$Enums.AgentStaffRole;
+            agentId: string;
+            permissions: Prisma.JsonValue | null;
+            isActive: boolean;
+            invitedAt: Date;
+            joinedAt: Date | null;
+        };
+        user: any;
+        isNewUser: boolean;
+    }>;
+    listStaff(agentId: string): Promise<({
+        user: {
+            id: string;
+            email: string;
+            firstName: string;
+            lastName: string;
+            phone: string | null;
+            role: import(".prisma/client").$Enums.UserRole;
+            status: import(".prisma/client").$Enums.UserStatus;
+        };
+    } & {
+        userId: string;
+        id: string;
+        role: import(".prisma/client").$Enums.AgentStaffRole;
+        agentId: string;
+        permissions: Prisma.JsonValue | null;
+        isActive: boolean;
+        invitedAt: Date;
+        joinedAt: Date | null;
+    })[]>;
+    updateStaffRole(agentId: string, staffId: string, input: UpdateStaffRoleInput): Promise<{
+        userId: string;
+        id: string;
+        role: import(".prisma/client").$Enums.AgentStaffRole;
+        agentId: string;
+        permissions: Prisma.JsonValue | null;
+        isActive: boolean;
+        invitedAt: Date;
+        joinedAt: Date | null;
+    }>;
+    removeStaff(agentId: string, staffId: string): Promise<{
+        userId: string;
+        id: string;
+        role: import(".prisma/client").$Enums.AgentStaffRole;
+        agentId: string;
+        permissions: Prisma.JsonValue | null;
+        isActive: boolean;
+        invitedAt: Date;
+        joinedAt: Date | null;
+    }>;
+    getWallet(agentId: string): Promise<any>;
+    getWalletStatement(agentId: string, page?: number, limit?: number): Promise<{
+        entries: {
+            type: import(".prisma/client").$Enums.LedgerEntryType;
+            id: string;
+            agentId: string | null;
+            idempotencyKey: string | null;
+            bookingId: string | null;
+            currency: string;
+            cancellationId: string | null;
+            referenceId: string | null;
+            description: string;
+            batchId: string;
+            refundId: string | null;
+            topupId: string | null;
+            debitAmount: Prisma.Decimal;
+            creditAmount: Prisma.Decimal;
+            postedAt: Date;
+            createdBy: string | null;
+        }[];
+        total: number;
+        page: number;
+        limit: number;
+        pages: number;
+    }>;
+    initiateTopup(agentId: string, input: InitiateTopupInput): Promise<{
+        topup: {
+            id: string;
+            status: import(".prisma/client").$Enums.TopupStatus;
+            createdAt: Date;
+            updatedAt: Date;
+            agentId: string;
+            idempotencyKey: string | null;
+            amount: Prisma.Decimal;
+            gateway: string;
+            gatewayOrderId: string | null;
+            gatewayPaymentId: string | null;
+            merchantTxnId: string;
+            webhookVerified: boolean;
+            completedAt: Date | null;
+        };
+        isIdempotent: boolean;
+        gateway?: undefined;
+        checkoutUrl?: undefined;
+        upiIntentUrl?: undefined;
+        sdkPayload?: undefined;
+        merchantTxnId?: undefined;
+    } | {
+        topup: {
+            id: string;
+            status: import(".prisma/client").$Enums.TopupStatus;
+            createdAt: Date;
+            updatedAt: Date;
+            agentId: string;
+            idempotencyKey: string | null;
+            amount: Prisma.Decimal;
+            gateway: string;
+            gatewayOrderId: string | null;
+            gatewayPaymentId: string | null;
+            merchantTxnId: string;
+            webhookVerified: boolean;
+            completedAt: Date | null;
+        };
+        gateway: import("../../infrastructure/payments").GatewayName;
+        checkoutUrl: string | undefined;
+        upiIntentUrl: string | undefined;
+        sdkPayload: Record<string, unknown> | undefined;
+        merchantTxnId: string;
+        isIdempotent: boolean;
+    }>;
+    confirmTopup(merchantTxnId: string, gatewayPaymentId?: string): Promise<{
+        id: string;
+        status: import(".prisma/client").$Enums.TopupStatus;
+        createdAt: Date;
+        updatedAt: Date;
+        agentId: string;
+        idempotencyKey: string | null;
+        amount: Prisma.Decimal;
+        gateway: string;
+        gatewayOrderId: string | null;
+        gatewayPaymentId: string | null;
+        merchantTxnId: string;
+        webhookVerified: boolean;
+        completedAt: Date | null;
+    } | null>;
+    getBookingHistory(agentId: string, filters: {
+        page?: number;
+        limit?: number;
+        status?: string;
+        fromDate?: string;
+        toDate?: string;
+    }): Promise<{
+        bookings: ({
+            ticket: {
+                ticketNumber: string;
+                pnrNumber: string;
+                pdfUrl: string | null;
+            } | null;
+            commissionSnapshot: {
+                id: string;
+                createdAt: Date;
+                agentId: string;
+                bookingId: string;
+                ruleId: string | null;
+                ruleSnapshot: Prisma.JsonValue;
+                grossFare: Prisma.Decimal;
+                baseFareForCommission: Prisma.Decimal;
+                commissionRate: Prisma.Decimal;
+                commissionAmt: Prisma.Decimal;
+                netFare: Prisma.Decimal;
+                reversedAt: Date | null;
+                reversalAmt: Prisma.Decimal | null;
+            } | null;
+        } & {
+            version: number;
+            userId: string | null;
+            id: string;
+            status: import(".prisma/client").$Enums.BookingStatus;
+            createdAt: Date;
+            updatedAt: Date;
+            agentId: string | null;
+            userType: string;
+            bookingNumber: string;
+            providerName: string;
+            providerHoldId: string | null;
+            providerTicketNo: string | null;
+            providerPnrNo: string | null;
+            fromCityId: number;
+            toCityId: number;
+            fromCityName: string;
+            toCityName: string;
+            journeyDate: string;
+            busId: number;
+            tripId: string;
+            pickupCode: string;
+            pickupLocation: string;
+            pickupTime: string;
+            dropoffCode: string;
+            dropoffLocation: string;
+            dropoffTime: string;
+            operatorName: string;
+            busType: string;
+            totalFare: Prisma.Decimal;
+            baseFare: Prisma.Decimal;
+            serviceTax: Prisma.Decimal;
+            operatorGst: Prisma.Decimal;
+            convenienceFee: Prisma.Decimal;
+            discountAmount: Prisma.Decimal;
+            contactName: string;
+            contactEmail: string;
+            contactPhone: string;
+            cancellationPolicy: Prisma.JsonValue | null;
+            pickupSnapshot: Prisma.JsonValue | null;
+            dropoffSnapshot: Prisma.JsonValue | null;
+            idempotencyKey: string | null;
+            confirmedAt: Date | null;
+            cancelledAt: Date | null;
+        })[];
+        total: number;
+        page: number;
+        limit: number;
+        pages: number;
+    }>;
+    getCommissionSummary(agentId: string, fromDate?: string, toDate?: string): Promise<{
+        totalCommission: number;
+        reversedCommission: number;
+        netCommission: number;
+        count: number;
+    }>;
+    private _safeAgent;
+    private _safeUser;
+    private _safeWallet;
+}
+//# sourceMappingURL=agents.service.d.ts.map
