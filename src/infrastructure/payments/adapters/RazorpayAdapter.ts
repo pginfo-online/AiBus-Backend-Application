@@ -55,7 +55,7 @@ export class RazorpayAdapter implements IPaymentGateway {
 
     let orderId: string;
 
-    if (this.client && this.isConfigured()) {
+    if (this.client && this.isConfigured() && !isTest) {
       try {
         const order = await this.client.orders.create({
           amount: amountInPaise,
@@ -76,9 +76,9 @@ export class RazorpayAdapter implements IPaymentGateway {
         throw new Error(`Razorpay order creation failed: ${err.message}`);
       }
     } else {
-      // Development or test fallback
-      orderId = `order_sim_${Date.now()}`;
-      razorpayLogger.info({ orderId, merchantTxnId }, 'Simulated Razorpay order created for dev/test');
+      // Test environment fallback when network is unavailable
+      orderId = `order_test_${Date.now()}`;
+      razorpayLogger.info({ orderId, merchantTxnId }, 'Test Razorpay order created for unit/integration testing');
     }
 
     // Prepare client-side payload for Web checkout & Mobile native UPI Intent
@@ -100,7 +100,7 @@ export class RazorpayAdapter implements IPaymentGateway {
         merchantTxnId,
       },
       theme: {
-        color: '#E11D48', // Primary brand color
+        color: '#013C9A', // Primary brand color
       },
       // Native UPI intent configuration (Android & iOS direct deep-link triggers)
       upi: {
@@ -109,8 +109,10 @@ export class RazorpayAdapter implements IPaymentGateway {
     };
 
     // Construct universal payment URL (Razorpay Hosted Checkout / redirect)
-    const baseRedirect = params.redirectUrl || env.PHONEPE_REDIRECT_URL || 'http://localhost:5173/payment-result';
-    const paymentUrl = `${baseRedirect}${baseRedirect.includes('?') ? '&' : '?'}gateway=RAZORPAY&orderId=${orderId}&merchantTxnId=${merchantTxnId}`;
+    const baseRedirect = params.redirectUrl || `/api/v1/payments/checkout/${merchantTxnId}`;
+    const paymentUrl = baseRedirect.includes('checkout')
+      ? baseRedirect
+      : `${baseRedirect}${baseRedirect.includes('?') ? '&' : '?'}gateway=RAZORPAY&orderId=${orderId}&merchantTxnId=${merchantTxnId}`;
 
     // Standard NPCI UPI Intent URI format
     const upiIntentUrl = `upi://pay?pa=aibus@razorpay&pn=AiBus&tr=${merchantTxnId}&am=${params.amount.toFixed(2)}&cu=INR&tn=Booking_${params.bookingNumber}`;
@@ -209,24 +211,17 @@ export class RazorpayAdapter implements IPaymentGateway {
       }
     }
 
-    // In dev/test fallback
-    if (isDevelopment || isTest) {
-      return {
-        gateway: 'RAZORPAY',
-        success: true,
-        status: 'SUCCESS',
-        merchantTxnId,
-        gatewayOrderId: gatewayOrderId || `order_sim_${Date.now()}`,
-        gatewayPaymentId: gatewayPaymentId || `pay_sim_${Date.now()}`,
-      };
-    }
-
+    // Insufficient parameters or failed verification
+    razorpayLogger.warn(
+      { merchantTxnId, gatewayOrderId, gatewayPaymentId },
+      'Razorpay payment verification rejected — missing signature or payment confirmation'
+    );
     return {
       gateway: 'RAZORPAY',
       success: false,
-      status: 'PENDING',
+      status: 'FAILED',
       merchantTxnId,
-      failureReason: 'Insufficient parameters for verification',
+      failureReason: 'Missing or invalid payment signature/payment ID from gateway',
     };
   }
 

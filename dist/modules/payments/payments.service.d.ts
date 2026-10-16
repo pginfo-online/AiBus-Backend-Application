@@ -539,6 +539,11 @@ export declare class PaymentsService {
         message?: undefined;
     }>;
     /**
+     * Generates a mobile-responsive, secure Razorpay Checkout HTML page
+     * Used by mobile apps and web checkouts to render the official Razorpay payment sheet
+     */
+    generateCheckoutHtml(merchantTxnId: string, customRedirectUrl?: string): Promise<string>;
+    /**
      * Get current dev simulation status for a transaction (dev/test only)
      */
     getDevSimulationStatus(merchantTxnId: string): DevPaymentSimulationState;

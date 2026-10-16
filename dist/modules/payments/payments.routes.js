@@ -26,5 +26,8 @@ paymentsRouter.post('/simulate-webhook', (0, middleware_1.validate)({ body: paym
 // Payment gateway return/redirect URL handler
 paymentsRouter.get('/redirect', controller.handleRedirect);
 paymentsRouter.post('/redirect', controller.handleRedirect);
+// Razorpay Hosted & Mobile Checkout page
+paymentsRouter.get('/checkout/:merchantTxnId', controller.renderCheckoutPage);
+paymentsRouter.get('/razorpay/checkout/:merchantTxnId', controller.renderCheckoutPage);
 exports.default = paymentsRouter;
 //# sourceMappingURL=payments.routes.js.map

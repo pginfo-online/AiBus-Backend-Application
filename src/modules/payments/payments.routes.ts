@@ -73,5 +73,9 @@ paymentsRouter.post(
 paymentsRouter.get('/redirect', controller.handleRedirect);
 paymentsRouter.post('/redirect', controller.handleRedirect);
 
+// Razorpay Hosted & Mobile Checkout page
+paymentsRouter.get('/checkout/:merchantTxnId', controller.renderCheckoutPage);
+paymentsRouter.get('/razorpay/checkout/:merchantTxnId', controller.renderCheckoutPage);
+
 export { paymentsRouter };
 export default paymentsRouter;

@@ -130,13 +130,17 @@ export class PaymentOrchestrator {
    * Refreshes gateway configuration cache from DB
    */
   public async refreshConfigCache(): Promise<void> {
-    const prisma = getPrismaClient();
-    const configs = await prisma.paymentGatewayConfig.findMany();
-    this.configCache.clear();
-    for (const c of configs) {
-      this.configCache.set(c.gateway, c);
+    try {
+      const prisma = getPrismaClient();
+      const configs = await prisma.paymentGatewayConfig.findMany();
+      this.configCache.clear();
+      for (const c of configs) {
+        this.configCache.set(c.gateway, c);
+      }
+      this.lastCacheFetchAt = Date.now();
+    } catch (err: any) {
+      orchestratorLogger.warn({ err: err.message }, 'Failed to refresh payment gateway config cache from DB');
     }
-    this.lastCacheFetchAt = Date.now();
   }
 
   private async getGatewayConfigs(): Promise<Map<string, any>> {

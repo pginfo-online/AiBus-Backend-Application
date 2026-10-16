@@ -1167,6 +1167,219 @@ export class PaymentsService {
   }
 
   /**
+   * Generates a mobile-responsive, secure Razorpay Checkout HTML page
+   * Used by mobile apps and web checkouts to render the official Razorpay payment sheet
+   */
+  public async generateCheckoutHtml(merchantTxnId: string, customRedirectUrl?: string): Promise<string> {
+    const prisma = getPrismaClient();
+    const payment = await prisma.payment.findUnique({
+      where: { merchantTxnId },
+      include: { booking: true },
+    });
+
+    const redirectBase = customRedirectUrl || 'aibus://payment-result';
+    const sep = redirectBase.includes('?') ? '&' : '?';
+
+    if (!payment) {
+      return `<!DOCTYPE html>
+<html>
+<head><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>AiBus Payment Error</title>
+<style>body{background:#051634;color:#fff;font-family:-apple-system,sans-serif;text-align:center;padding:40px;}</style>
+</head>
+<body>
+  <h2>Transaction Not Found</h2>
+  <p>Reference: ${merchantTxnId}</p>
+  <a href="${redirectBase}${sep}status=FAILED&merchantTxnId=${merchantTxnId}&reason=Transaction+not+found" style="color:#E11D48;">Return to App</a>
+</body>
+</html>`;
+    }
+
+    if (payment.status === PaymentStatus.SUCCESS) {
+      return `<!DOCTYPE html>
+<html>
+<head><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>AiBus Payment Confirmed</title>
+<style>body{background:#051634;color:#fff;font-family:-apple-system,sans-serif;text-align:center;padding:40px;}</style>
+</head>
+<body>
+  <h2 style="color:#10B981;">Payment Already Confirmed</h2>
+  <p>Booking #${payment.booking.bookingNumber} is confirmed.</p>
+  <script>setTimeout(function(){ window.location.href = "${redirectBase}${sep}status=SUCCESS&merchantTxnId=${merchantTxnId}&bookingId=${payment.bookingId}"; }, 1000);</script>
+  <a href="${redirectBase}${sep}status=SUCCESS&merchantTxnId=${merchantTxnId}&bookingId=${payment.bookingId}" style="display:inline-block;margin-top:20px;padding:12px 24px;background:#013C9A;color:#fff;text-decoration:none;border-radius:8px;">View Confirmed Ticket</a>
+</body>
+</html>`;
+    }
+
+    const meta = (payment.metadata as any) || {};
+    const sdkPayload = meta.sdkPayload || {
+      key: env.RAZORPAY_KEY_ID || 'rzp_test_mock',
+      amount: Math.round(Number(payment.amount) * 100),
+      currency: payment.currency || 'INR',
+      name: env.APP_NAME || 'AiBus',
+      description: `Bus Booking #${payment.booking.bookingNumber}`,
+      order_id: payment.gatewayOrderId,
+      prefill: {
+        name: payment.booking.contactName || '',
+        email: payment.booking.contactEmail || '',
+        contact: payment.booking.contactPhone || '',
+      },
+      theme: { color: '#013C9A' },
+    };
+
+    return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>AiBus Secure Checkout</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background-color: #051634;
+      color: #FFFFFF;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+      padding: 24px;
+      text-align: center;
+    }
+    .card {
+      background: rgba(255, 255, 255, 0.05);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      border-radius: 16px;
+      padding: 32px 24px;
+      max-width: 400px;
+      width: 100%;
+      box-shadow: 0 10px 25px rgba(0, 0, 0, 0.5);
+    }
+    .brand { font-size: 24px; font-weight: 800; color: #FFFFFF; margin-bottom: 4px; letter-spacing: -0.5px; }
+    .brand span { color: #E11D48; }
+    .subtitle { font-size: 13px; color: #94A3B8; margin-bottom: 24px; }
+    .amount-badge {
+      background: #013C9A;
+      color: #FFFFFF;
+      font-size: 22px;
+      font-weight: 700;
+      padding: 10px 20px;
+      border-radius: 30px;
+      display: inline-block;
+      margin-bottom: 24px;
+    }
+    .spinner {
+      border: 3px solid rgba(255, 255, 255, 0.15);
+      border-top: 3px solid #E11D48;
+      border-radius: 50%;
+      width: 44px;
+      height: 44px;
+      animation: spin 0.8s linear infinite;
+      margin: 0 auto 20px;
+    }
+    @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+    .status-text { font-size: 15px; font-weight: 600; margin-bottom: 8px; }
+    .subtext { font-size: 12px; color: #94A3B8; line-height: 1.5; margin-bottom: 24px; }
+    .btn {
+      display: inline-block;
+      background: #E11D48;
+      color: #FFFFFF;
+      text-decoration: none;
+      font-size: 14px;
+      font-weight: 600;
+      padding: 12px 24px;
+      border-radius: 8px;
+      border: none;
+      cursor: pointer;
+      width: 100%;
+    }
+    .btn-secondary {
+      background: transparent;
+      border: 1px solid rgba(255, 255, 255, 0.2);
+      color: #CBD5E1;
+      margin-top: 10px;
+    }
+  </style>
+  <script src="https://checkout.razorpay.com/v1/checkout.js"></script>
+</head>
+<body>
+  <div class="card">
+    <div class="brand">Ai<span>Bus</span></div>
+    <div class="subtitle">Official Real-Time Ticket Booking</div>
+    <div class="amount-badge">₹${Number(payment.amount).toFixed(2)}</div>
+    <div class="spinner" id="spinner"></div>
+    <div class="status-text" id="status-text">Opening Razorpay Payment Sheet...</div>
+    <div class="subtext" id="sub-text">Please authorize your payment using UPI, Cards, or NetBanking.</div>
+    <button class="btn" id="pay-btn" onclick="openRazorpay()" style="display:none;">Launch Payment</button>
+    <button class="btn btn-secondary" onclick="cancelPayment()">Cancel & Return to App</button>
+  </div>
+
+  <script>
+    var options = ${JSON.stringify(sdkPayload)};
+    var redirectBase = "${redirectBase}";
+    var sep = redirectBase.indexOf('?') >= 0 ? '&' : '?';
+    var bookingId = "${payment.bookingId}";
+    var merchantTxnId = "${merchantTxnId}";
+
+    options.handler = function(response) {
+      document.getElementById('spinner').style.display = 'block';
+      document.getElementById('status-text').innerText = 'Payment received! Redirecting...';
+      var targetUrl = redirectBase + sep + "status=SUCCESS" +
+        "&merchantTxnId=" + encodeURIComponent(merchantTxnId) +
+        "&bookingId=" + encodeURIComponent(bookingId) +
+        "&gatewayOrderId=" + encodeURIComponent(response.razorpay_order_id || '') +
+        "&gatewayPaymentId=" + encodeURIComponent(response.razorpay_payment_id || '') +
+        "&gatewaySignature=" + encodeURIComponent(response.razorpay_signature || '');
+      window.location.href = targetUrl;
+    };
+
+    options.modal = {
+      ondismiss: function() {
+        document.getElementById('spinner').style.display = 'none';
+        document.getElementById('pay-btn').style.display = 'block';
+        document.getElementById('status-text').innerText = 'Payment cancelled';
+        document.getElementById('sub-text').innerText = 'You can retry or return to select another method.';
+        var cancelUrl = redirectBase + sep + "status=CANCELLED" +
+          "&merchantTxnId=" + encodeURIComponent(merchantTxnId) +
+          "&bookingId=" + encodeURIComponent(bookingId);
+        window.location.href = cancelUrl;
+      }
+    };
+
+    var rzp = null;
+    function openRazorpay() {
+      try {
+        if (!rzp) {
+          rzp = new Razorpay(options);
+          rzp.on('payment.failed', function(resp) {
+            var failUrl = redirectBase + sep + "status=FAILED" +
+              "&merchantTxnId=" + encodeURIComponent(merchantTxnId) +
+              "&bookingId=" + encodeURIComponent(bookingId) +
+              "&reason=" + encodeURIComponent(resp.error && resp.error.description ? resp.error.description : 'Payment failed');
+            window.location.href = failUrl;
+          });
+        }
+        rzp.open();
+      } catch (err) {
+        document.getElementById('pay-btn').style.display = 'block';
+        document.getElementById('status-text').innerText = 'Unable to open payment modal';
+        document.getElementById('sub-text').innerText = err.message || 'Please tap Launch Payment to retry.';
+      }
+    }
+
+    function cancelPayment() {
+      window.location.href = redirectBase + sep + "status=CANCELLED&merchantTxnId=" + encodeURIComponent(merchantTxnId) + "&bookingId=" + encodeURIComponent(bookingId);
+    }
+
+    // Auto-launch on load
+    window.addEventListener('load', function() {
+      setTimeout(openRazorpay, 300);
+    });
+  </script>
+</body>
+</html>`;
+  }
+
+  /**
    * Get current dev simulation status for a transaction (dev/test only)
    */
   public getDevSimulationStatus(merchantTxnId: string): DevPaymentSimulationState {

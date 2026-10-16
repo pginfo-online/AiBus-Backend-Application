@@ -88,4 +88,16 @@ export class PaymentsController {
       next(error);
     }
   };
+
+  public renderCheckoutPage = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+    try {
+      const merchantTxnId = String(req.params.merchantTxnId || '');
+      const redirectUrlParam = (req.query.redirectUrl as string) || undefined;
+      const checkoutHtml = await this.paymentsService.generateCheckoutHtml(merchantTxnId, redirectUrlParam);
+      res.setHeader('Content-Type', 'text/html; charset=utf-8');
+      res.send(checkoutHtml);
+    } catch (error) {
+      next(error);
+    }
+  };
 }

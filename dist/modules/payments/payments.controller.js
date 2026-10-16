@@ -86,6 +86,18 @@ class PaymentsController {
             next(error);
         }
     };
+    renderCheckoutPage = async (req, res, next) => {
+        try {
+            const merchantTxnId = String(req.params.merchantTxnId || '');
+            const redirectUrlParam = req.query.redirectUrl || undefined;
+            const checkoutHtml = await this.paymentsService.generateCheckoutHtml(merchantTxnId, redirectUrlParam);
+            res.setHeader('Content-Type', 'text/html; charset=utf-8');
+            res.send(checkoutHtml);
+        }
+        catch (error) {
+            next(error);
+        }
+    };
 }
 exports.PaymentsController = PaymentsController;
 //# sourceMappingURL=payments.controller.js.map
