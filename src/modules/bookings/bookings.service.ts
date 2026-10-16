@@ -96,11 +96,47 @@ export class BookingsService {
           throw new ValidationError('Seat hold has expired. Please select seats again.');
         }
 
+        if (hold.bookingId) {
+          const existingBooking = await prisma.booking.findUnique({
+            where: { id: hold.bookingId },
+            include: { seats: true, passengers: true },
+          });
+          if (
+            existingBooking &&
+            (existingBooking.status === BookingStatus.HELD ||
+              existingBooking.status === BookingStatus.PAYMENT_PENDING)
+          ) {
+            this.bookingLogger.info(
+              { bookingId: existingBooking.id, holdId: hold.id },
+              'Returning existing booking for active hold (idempotent)'
+            );
+            return existingBooking;
+          }
+        }
+
         providerHoldId = hold.providerHoldId;
         holdRecordId = hold.id;
       } else if (!isUuid) {
         // Direct providerHoldId provided
         providerHoldId = String(input.holdId);
+      }
+    }
+
+    if (providerHoldId && !providerHoldId.startsWith('HOLD-GDS-') && typeof prisma.booking.findFirst === 'function') {
+      const existingBookingWithHold = await prisma.booking.findFirst({
+        where: {
+          providerHoldId,
+          status: { in: [BookingStatus.HELD, BookingStatus.PAYMENT_PENDING] },
+        },
+        include: { seats: true, passengers: true },
+        orderBy: { createdAt: 'desc' },
+      });
+      if (existingBookingWithHold) {
+        this.bookingLogger.info(
+          { bookingId: existingBookingWithHold.id, providerHoldId },
+          'Returning existing booking for provider hold (idempotent)'
+        );
+        return existingBookingWithHold;
       }
     }
 

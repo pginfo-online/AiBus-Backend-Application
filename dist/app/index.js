@@ -61,8 +61,13 @@ function createApp() {
     app.use((0, hpp_1.default)());
     // 6. Gzip compression (crucial for large bus search/layout payloads)
     app.use((0, compression_1.default)());
-    // 7. Body parsing with strict size limits
-    app.use(express_1.default.json({ limit: env_1.env.REQUEST_BODY_LIMIT }));
+    // 7. Body parsing with strict size limits (and rawBody preservation for webhooks)
+    app.use(express_1.default.json({
+        limit: env_1.env.REQUEST_BODY_LIMIT,
+        verify: (req, _res, buf) => {
+            req.rawBody = buf.toString('utf8');
+        },
+    }));
     app.use(express_1.default.urlencoded({ extended: true, limit: env_1.env.REQUEST_BODY_LIMIT }));
     app.use((0, cookie_parser_1.default)());
     // 8. Structured HTTP request logging

@@ -22,10 +22,10 @@ paymentsRouter.post(
   controller.payWithWallet
 );
 
-// Create payment intent — requires authentication (only confirmed users may pay)
+// Create payment intent — allows both guest and authenticated users
 paymentsRouter.post(
   '/intent',
-  authenticate,
+  optionalAuth,
   idempotencyMiddleware(),
   validate({ body: createPaymentIntentSchema }),
   controller.createPaymentIntent

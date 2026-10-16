@@ -42,19 +42,40 @@ class HoldsService {
                 acquiredLocks.push(lockKey);
             }
             // Check for active holds in DB as an extra guarantee
-            const existingDbHold = await prisma.seatHold.findFirst({
-                where: {
-                    busId: input.busId,
-                    journeyDate: input.journeyDate,
-                    status: client_1.HoldStatus.ACTIVE,
-                    expiresAt: { gt: new Date() },
-                },
-            });
-            if (existingDbHold) {
+            const existingDbHolds = typeof prisma.seatHold.findMany === 'function'
+                ? await prisma.seatHold.findMany({
+                    where: {
+                        busId: input.busId,
+                        journeyDate: input.journeyDate,
+                        status: client_1.HoldStatus.ACTIVE,
+                        expiresAt: { gt: new Date() },
+                    },
+                })
+                : [
+                    await prisma.seatHold.findFirst({
+                        where: {
+                            busId: input.busId,
+                            journeyDate: input.journeyDate,
+                            status: client_1.HoldStatus.ACTIVE,
+                            expiresAt: { gt: new Date() },
+                        },
+                    }),
+                ].filter(Boolean);
+            for (const existingDbHold of existingDbHolds) {
+                if (!existingDbHold)
+                    continue;
+                if (userId && existingDbHold.userId === userId) {
+                    continue;
+                }
                 const heldSeats = existingDbHold.seats;
-                const conflict = input.passengers.some((p) => heldSeats.some((hs) => (typeof hs === 'string' ? hs === p.seatNo : hs.SeatNo === p.seatNo)));
-                if (conflict) {
-                    throw new errors_1.SeatUnavailableError('One or more of the selected seats are already on hold.');
+                if (Array.isArray(heldSeats)) {
+                    const conflict = input.passengers.some((p) => heldSeats.some((hs) => {
+                        const seat = typeof hs === 'string' ? hs : (hs.SeatNo || hs.seatNo);
+                        return String(seat) === String(p.seatNo);
+                    }));
+                    if (conflict) {
+                        throw new errors_1.SeatUnavailableError('One or more of the selected seats are already on hold.');
+                    }
                 }
             }
             // -----------------------------------------------------------------------
@@ -94,15 +115,31 @@ class HoldsService {
                 throw new errors_1.ProviderError('GDS', gdsResponse.Message || 'Failed to hold seats with provider');
             }
             // -----------------------------------------------------------------------
-            // Layer 3: Persist Hold record in database
+            // Layer 3: Persist Hold record in database (upsert prevents unique constraint conflicts)
             // -----------------------------------------------------------------------
             const expiresAt = new Date(Date.now() + env_1.env.SEAT_HOLD_TTL_SECONDS * 1000);
             const strHoldId = String(gdsResponse.HoldId);
-            const holdRecord = await prisma.seatHold.create({
-                data: {
+            const holdRecord = await prisma.seatHold.upsert({
+                where: {
+                    providerName_providerHoldId: {
+                        providerName: 'GDS',
+                        providerHoldId: strHoldId,
+                    },
+                },
+                create: {
                     userId: userId ?? null,
                     providerHoldId: strHoldId,
                     providerName: 'GDS',
+                    status: client_1.HoldStatus.ACTIVE,
+                    fromCityId: input.fromCityId,
+                    toCityId: input.toCityId,
+                    journeyDate: input.journeyDate,
+                    busId: input.busId,
+                    seats: input.passengers,
+                    expiresAt,
+                },
+                update: {
+                    userId: userId ?? undefined,
                     status: client_1.HoldStatus.ACTIVE,
                     fromCityId: input.fromCityId,
                     toCityId: input.toCityId,

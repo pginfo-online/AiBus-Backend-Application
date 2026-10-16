@@ -66,8 +66,15 @@ export function createApp(): Express {
   // 6. Gzip compression (crucial for large bus search/layout payloads)
   app.use(compression());
 
-  // 7. Body parsing with strict size limits
-  app.use(express.json({ limit: env.REQUEST_BODY_LIMIT }));
+  // 7. Body parsing with strict size limits (and rawBody preservation for webhooks)
+  app.use(
+    express.json({
+      limit: env.REQUEST_BODY_LIMIT,
+      verify: (req: any, _res, buf) => {
+        req.rawBody = buf.toString('utf8');
+      },
+    })
+  );
   app.use(express.urlencoded({ extended: true, limit: env.REQUEST_BODY_LIMIT }));
   app.use(cookieParser());
 

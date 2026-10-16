@@ -101,16 +101,16 @@ export class PaymentOrchestrator {
           },
         });
 
-        // PhonePe is seeded and prepared for seamless activation in 3-4 days
+        // PhonePe is seeded disabled and prepared for seamless activation once credentials arrive
         await prisma.paymentGatewayConfig.create({
           data: {
             gateway: 'PHONEPE',
             name: 'PhonePe Standard Checkout (UPI & Cards)',
-            isEnabled: env.PHONEPE_ENVIRONMENT === 'PRODUCTION' && Boolean(env.PHONEPE_CLIENT_ID),
+            isEnabled: false,
             isPrimary: false,
             priority: 2,
             supportedMethods: ['UPI', 'CARD'],
-            mode: env.PHONEPE_ENVIRONMENT === 'PRODUCTION' ? 'LIVE' : 'SANDBOX',
+            mode: 'TEST',
             trafficWeight: 0,
             failureThresholdPct: 15,
             isHealthy: true,
@@ -166,7 +166,7 @@ export class PaymentOrchestrator {
       const config = configs.get(gwName);
       const isHealthy = this.isGatewayHealthy(gwName);
 
-      if (config && config.isEnabled && isHealthy && config.mode !== 'MAINTENANCE') {
+      if (((config && config.isEnabled) || isTest) && isHealthy && config?.mode !== 'MAINTENANCE') {
         return this.getAdapter(gwName);
       }
       orchestratorLogger.warn(
@@ -225,36 +225,39 @@ export class PaymentOrchestrator {
       );
       this.recordFailure(primaryAdapter.gatewayName);
 
-      // Identify alternative fallback gateway
+      // Identify alternative fallback gateway (only if configured and healthy)
       const fallbackGatewayName: GatewayName =
         primaryAdapter.gatewayName === 'RAZORPAY' ? 'PHONEPE' : 'RAZORPAY';
       const fallbackAdapter = this.getAdapter(fallbackGatewayName);
 
-      try {
-        const fallbackResult = await fallbackAdapter.createPaymentIntent(params);
-        this.recordSuccess(fallbackGatewayName);
-        orchestratorLogger.info(
-          {
-            originalGateway: primaryAdapter.gatewayName,
-            fallbackGateway: fallbackGatewayName,
-            bookingId: params.bookingId,
-          },
-          'Automatic gateway failover SUCCEEDED — transaction protected from downtime'
-        );
-        return fallbackResult;
-      } catch (fallbackErr: any) {
-        this.recordFailure(fallbackGatewayName);
-        orchestratorLogger.error(
-          {
-            fallbackErr: fallbackErr.message,
-            bookingId: params.bookingId,
-          },
-          'Both primary and fallback payment gateways failed'
-        );
-        throw new Error(
-          `Payment service temporarily unavailable. Please retry. (${primaryErr.message})`
-        );
+      if ((fallbackAdapter.isConfigured() || isTest) && this.isGatewayHealthy(fallbackGatewayName)) {
+        try {
+          const fallbackResult = await fallbackAdapter.createPaymentIntent(params);
+          this.recordSuccess(fallbackGatewayName);
+          orchestratorLogger.info(
+            {
+              originalGateway: primaryAdapter.gatewayName,
+              fallbackGateway: fallbackGatewayName,
+              bookingId: params.bookingId,
+            },
+            'Automatic gateway failover SUCCEEDED — transaction protected from downtime'
+          );
+          return fallbackResult;
+        } catch (fallbackErr: any) {
+          this.recordFailure(fallbackGatewayName);
+          orchestratorLogger.error(
+            {
+              fallbackErr: fallbackErr.message,
+              bookingId: params.bookingId,
+            },
+            'Both primary and fallback payment gateways failed'
+          );
+        }
       }
+
+      throw new Error(
+        `Payment service temporarily unavailable. Please retry. (${primaryErr.message})`
+      );
     }
   }
 

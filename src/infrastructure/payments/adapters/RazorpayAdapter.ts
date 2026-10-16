@@ -314,7 +314,13 @@ export class RazorpayAdapter implements IPaymentGateway {
       .update(rawBody)
       .digest('hex');
 
-    return crypto.timingSafeEqual(Buffer.from(expectedSignature), Buffer.from(signature));
+    const expectedBuf = Buffer.from(expectedSignature, 'utf8');
+    const signatureBuf = Buffer.from(signature, 'utf8');
+    if (expectedBuf.length !== signatureBuf.length) {
+      return false;
+    }
+
+    return crypto.timingSafeEqual(expectedBuf, signatureBuf);
   }
 
   /**

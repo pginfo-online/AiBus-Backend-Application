@@ -11,8 +11,8 @@ exports.paymentsRouter = paymentsRouter;
 const controller = new payments_controller_1.PaymentsController();
 // B2B Agent Wallet Payment — requires authenticated approved agent context
 paymentsRouter.post('/wallet-pay', middleware_1.authenticate, agents_middleware_1.requireAgentContext, agents_middleware_1.requireAgentKycApproved, (0, middleware_1.idempotencyMiddleware)(), controller.payWithWallet);
-// Create payment intent — requires authentication (only confirmed users may pay)
-paymentsRouter.post('/intent', middleware_1.authenticate, (0, middleware_1.idempotencyMiddleware)(), (0, middleware_1.validate)({ body: payments_validation_1.createPaymentIntentSchema }), controller.createPaymentIntent);
+// Create payment intent — allows both guest and authenticated users
+paymentsRouter.post('/intent', middleware_1.optionalAuth, (0, middleware_1.idempotencyMiddleware)(), (0, middleware_1.validate)({ body: payments_validation_1.createPaymentIntentSchema }), controller.createPaymentIntent);
 // Verify payment
 paymentsRouter.post('/verify', middleware_1.optionalAuth, (0, middleware_1.idempotencyMiddleware)(), (0, middleware_1.validate)({ body: payments_validation_1.verifyPaymentSchema }), controller.verifyPayment);
 // Payment gateway webhook (PhonePe)

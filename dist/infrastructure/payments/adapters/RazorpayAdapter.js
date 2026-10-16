@@ -267,7 +267,12 @@ class RazorpayAdapter {
             .createHmac('sha256', secret)
             .update(rawBody)
             .digest('hex');
-        return crypto_1.default.timingSafeEqual(Buffer.from(expectedSignature), Buffer.from(signature));
+        const expectedBuf = Buffer.from(expectedSignature, 'utf8');
+        const signatureBuf = Buffer.from(signature, 'utf8');
+        if (expectedBuf.length !== signatureBuf.length) {
+            return false;
+        }
+        return crypto_1.default.timingSafeEqual(expectedBuf, signatureBuf);
     }
     /**
      * Parse Razorpay Webhook Payload into unified structure

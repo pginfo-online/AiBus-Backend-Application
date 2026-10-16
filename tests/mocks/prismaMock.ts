@@ -13,11 +13,28 @@ export function createPrismaMock() {
   const mockInstance: any = {
     seatHold: {
       findFirst: vi.fn().mockImplementation(async () => null),
+      findMany: vi.fn().mockImplementation(async () => Array.from(holds.values())),
       findUnique: vi.fn().mockImplementation(async ({ where }) => holds.get(where.id) || null),
       create: vi.fn().mockImplementation(async ({ data }) => {
         const item = { id: uuidv4(), status: HoldStatus.ACTIVE, ...data };
         holds.set(item.id, item);
         return item;
+      }),
+      upsert: vi.fn().mockImplementation(async ({ where, create, update }) => {
+        let item = null;
+        if (where.id) item = holds.get(where.id);
+        if (!item && where.providerName_providerHoldId) {
+          item = Array.from(holds.values()).find(
+            (h: any) => h.providerHoldId === where.providerName_providerHoldId.providerHoldId
+          );
+        }
+        if (item) {
+          Object.assign(item, update);
+          return item;
+        }
+        const created = { id: uuidv4(), status: HoldStatus.ACTIVE, ...create };
+        holds.set(created.id, created);
+        return created;
       }),
       update: vi.fn().mockImplementation(async ({ where, data }) => {
         const item = holds.get(where.id);
@@ -27,6 +44,13 @@ export function createPrismaMock() {
       updateMany: vi.fn().mockImplementation(async () => ({ count: 1 })),
     },
     booking: {
+      findFirst: vi.fn().mockImplementation(async ({ where }) => {
+        let list = Array.from(bookings.values());
+        if (where?.id) list = list.filter((b) => b.id === where.id);
+        if (where?.providerHoldId) list = list.filter((b) => b.providerHoldId === where.providerHoldId);
+        if (where?.bookingNumber) list = list.filter((b) => b.bookingNumber === where.bookingNumber);
+        return list[0] || null;
+      }),
       findUnique: vi.fn().mockImplementation(async ({ where }) => {
         const b = bookings.get(where.id);
         if (!b) return null;

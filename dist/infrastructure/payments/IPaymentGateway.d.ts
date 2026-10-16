@@ -71,6 +71,7 @@ export interface WebhookEventNormalized {
 }
 export interface IPaymentGateway {
     readonly gatewayName: GatewayName;
+    isConfigured(): boolean;
     createPaymentIntent(params: PaymentIntentParams): Promise<PaymentIntentResult>;
     verifyPayment(params: VerifyPaymentParams): Promise<PaymentVerificationResult>;
     processRefund(params: ProcessRefundParams): Promise<RefundResult>;
