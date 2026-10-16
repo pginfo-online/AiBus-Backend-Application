@@ -7,8 +7,8 @@ node_modules/
 /coverage
 
 # Production & Build outputs
-/dist
-/build
+dist/
+build/
 
 # Environment variables
 .env
@@ -16,6 +16,8 @@ node_modules/
 .env.development.local
 .env.test.local
 .env.production.local
+!.env.example
+!.env.production.example
 
 # Logs
 npm-debug.log*
@@ -23,6 +25,8 @@ yarn-debug.log*
 yarn-error.log*
 pino.log*
 *.log
+logs/*
+!logs/.gitkeep
 
 # Editor & OS files
 .vscode/
