@@ -218,8 +218,15 @@ export declare class AgentsService {
         joinedAt: Date | null;
     }>;
     getWallet(agentId: string): Promise<any>;
-    getWalletStatement(agentId: string, page?: number, limit?: number): Promise<{
+    getWalletStatement(agentId: string, page?: number, limit?: number, fromDate?: string, toDate?: string): Promise<{
         entries: {
+            entryType: "CREDIT" | "DEBIT";
+            accountType: import(".prisma/client").$Enums.LedgerEntryType;
+            amount: number;
+            balanceAfter: number;
+            debitAmount: number;
+            creditAmount: number;
+            postedAt: string;
             type: import(".prisma/client").$Enums.LedgerEntryType;
             id: string;
             agentId: string | null;
@@ -232,9 +239,6 @@ export declare class AgentsService {
             batchId: string;
             refundId: string | null;
             topupId: string | null;
-            debitAmount: Prisma.Decimal;
-            creditAmount: Prisma.Decimal;
-            postedAt: Date;
             createdBy: string | null;
         }[];
         total: number;
@@ -385,6 +389,24 @@ export declare class AgentsService {
         reversedCommission: number;
         netCommission: number;
         count: number;
+        snapshots: {
+            id: string;
+            bookingId: string;
+            bookingNumber: string;
+            providerPnrNo: string | null;
+            operatorName: string;
+            route: string | undefined;
+            travelDate: string;
+            bookingStatus: import(".prisma/client").$Enums.BookingStatus;
+            grossFare: number;
+            baseFareForCommission: number;
+            commissionRate: number;
+            commissionAmt: number;
+            netFare: number;
+            reversedAt: string | null;
+            reversalAmt: number | null;
+            createdAt: string;
+        }[];
     }>;
     private _safeAgent;
     private _safeUser;

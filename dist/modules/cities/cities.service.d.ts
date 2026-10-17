@@ -4,7 +4,7 @@ export declare class CitiesService {
     private citiesLogger;
     private constructor();
     static getInstance(): CitiesService;
-    getCities(query?: string): Promise<{
+    getCities(query?: string, limit?: number, popular?: boolean): Promise<{
         id: string;
         providerCityId: number;
         name: string;

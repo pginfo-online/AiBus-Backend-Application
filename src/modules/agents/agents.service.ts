@@ -427,18 +427,60 @@ export class AgentsService {
     return this._safeWallet(wallet);
   }
 
-  public async getWalletStatement(agentId: string, page = 1, limit = 50) {
+  public async getWalletStatement(
+    agentId: string,
+    page = 1,
+    limit = 50,
+    fromDate?: string,
+    toDate?: string
+  ) {
     const prisma = getPrismaClient();
     const skip = (page - 1) * limit;
-    const [entries, total] = await Promise.all([
+    const where: any = { agentId };
+    if (fromDate || toDate) {
+      where.postedAt = {};
+      if (fromDate) {
+        where.postedAt.gte = fromDate.includes('T') ? new Date(fromDate) : new Date(`${fromDate}T00:00:00.000Z`);
+      }
+      if (toDate) {
+        where.postedAt.lte = toDate.includes('T') ? new Date(toDate) : new Date(`${toDate}T23:59:59.999Z`);
+      }
+    }
+
+    const [rawEntries, total] = await Promise.all([
       prisma.ledgerEntry.findMany({
-        where: { agentId },
+        where,
         orderBy: { postedAt: 'desc' },
         skip,
         take: limit,
       }),
-      prisma.ledgerEntry.count({ where: { agentId } }),
+      prisma.ledgerEntry.count({ where }),
     ]);
+
+    const entries = rawEntries.map((e) => {
+      const isCredit =
+        Number(e.creditAmount) > 0 ||
+        e.type.includes('CREDIT') ||
+        e.type.includes('TOPUP');
+      const amount =
+        Number(e.creditAmount) > 0
+          ? Number(e.creditAmount)
+          : Number(e.debitAmount) > 0
+          ? Number(e.debitAmount)
+          : 0;
+
+      return {
+        ...e,
+        entryType: isCredit ? ('CREDIT' as const) : ('DEBIT' as const),
+        accountType: e.type,
+        amount,
+        balanceAfter: 0,
+        debitAmount: Number(e.debitAmount),
+        creditAmount: Number(e.creditAmount),
+        postedAt: e.postedAt.toISOString(),
+      };
+    });
+
     return { entries, total, page, limit, pages: Math.ceil(total / limit) };
   }
 
@@ -574,8 +616,16 @@ export class AgentsService {
     if (filters.status) where.status = filters.status;
     if (filters.fromDate || filters.toDate) {
       where.createdAt = {};
-      if (filters.fromDate) where.createdAt.gte = new Date(filters.fromDate);
-      if (filters.toDate) where.createdAt.lte = new Date(filters.toDate);
+      if (filters.fromDate) {
+        where.createdAt.gte = filters.fromDate.includes('T')
+          ? new Date(filters.fromDate)
+          : new Date(`${filters.fromDate}T00:00:00.000Z`);
+      }
+      if (filters.toDate) {
+        where.createdAt.lte = filters.toDate.includes('T')
+          ? new Date(filters.toDate)
+          : new Date(`${filters.toDate}T23:59:59.999Z`);
+      }
     }
 
     const [bookings, total] = await Promise.all([
@@ -597,19 +647,68 @@ export class AgentsService {
     const where: any = { agentId };
     if (fromDate || toDate) {
       where.createdAt = {};
-      if (fromDate) where.createdAt.gte = new Date(fromDate);
-      if (toDate) where.createdAt.lte = new Date(toDate);
+      if (fromDate) {
+        where.createdAt.gte = fromDate.includes('T')
+          ? new Date(fromDate)
+          : new Date(`${fromDate}T00:00:00.000Z`);
+      }
+      if (toDate) {
+        where.createdAt.lte = toDate.includes('T')
+          ? new Date(toDate)
+          : new Date(`${toDate}T23:59:59.999Z`);
+      }
     }
 
-    const snapshots = await prisma.commissionSnapshot.findMany({ where });
-    const total = snapshots.reduce((sum, s) => sum + Number(s.commissionAmt), 0);
-    const reversed = snapshots.reduce((sum, s) => sum + Number(s.reversalAmt ?? 0), 0);
+    const rawSnapshots = await prisma.commissionSnapshot.findMany({
+      where,
+      include: {
+        booking: {
+          select: {
+            id: true,
+            bookingNumber: true,
+            providerPnrNo: true,
+            operatorName: true,
+            fromCityName: true,
+            toCityName: true,
+            journeyDate: true,
+            status: true,
+            createdAt: true,
+          },
+        },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+    const total = rawSnapshots.reduce((sum, s) => sum + Number(s.commissionAmt), 0);
+    const reversed = rawSnapshots.reduce((sum, s) => sum + Number(s.reversalAmt ?? 0), 0);
+
+    const snapshots = rawSnapshots.map((s) => ({
+      id: s.id,
+      bookingId: s.bookingId,
+      bookingNumber: s.booking?.bookingNumber,
+      providerPnrNo: s.booking?.providerPnrNo,
+      operatorName: s.booking?.operatorName,
+      route:
+        s.booking?.fromCityName && s.booking?.toCityName
+          ? `${s.booking.fromCityName} → ${s.booking.toCityName}`
+          : undefined,
+      travelDate: s.booking?.journeyDate,
+      bookingStatus: s.booking?.status,
+      grossFare: Number(s.grossFare),
+      baseFareForCommission: Number(s.baseFareForCommission),
+      commissionRate: Number(s.commissionRate),
+      commissionAmt: Number(s.commissionAmt),
+      netFare: Number(s.netFare),
+      reversedAt: s.reversedAt?.toISOString() ?? null,
+      reversalAmt: s.reversalAmt ? Number(s.reversalAmt) : null,
+      createdAt: s.createdAt.toISOString(),
+    }));
 
     return {
       totalCommission: total,
       reversedCommission: reversed,
       netCommission: total - reversed,
-      count: snapshots.length,
+      count: rawSnapshots.length,
+      snapshots,
     };
   }
 

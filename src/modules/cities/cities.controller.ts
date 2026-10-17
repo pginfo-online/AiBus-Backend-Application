@@ -12,7 +12,9 @@ export class CitiesController {
   public getCities = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     try {
       const query = typeof req.query.q === 'string' ? req.query.q : undefined;
-      const cities = await this.citiesService.getCities(query);
+      const limit = req.query.limit ? Math.min(Math.max(parseInt(req.query.limit as string, 10) || 20, 1), 100) : undefined;
+      const popular = req.query.popular === 'true' || req.query.popular === '1';
+      const cities = await this.citiesService.getCities(query, limit, popular);
       ApiResponse.success(res, cities);
     } catch (error) {
       next(error);

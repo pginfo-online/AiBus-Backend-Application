@@ -234,7 +234,9 @@ class AgentsController {
             const agentId = req.agentId;
             const page = Math.max(1, parseInt(req.query.page) || 1);
             const limit = Math.min(100, Math.max(1, parseInt(req.query.limit) || 20));
-            const statement = await this.agentsService.getWalletStatement(agentId, page, limit);
+            const fromDate = req.query.fromDate;
+            const toDate = req.query.toDate;
+            const statement = await this.agentsService.getWalletStatement(agentId, page, limit, fromDate, toDate);
             res.json({
                 success: true,
                 data: statement,

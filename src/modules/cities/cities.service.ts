@@ -22,7 +22,7 @@ export class CitiesService {
     return CitiesService.instance;
   }
 
-  public async getCities(query?: string) {
+  public async getCities(query?: string, limit?: number, popular?: boolean) {
     const cacheKey = `${RedisPrefix.CACHE_CITIES}gds`;
     let cities: Array<{ id: string; providerCityId: number; name: string; City: string; CityId: number; State?: string }> = [];
 
@@ -106,10 +106,68 @@ export class CitiesService {
     }
     cities = deduplicatedCities;
 
-    // 3. Filter by query if provided (case-insensitive autocomplete)
+    // Curated high-priority popular cities (matching UI reference ref-3)
+    const POPULAR_KEYS = [
+      'bengaluru',
+      'bangalore',
+      'hyderabad',
+      'chennai',
+      'pune',
+      'mumbai',
+      'delhi',
+      'coimbatore',
+      'vijayawada',
+      'visakhapatnam',
+      'ahmedabad',
+    ];
+
+    if (popular) {
+      const popularMatches: typeof cities = [];
+      for (const key of POPULAR_KEYS) {
+        const found = cities.find((c) => (c.name || c.City || '').toLowerCase().includes(key));
+        if (found && !popularMatches.some((m) => m.CityId === found.CityId)) {
+          popularMatches.push(found);
+        }
+      }
+      return limit ? popularMatches.slice(0, limit) : popularMatches;
+    }
+
+    // 3. Filter by query if provided (prefix match prioritized, then substring)
     if (query && query.trim()) {
       const q = query.toLowerCase().trim();
-      return cities.filter((c) => (c.name || c.City || '').toLowerCase().includes(q));
+      const prefixMatches: typeof cities = [];
+      const containsMatches: typeof cities = [];
+
+      for (const c of cities) {
+        const cityName = (c.name || c.City || '').toLowerCase();
+        if (cityName.startsWith(q)) {
+          prefixMatches.push(c);
+        } else if (cityName.includes(q)) {
+          containsMatches.push(c);
+        }
+      }
+
+      const combined = [...prefixMatches, ...containsMatches];
+      return limit ? combined.slice(0, limit) : combined;
+    }
+
+    // If limit is specified without query, return popular cities first, then others up to limit
+    if (limit) {
+      const popularMatches: typeof cities = [];
+      const otherCities: typeof cities = [];
+
+      for (const c of cities) {
+        const cityName = (c.name || c.City || '').toLowerCase();
+        if (POPULAR_KEYS.some((pk) => cityName.includes(pk))) {
+          if (!popularMatches.some((m) => m.CityId === c.CityId)) {
+            popularMatches.push(c);
+          }
+        } else {
+          otherCities.push(c);
+        }
+      }
+
+      return [...popularMatches, ...otherCities].slice(0, limit);
     }
 
     return cities;

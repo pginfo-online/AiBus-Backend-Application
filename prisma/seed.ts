@@ -67,6 +67,25 @@ async function main() {
   });
   console.log(`✓ Support Agent seeded: ${support.email} (${support.role})`);
 
+  // 4. Default Global Commission Rule (10% flat percentage)
+  const defaultRule = await prisma.commissionRule.findFirst({
+    where: { name: 'Default Global Commission' },
+  });
+  if (!defaultRule) {
+    await prisma.commissionRule.create({
+      data: {
+        name: 'Default Global Commission',
+        ruleType: 'FLAT_PERCENTAGE',
+        percentage: 10.0,
+        priority: 1,
+        effectiveFrom: new Date('2026-01-01T00:00:00.000Z'),
+        isActive: true,
+        createdBy: superAdmin.id,
+      },
+    });
+    console.log('✓ Default Global Commission Rule seeded (10%)');
+  }
+
   console.log('--- Seeding Complete ---');
 }
 
