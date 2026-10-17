@@ -53,11 +53,15 @@ export class TicketsService {
     }
 
     let gdsDetails = null;
-    if (booking.providerPnrNo && booking.providerTicketNo) {
+    // Only call external GDS if ticket record does not yet exist locally
+    if (booking.providerPnrNo && booking.providerTicketNo && !booking.ticket) {
       try {
-        gdsDetails = await this.gdsAdapter.getBookingDetails(booking.providerPnrNo, booking.providerTicketNo);
+        gdsDetails = await Promise.race([
+          this.gdsAdapter.getBookingDetails(booking.providerPnrNo, booking.providerTicketNo),
+          new Promise<null>((_, reject) => setTimeout(() => reject(new Error('GDS details fetch timeout')), 2500)),
+        ]);
       } catch {
-        // Continue with database record if provider details query fails
+        // Continue immediately with database record if provider details query fails or times out
       }
     }
 
@@ -107,7 +111,7 @@ export class TicketsService {
     }
 
     // Create ticket record if missing for confirmed booking
-    if (!booking.ticket && booking.status === 'CONFIRMED' && ticketNo && !ticketNo.startsWith('TKT-')) {
+    if (!booking.ticket && (booking.status === 'CONFIRMED' || booking.providerTicketNo)) {
       try {
         const created = await prisma.ticket.create({
           data: {
