@@ -294,12 +294,15 @@ class PaymentsService {
             }
         }
         const amount = Number(booking.totalFare);
-        // Idempotency: return existing PENDING payment if matching gateway and not expired
+        // Idempotency: return existing PENDING payment if matching gateway and not expired (< 14 mins)
         const existingPayment = await prisma.payment.findFirst({
             where: { bookingId: booking.id, status: client_1.PaymentStatus.PENDING },
             orderBy: { createdAt: 'desc' },
         });
+        const isExistingExpired = existingPayment &&
+            Date.now() - new Date(existingPayment.createdAt).getTime() > 14 * 60 * 1000;
         if (existingPayment &&
+            !isExistingExpired &&
             (!input.gateway || input.gateway === 'AUTO' || existingPayment.gateway === input.gateway)) {
             const meta = existingPayment.metadata || {};
             return {
@@ -314,6 +317,13 @@ class PaymentsService {
                 gatewayOrderId: existingPayment.gatewayOrderId,
                 sdkPayload: meta.sdkPayload,
             };
+        }
+        // If an existing pending payment has expired, mark it FAILED to allow fresh order generation
+        if (existingPayment && isExistingExpired) {
+            await prisma.payment.update({
+                where: { id: existingPayment.id },
+                data: { status: client_1.PaymentStatus.FAILED },
+            });
         }
         // Call PaymentOrchestrator to generate intent with automatic failover
         const orchestrator = payments_1.PaymentOrchestrator.getInstance();
@@ -407,10 +417,25 @@ class PaymentsService {
             currentBooking.status === client_1.BookingStatus.BOOKING_UNKNOWN ||
             currentBooking.status === client_1.BookingStatus.BOOKING_FAILED) {
             paymentLogger.info({ bookingId: currentBooking.id, status: currentBooking.status }, 'Booking already in post-payment state, returning current status');
+            let returnStatus = 'PENDING';
+            if (currentBooking.status === client_1.BookingStatus.CONFIRMED) {
+                returnStatus = 'SUCCESS';
+            }
+            else if (currentBooking.status === client_1.BookingStatus.BOOKING_FAILED) {
+                returnStatus = 'BOOKING_FAILED';
+            }
+            else if (currentBooking.status === client_1.BookingStatus.BOOKING_UNKNOWN) {
+                returnStatus = 'BOOKING_UNKNOWN';
+            }
             return {
-                status: currentBooking.status === client_1.BookingStatus.CONFIRMED ? 'SUCCESS' : 'PENDING',
+                status: returnStatus,
                 payment,
                 booking: currentBooking,
+                message: currentBooking.status === client_1.BookingStatus.BOOKING_FAILED
+                    ? 'Seat confirmation failed with operator. A full refund has been initiated.'
+                    : currentBooking.status === client_1.BookingStatus.BOOKING_UNKNOWN
+                        ? 'Seat confirmation with operator is in progress.'
+                        : undefined,
             };
         }
         // -----------------------------------------------------------------------
@@ -530,8 +555,28 @@ class PaymentsService {
             };
         }
         catch (err) {
-            // confirmBooking handles BOOKING_UNKNOWN and BOOKING_FAILED internally
-            // Re-throw so the controller can return the appropriate HTTP status
+            const postBooking = await prisma.booking.findUnique({
+                where: { id: payment.bookingId },
+                include: { seats: true, passengers: true, ticket: true },
+            });
+            if (postBooking?.status === client_1.BookingStatus.BOOKING_FAILED) {
+                paymentLogger.error({ bookingId: payment.bookingId, err: err.message }, 'Payment succeeded but booking failed with provider — auto-refund queued');
+                return {
+                    status: 'BOOKING_FAILED',
+                    payment: updatedPayment,
+                    booking: postBooking,
+                    message: 'Payment was debited, but seat confirmation failed with the bus operator. A 100% full refund has been automatically initiated.',
+                };
+            }
+            if (postBooking?.status === client_1.BookingStatus.BOOKING_UNKNOWN) {
+                paymentLogger.warn({ bookingId: payment.bookingId, err: err.message }, 'Payment succeeded but provider timed out — reconciliation in progress');
+                return {
+                    status: 'BOOKING_UNKNOWN',
+                    payment: updatedPayment,
+                    booking: postBooking,
+                    message: 'Payment confirmed. Ticket confirmation with the bus operator is in progress.',
+                };
+            }
             throw err;
         }
     }
@@ -733,6 +778,7 @@ class PaymentsService {
                             merchantTxnId: payment.merchantTxnId,
                             gatewayOrderId: parsed.gatewayOrderId || payment.gatewayOrderId || undefined,
                             gatewayPaymentId: parsed.gatewayPaymentId,
+                            gatewaySignature: 'VERIFIED_VIA_WEBHOOK',
                         }).catch((err) => {
                             paymentLogger.warn({ err: err.message, merchantTxnId: payment?.merchantTxnId }, 'verifyPayment from Razorpay webhook encountered non-blocking warning');
                         });
@@ -802,6 +848,74 @@ class PaymentsService {
             reason: input.reason,
             simulatedAt: new Date(),
         });
+        // If Razorpay transaction, simulate official Razorpay webhook
+        if (payment.gateway === 'RAZORPAY') {
+            const rzpOrderId = payment.gatewayOrderId || `order_${Date.now()}`;
+            const rzpPaymentId = `pay_sim_${Date.now()}`;
+            const rzpEvent = isSuccess ? 'payment.captured' : 'payment.failed';
+            const rzpPayload = {
+                entity: 'event',
+                account_id: 'acc_sim_123',
+                event: rzpEvent,
+                contains: ['payment'],
+                payload: {
+                    payment: {
+                        entity: {
+                            id: rzpPaymentId,
+                            entity: 'payment',
+                            amount: amountInPaise,
+                            currency: 'INR',
+                            status: isSuccess ? 'captured' : 'failed',
+                            order_id: rzpOrderId,
+                            method: 'upi',
+                            captured: isSuccess,
+                            description: `Bus Booking #${payment.booking.bookingNumber}`,
+                            notes: {
+                                merchantTxnId: input.merchantTxnId,
+                                bookingId: payment.bookingId,
+                            },
+                            error_code: isSuccess ? null : 'BAD_REQUEST_ERROR',
+                            error_description: isSuccess ? null : (input.reason || 'Payment failed at bank'),
+                        },
+                    },
+                    order: {
+                        entity: {
+                            id: rzpOrderId,
+                            entity: 'order',
+                            amount: amountInPaise,
+                            currency: 'INR',
+                            receipt: input.merchantTxnId,
+                            status: isSuccess ? 'paid' : 'attempted',
+                        },
+                    },
+                },
+            };
+            const rawRzpBody = JSON.stringify(rzpPayload);
+            const rzpSecret = env_1.env.RAZORPAY_WEBHOOK_SECRET || env_1.env.RAZORPAY_KEY_SECRET || 'mock_secret';
+            const rzpSignature = crypto_1.default.createHmac('sha256', rzpSecret).update(rawRzpBody).digest('hex');
+            const webhookResult = await this.handleRazorpayWebhook(rawRzpBody, {
+                'x-razorpay-signature': rzpSignature,
+            });
+            const updatedPayment = await prisma.payment.findUnique({
+                where: { id: payment.id },
+            });
+            const updatedBooking = await prisma.booking.findUnique({
+                where: { id: payment.bookingId },
+                include: { ticket: true },
+            });
+            const ticket = await prisma.ticket.findUnique({
+                where: { bookingId: payment.bookingId },
+            });
+            return {
+                simulationStatus: input.status,
+                gateway: 'RAZORPAY',
+                webhookResult,
+                payment: updatedPayment,
+                booking: updatedBooking,
+                bookingStatus: updatedBooking?.status,
+                ticket: ticket || updatedBooking?.ticket,
+            };
+        }
         // 1. Construct canonical PhonePe webhook JSON payload
         const payload = {
             success: isSuccess,

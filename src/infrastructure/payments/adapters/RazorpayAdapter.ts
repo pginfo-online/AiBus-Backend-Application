@@ -106,6 +106,9 @@ export class RazorpayAdapter implements IPaymentGateway {
       upi: {
         flow: 'intent',
       },
+      modal: {
+        confirm_close: true,
+      },
     };
 
     // Construct universal payment URL (Razorpay Hosted Checkout / redirect)
@@ -138,16 +141,43 @@ export class RazorpayAdapter implements IPaymentGateway {
     const keySecret = env.RAZORPAY_KEY_SECRET || 'mock_secret';
     const { gatewayOrderId, gatewayPaymentId, gatewaySignature, merchantTxnId } = params;
 
-    // 1. Signature Verification if client returned orderId, paymentId, signature
+    // 1. Webhook-verified payment (Razorpay webhook HMAC was already verified by handleRazorpayWebhook)
+    if (gatewaySignature === 'VERIFIED_VIA_WEBHOOK') {
+      razorpayLogger.info(
+        { merchantTxnId, gatewayOrderId, gatewayPaymentId },
+        'Razorpay payment verified via webhook signature'
+      );
+      return {
+        gateway: 'RAZORPAY',
+        success: true,
+        status: 'SUCCESS',
+        merchantTxnId,
+        gatewayOrderId,
+        gatewayPaymentId,
+      };
+    }
+
+    // 2. Cryptographic Signature Verification if client returned orderId, paymentId, signature
     if (gatewayOrderId && gatewayPaymentId && gatewaySignature) {
       const generatedSignature = crypto
         .createHmac('sha256', keySecret)
         .update(`${gatewayOrderId}|${gatewayPaymentId}`)
         .digest('hex');
 
-      const isSignatureValid =
-        generatedSignature === gatewaySignature ||
-        ((isDevelopment || isTest) && gatewaySignature.startsWith('mock_sig'));
+      let isSignatureValid = false;
+      try {
+        const expectedBuf = Buffer.from(generatedSignature, 'utf8');
+        const signatureBuf = Buffer.from(gatewaySignature, 'utf8');
+        if (expectedBuf.length === signatureBuf.length && crypto.timingSafeEqual(expectedBuf, signatureBuf)) {
+          isSignatureValid = true;
+        }
+      } catch {
+        isSignatureValid = false;
+      }
+
+      if (!isSignatureValid && (isDevelopment || isTest) && gatewaySignature.startsWith('mock_sig')) {
+        isSignatureValid = true;
+      }
 
       if (isSignatureValid) {
         razorpayLogger.info(
@@ -177,6 +207,22 @@ export class RazorpayAdapter implements IPaymentGateway {
           failureReason: 'Cryptographic signature mismatch',
         };
       }
+    }
+
+    // 3. Test environment synthetic transaction handling (when no signature is provided)
+    if (isTest && (gatewayPaymentId?.startsWith('pay_sim_') || gatewayOrderId?.startsWith('order_test_'))) {
+      razorpayLogger.info(
+        { merchantTxnId, gatewayOrderId, gatewayPaymentId },
+        'Synthetic Razorpay transaction verified for test environment'
+      );
+      return {
+        gateway: 'RAZORPAY',
+        success: true,
+        status: 'SUCCESS',
+        merchantTxnId,
+        gatewayOrderId,
+        gatewayPaymentId,
+      };
     }
 
     // 2. Direct API status check if paymentId is available
