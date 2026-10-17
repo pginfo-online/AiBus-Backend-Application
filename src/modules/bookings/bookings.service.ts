@@ -311,7 +311,7 @@ export class BookingsService {
 
         // Generate Ticket record using actual 3rd party provider TicketNo (per Transactionapi.md)
         const ticketNumber = String(bookRes.TicketNo || booking.providerTicketNo || `TKT-${booking.bookingNumber}`);
-        await tx.ticket.create({
+        const createdTicket = await tx.ticket.create({
           data: {
             bookingId: updated.id,
             ticketNumber,
@@ -321,7 +321,7 @@ export class BookingsService {
           },
         });
 
-        return updated;
+        return { ...updated, ticket: createdTicket };
       });
 
       // Queue confirmation notifications

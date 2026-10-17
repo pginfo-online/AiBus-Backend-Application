@@ -1,37 +1,4 @@
 "use strict";
-var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
-    if (k2 === undefined) k2 = k;
-    var desc = Object.getOwnPropertyDescriptor(m, k);
-    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
-      desc = { enumerable: true, get: function() { return m[k]; } };
-    }
-    Object.defineProperty(o, k2, desc);
-}) : (function(o, m, k, k2) {
-    if (k2 === undefined) k2 = k;
-    o[k2] = m[k];
-}));
-var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
-    Object.defineProperty(o, "default", { enumerable: true, value: v });
-}) : function(o, v) {
-    o["default"] = v;
-});
-var __importStar = (this && this.__importStar) || (function () {
-    var ownKeys = function(o) {
-        ownKeys = Object.getOwnPropertyNames || function (o) {
-            var ar = [];
-            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
-            return ar;
-        };
-        return ownKeys(o);
-    };
-    return function (mod) {
-        if (mod && mod.__esModule) return mod;
-        var result = {};
-        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
-        __setModuleDefault(result, mod);
-        return result;
-    };
-})();
 var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
@@ -43,6 +10,7 @@ const uuid_1 = require("uuid");
 const env_1 = require("../../config/env");
 const database_1 = require("../../infrastructure/database");
 const bookings_service_1 = require("../bookings/bookings.service");
+const tickets_service_1 = require("../tickets/tickets.service");
 const errors_1 = require("../../shared/errors");
 const logger_1 = require("../../infrastructure/logger");
 const client_1 = require("@prisma/client");
@@ -244,8 +212,10 @@ async function checkPhonePePaymentStatus(merchantTxnId, input) {
 class PaymentsService {
     static instance;
     bookingsService;
+    ticketsService;
     constructor() {
         this.bookingsService = bookings_service_1.BookingsService.getInstance();
+        this.ticketsService = tickets_service_1.TicketsService.getInstance();
     }
     static getInstance() {
         if (!PaymentsService.instance) {
@@ -400,11 +370,35 @@ class PaymentsService {
         // Idempotency: if already SUCCESS and booking CONFIRMED, return immediately
         if (payment.status === client_1.PaymentStatus.SUCCESS) {
             paymentLogger.info({ paymentId: payment.id, bookingId: payment.bookingId }, 'Payment already verified (idempotent return)');
-            const confirmedBooking = await prisma.booking.findUnique({
+            let confirmedBooking = await prisma.booking.findUnique({
                 where: { id: payment.bookingId },
                 include: { seats: true, passengers: true, ticket: true },
             });
-            return { status: 'SUCCESS', payment, booking: confirmedBooking || payment.booking };
+            // If webhook or another thread marked payment SUCCESS and is completing GDS booking, wait internally
+            const maxWaitMs = 3500;
+            const pollIntervalMs = 200;
+            let waitedMs = 0;
+            while (waitedMs < maxWaitMs &&
+                confirmedBooking &&
+                confirmedBooking.status !== client_1.BookingStatus.CONFIRMED &&
+                confirmedBooking.status !== client_1.BookingStatus.BOOKING_FAILED &&
+                confirmedBooking.status !== client_1.BookingStatus.BOOKING_UNKNOWN) {
+                await new Promise((r) => setTimeout(r, pollIntervalMs));
+                waitedMs += pollIntervalMs;
+                confirmedBooking = await prisma.booking.findUnique({
+                    where: { id: payment.bookingId },
+                    include: { seats: true, passengers: true, ticket: true },
+                });
+            }
+            const ticket = confirmedBooking?.status === client_1.BookingStatus.CONFIRMED
+                ? await this.ticketsService.getTicketByBookingId(payment.bookingId)
+                : null;
+            return {
+                status: confirmedBooking?.status === client_1.BookingStatus.CONFIRMED ? 'SUCCESS' : (confirmedBooking?.status || 'PENDING'),
+                payment,
+                booking: confirmedBooking || payment.booking,
+                ticket: ticket || undefined,
+            };
         }
         // Prevent double-processing: check current booking state
         const currentBooking = await prisma.booking.findUnique({
@@ -418,8 +412,10 @@ class PaymentsService {
             currentBooking.status === client_1.BookingStatus.BOOKING_FAILED) {
             paymentLogger.info({ bookingId: currentBooking.id, status: currentBooking.status }, 'Booking already in post-payment state, returning current status');
             let returnStatus = 'PENDING';
+            let ticket = null;
             if (currentBooking.status === client_1.BookingStatus.CONFIRMED) {
                 returnStatus = 'SUCCESS';
+                ticket = await this.ticketsService.getTicketByBookingId(payment.bookingId);
             }
             else if (currentBooking.status === client_1.BookingStatus.BOOKING_FAILED) {
                 returnStatus = 'BOOKING_FAILED';
@@ -431,6 +427,7 @@ class PaymentsService {
                 status: returnStatus,
                 payment,
                 booking: currentBooking,
+                ticket: ticket || undefined,
                 message: currentBooking.status === client_1.BookingStatus.BOOKING_FAILED
                     ? 'Seat confirmation failed with operator. A full refund has been initiated.'
                     : currentBooking.status === client_1.BookingStatus.BOOKING_UNKNOWN
@@ -484,51 +481,48 @@ class PaymentsService {
             where: { id: payment.bookingId, status: client_1.BookingStatus.PAYMENT_PENDING },
             data: { status: client_1.BookingStatus.PAYMENT_SUCCESS },
         });
-        // If updateResult.count === 0, another request already claimed it
+        // If updateResult.count === 0, another request already claimed it (e.g. concurrent webhook)
         if (updateResult.count === 0) {
-            const latestBooking = await prisma.booking.findUnique({ where: { id: payment.bookingId } });
-            // Edge-case duplicate debit handling (redBus / AbhiBus practice)
-            if (latestBooking && latestBooking.status === client_1.BookingStatus.CONFIRMED) {
-                paymentLogger.warn({ bookingId: payment.bookingId, merchantTxnId: payment.merchantTxnId }, 'DUPLICATE PAYMENT DETECTED: Booking already confirmed; queuing automated refund');
-                await prisma.payment.update({
-                    where: { id: payment.id },
-                    data: {
-                        status: client_1.PaymentStatus.PROCESSING,
-                        gatewayPaymentId: gatewayVerification.gatewayPaymentId || input.gatewayPaymentId,
-                    },
+            let latestBooking = await prisma.booking.findUnique({
+                where: { id: payment.bookingId },
+                include: { seats: true, passengers: true, ticket: true },
+            });
+            // Internal wait: give concurrent request up to 3500ms to complete GDS BookSeats
+            const maxWaitMs = 3500;
+            const pollIntervalMs = 200;
+            let waitedMs = 0;
+            while (waitedMs < maxWaitMs &&
+                latestBooking &&
+                latestBooking.status !== client_1.BookingStatus.CONFIRMED &&
+                latestBooking.status !== client_1.BookingStatus.BOOKING_FAILED &&
+                latestBooking.status !== client_1.BookingStatus.BOOKING_UNKNOWN) {
+                await new Promise((r) => setTimeout(r, pollIntervalMs));
+                waitedMs += pollIntervalMs;
+                latestBooking = await prisma.booking.findUnique({
+                    where: { id: payment.bookingId },
+                    include: { seats: true, passengers: true, ticket: true },
                 });
-                try {
-                    const { addJob } = await Promise.resolve().then(() => __importStar(require('../../infrastructure/queues')));
-                    const refund = await prisma.refund.create({
-                        data: {
-                            bookingId: payment.bookingId,
-                            paymentId: payment.id,
-                            userId: payment.userId,
-                            amount: Number(payment.amount),
-                            status: 'PENDING',
-                            reason: 'Automated refund for duplicate payment attempt',
-                        },
-                    });
-                    await addJob('refund-processing', 'process-refund', {
-                        refundId: refund.id,
-                        bookingId: payment.bookingId,
-                        amount: Number(payment.amount),
-                        gatewayPaymentId: gatewayVerification.gatewayPaymentId || input.gatewayPaymentId,
-                        merchantTxnId: payment.merchantTxnId,
-                    });
-                }
-                catch (qErr) {
-                    paymentLogger.error({ qErr }, 'Failed to queue automated refund for duplicate payment');
-                }
+            }
+            if (latestBooking && latestBooking.status === client_1.BookingStatus.CONFIRMED) {
+                const ticket = await this.ticketsService.getTicketByBookingId(payment.bookingId);
                 return {
                     status: 'SUCCESS',
                     payment,
                     booking: latestBooking,
+                    ticket,
                 };
             }
-            paymentLogger.warn({ bookingId: payment.bookingId }, 'Booking already being processed by another request (concurrent verification)');
+            if (latestBooking && latestBooking.status === client_1.BookingStatus.BOOKING_FAILED) {
+                return {
+                    status: 'BOOKING_FAILED',
+                    payment,
+                    booking: latestBooking,
+                    message: 'Seat confirmation failed with operator. A full refund has been initiated.',
+                };
+            }
+            paymentLogger.warn({ bookingId: payment.bookingId }, 'Booking still being processed by another request after internal wait');
             return {
-                status: latestBooking?.status === client_1.BookingStatus.CONFIRMED ? 'SUCCESS' : 'PENDING',
+                status: 'PENDING',
                 payment,
                 booking: latestBooking || currentBooking,
             };
@@ -548,10 +542,12 @@ class PaymentsService {
         // Call GDS BookSeats — this may throw for BOOKING_UNKNOWN/BOOKING_FAILED
         try {
             const confirmedBooking = await this.bookingsService.confirmBooking(payment.bookingId);
+            const ticket = await this.ticketsService.getTicketByBookingId(payment.bookingId);
             return {
                 status: 'SUCCESS',
                 payment: updatedPayment,
                 booking: confirmedBooking,
+                ticket,
             };
         }
         catch (err) {
