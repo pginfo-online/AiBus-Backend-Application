@@ -34,6 +34,7 @@ exports.createBookingSchema = zod_1.z.object({
 exports.cancelBookingSchema = zod_1.z.object({
     seatNos: zod_1.z.array(zod_1.z.string().min(1)).min(1, 'At least one seat number is required'),
     reason: zod_1.z.string().optional(),
+    refundToWallet: zod_1.z.boolean().optional(),
 });
 exports.bookingStatusSchema = zod_1.z.object({
     holdId: zod_1.z.coerce.string().min(1).optional(),

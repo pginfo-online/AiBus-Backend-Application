@@ -10,5 +10,6 @@ const controller = new users_controller_1.UsersController();
 usersRouter.use(middleware_1.authenticate);
 usersRouter.get('/profile', controller.getProfile);
 usersRouter.patch('/profile', controller.updateProfile);
+usersRouter.get('/wallet', controller.getWallet);
 exports.default = usersRouter;
 //# sourceMappingURL=users.routes.js.map

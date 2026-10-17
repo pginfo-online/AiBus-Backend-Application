@@ -30,8 +30,8 @@ export declare const listNotificationsQuerySchema: z.ZodObject<{
         sentAt: "sentAt";
     }>>>;
     sortOrder: z.ZodDefault<z.ZodOptional<z.ZodEnum<{
-        desc: "desc";
         asc: "asc";
+        desc: "desc";
     }>>>;
 }, z.core.$strict>;
 export declare const notificationIdParamsSchema: z.ZodObject<{

@@ -31,5 +31,18 @@ export declare class UsersService {
         walletBalance: import("@prisma/client/runtime/library").Decimal;
         updatedAt: Date;
     }>;
+    getWallet(userId: string): Promise<{
+        walletBalance: number;
+        transactions: {
+            id: string;
+            type: import(".prisma/client").$Enums.WalletTransactionType;
+            amount: number;
+            balanceAfter: number;
+            referenceType: string;
+            referenceId: string | null;
+            description: string | null;
+            createdAt: Date;
+        }[];
+    }>;
 }
 //# sourceMappingURL=users.service.d.ts.map

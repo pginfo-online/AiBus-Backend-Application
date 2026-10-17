@@ -14,8 +14,8 @@ export declare const listProviderTransactionsQuerySchema: z.ZodObject<{
         durationMs: "durationMs";
     }>>>;
     sortOrder: z.ZodDefault<z.ZodOptional<z.ZodEnum<{
-        desc: "desc";
         asc: "asc";
+        desc: "desc";
     }>>>;
 }, z.core.$strict>;
 export declare const providerNameParamsSchema: z.ZodObject<{

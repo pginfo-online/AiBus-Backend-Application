@@ -4,5 +4,6 @@ export declare class UsersController {
     constructor();
     getProfile: (req: Request, res: Response, next: NextFunction) => Promise<void>;
     updateProfile: (req: Request, res: Response, next: NextFunction) => Promise<void>;
+    getWallet: (req: Request, res: Response, next: NextFunction) => Promise<void>;
 }
 //# sourceMappingURL=users.controller.d.ts.map

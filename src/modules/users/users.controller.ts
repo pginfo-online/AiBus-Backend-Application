@@ -28,4 +28,14 @@ export class UsersController {
       next(error);
     }
   };
+
+  public getWallet = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+    try {
+      const userId = (req as any).user.sub;
+      const wallet = await this.usersService.getWallet(userId);
+      ApiResponse.success(res, wallet, 'Wallet details retrieved');
+    } catch (error) {
+      next(error);
+    }
+  };
 }

@@ -21,8 +21,8 @@ export declare const listCouponsQuerySchema: z.ZodObject<{
         validUntil: "validUntil";
     }>>>;
     sortOrder: z.ZodDefault<z.ZodOptional<z.ZodEnum<{
-        desc: "desc";
         asc: "asc";
+        desc: "desc";
     }>>>;
 }, z.core.$strict>;
 export declare const couponIdParamsSchema: z.ZodObject<{

@@ -33,6 +33,7 @@ export const createBookingSchema = z.object({
 export const cancelBookingSchema = z.object({
   seatNos: z.array(z.string().min(1)).min(1, 'At least one seat number is required'),
   reason: z.string().optional(),
+  refundToWallet: z.boolean().optional(),
 });
 
 export const bookingStatusSchema = z.object({

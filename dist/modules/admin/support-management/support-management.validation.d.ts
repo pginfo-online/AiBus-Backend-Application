@@ -27,8 +27,8 @@ export declare const listTicketsQuerySchema: z.ZodObject<{
         priority: "priority";
     }>>>;
     sortOrder: z.ZodDefault<z.ZodOptional<z.ZodEnum<{
-        desc: "desc";
         asc: "asc";
+        desc: "desc";
     }>>>;
 }, z.core.$strict>;
 export declare const ticketIdParamsSchema: z.ZodObject<{

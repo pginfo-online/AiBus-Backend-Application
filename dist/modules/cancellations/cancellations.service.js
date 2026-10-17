@@ -64,17 +64,17 @@ class CancellationsService {
             PNR: params.PNR,
         });
     }
-    async cancelSeats(bookingIdentifier, seatNos, reason, userId) {
+    async cancelSeats(bookingIdentifier, seatNos, reason, userId, refundToWallet) {
         const prisma = (0, database_1.getPrismaClient)();
         const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(bookingIdentifier);
         const booking = isUuid
             ? await prisma.booking.findUnique({
                 where: { id: bookingIdentifier },
-                include: { seats: true, payments: true, commissionSnapshot: true },
+                include: { seats: true, payments: true, commissionSnapshot: true, ticket: true },
             })
             : await prisma.booking.findUnique({
                 where: { bookingNumber: bookingIdentifier },
-                include: { seats: true, payments: true, commissionSnapshot: true },
+                include: { seats: true, payments: true, commissionSnapshot: true, ticket: true },
             });
         if (!booking) {
             throw new errors_1.NotFoundError('Booking not found');
@@ -114,13 +114,16 @@ class CancellationsService {
                 netRefundToAgent = Math.max(0, refundAmount - commissionReversal);
             }
             const isAgentBooking = Boolean(booking.agentId);
+            const targetUserId = userId ?? booking.userId ?? null;
+            // Customer wallet credit: when not an agent booking, user exists, and refundToWallet is requested (or true)
+            const creditToCustomerWallet = !isAgentBooking && Boolean(targetUserId) && refundToWallet === true;
             // 3. Atomically update DB records & financials
             const cancellationResult = await prisma.$transaction(async (tx) => {
                 // Record cancellation
                 const cancellation = await tx.cancellation.create({
                     data: {
                         bookingId: booking.id,
-                        userId: userId ?? booking.userId ?? null,
+                        userId: targetUserId,
                         status: client_1.CancellationStatus.COMPLETED,
                         seatNos,
                         providerNewHoldId: cancelRes.NewHoldId ? String(cancelRes.NewHoldId) : null,
@@ -141,6 +144,37 @@ class CancellationsService {
                         cancelledAt: new Date(),
                     },
                 });
+                // Update Ticket status to CANCELLED if ticket exists
+                if (booking.ticket) {
+                    await tx.ticket.update({
+                        where: { id: booking.ticket.id },
+                        data: { status: client_1.TicketStatus.CANCELLED },
+                    });
+                }
+                // Credit to customer wallet if requested
+                let customerNewWalletBalance = null;
+                if (creditToCustomerWallet && refundAmount > 0 && targetUserId) {
+                    const updatedUser = await tx.user.update({
+                        where: { id: targetUserId },
+                        data: {
+                            walletBalance: { increment: refundAmount },
+                        },
+                        select: { walletBalance: true },
+                    });
+                    customerNewWalletBalance = Number(updatedUser.walletBalance);
+                    await tx.walletTransaction.create({
+                        data: {
+                            userId: targetUserId,
+                            type: client_1.WalletTransactionType.REFUND,
+                            amount: refundAmount,
+                            balanceAfter: updatedUser.walletBalance,
+                            referenceType: 'BOOKING_CANCELLATION',
+                            referenceId: booking.bookingNumber,
+                            description: `Refund for cancellation of booking #${booking.bookingNumber}`,
+                        },
+                    });
+                }
+                const isWalletDestination = isAgentBooking || creditToCustomerWallet;
                 // Create Refund record
                 const payment = booking.payments.find((p) => p.status === 'SUCCESS');
                 const refund = await tx.refund.create({
@@ -148,12 +182,12 @@ class CancellationsService {
                         bookingId: booking.id,
                         paymentId: payment?.id ?? null,
                         cancellationId: cancellation.id,
-                        userId: userId ?? booking.userId ?? null,
+                        userId: targetUserId,
                         amount: refundAmount,
-                        status: isAgentBooking ? client_1.RefundStatus.COMPLETED : client_1.RefundStatus.PENDING,
-                        destination: isAgentBooking ? client_1.RefundDestination.WALLET : client_1.RefundDestination.ORIGINAL_PAYMENT_METHOD,
+                        status: isWalletDestination ? client_1.RefundStatus.COMPLETED : client_1.RefundStatus.PENDING,
+                        destination: isWalletDestination ? client_1.RefundDestination.WALLET : client_1.RefundDestination.ORIGINAL_PAYMENT_METHOD,
                         reason: reason || 'Seat cancellation processed',
-                        completedAt: isAgentBooking ? new Date() : null,
+                        completedAt: isWalletDestination ? new Date() : null,
                     },
                 });
                 // If agent booking: credit agent wallet and post balanced double-entry ledger reversals
@@ -200,10 +234,12 @@ class CancellationsService {
                     providerResponse: cancelRes,
                     commissionReversal,
                     netRefundToAgent: isAgentBooking ? netRefundToAgent : undefined,
+                    walletCredited: isWalletDestination,
+                    newWalletBalance: customerNewWalletBalance,
                 };
             });
-            // 4. Enqueue gateway refund processing job only for customer credit-card/UPI payments
-            if (!isAgentBooking && refundAmount > 0) {
+            // 4. Enqueue gateway refund processing job only for customer credit-card/UPI payments if not credited to wallet
+            if (!isAgentBooking && !creditToCustomerWallet && refundAmount > 0) {
                 try {
                     await (0, queues_1.addJob)(constants_1.QueueName.REFUND_PROCESSING, 'process-refund', {
                         refundId: cancellationResult.refund.id,
@@ -215,7 +251,7 @@ class CancellationsService {
                     this.cancelLogger.warn({ queueErr }, 'Failed to queue refund processing job');
                 }
             }
-            this.cancelLogger.info({ bookingId: booking.id, refundAmount, isAgentBooking }, 'Cancellation completed and financials settled');
+            this.cancelLogger.info({ bookingId: booking.id, refundAmount, isAgentBooking, creditToCustomerWallet }, 'Cancellation completed and financials settled');
             return cancellationResult;
         }
         catch (err) {

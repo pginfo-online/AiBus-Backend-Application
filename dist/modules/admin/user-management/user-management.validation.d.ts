@@ -24,8 +24,8 @@ export declare const listUsersQuerySchema: z.ZodObject<{
         createdAt: "createdAt";
     }>>>;
     sortOrder: z.ZodDefault<z.ZodOptional<z.ZodEnum<{
-        desc: "desc";
         asc: "asc";
+        desc: "desc";
     }>>>;
     startDate: z.ZodOptional<z.ZodString>;
     endDate: z.ZodOptional<z.ZodString>;

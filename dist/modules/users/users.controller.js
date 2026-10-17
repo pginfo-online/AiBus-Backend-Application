@@ -28,6 +28,16 @@ class UsersController {
             next(error);
         }
     };
+    getWallet = async (req, res, next) => {
+        try {
+            const userId = req.user.sub;
+            const wallet = await this.usersService.getWallet(userId);
+            response_1.ApiResponse.success(res, wallet, 'Wallet details retrieved');
+        }
+        catch (error) {
+            next(error);
+        }
+    };
 }
 exports.UsersController = UsersController;
 //# sourceMappingURL=users.controller.js.map

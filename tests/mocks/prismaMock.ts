@@ -131,6 +131,11 @@ export function createPrismaMock() {
         tickets.set(item.id, item);
         return item;
       }),
+      update: vi.fn().mockImplementation(async ({ where, data }) => {
+        const item = (where.id ? tickets.get(where.id) : null) || Array.from(tickets.values()).find((t) => t.bookingId === where.bookingId || t.id === where.id);
+        if (item) Object.assign(item, data);
+        return item || { id: where.id || uuidv4(), ...data };
+      }),
     },
     cancellation: {
       create: vi.fn().mockImplementation(async ({ data }) => {
@@ -216,6 +221,29 @@ export function createPrismaMock() {
       create: vi.fn().mockImplementation(async ({ data }) => ({ id: uuidv4(), ...data })),
       update: vi.fn().mockImplementation(async ({ data }) => ({ ...data })),
       upsert: vi.fn().mockImplementation(async ({ create }) => ({ id: uuidv4(), ...create })),
+    },
+    user: {
+      findUnique: vi.fn().mockImplementation(async ({ where }) => {
+        return {
+          id: where.id || uuidv4(),
+          email: where.email || 'customer@aibus.com',
+          firstName: 'Madhav',
+          lastName: 'More',
+          walletBalance: 0,
+          walletTransactions: [],
+        };
+      }),
+      update: vi.fn().mockImplementation(async ({ where, data }) => {
+        let bal = 0;
+        if (data.walletBalance?.increment) {
+          bal += Number(data.walletBalance.increment);
+        }
+        return { id: where.id, walletBalance: bal };
+      }),
+    },
+    walletTransaction: {
+      create: vi.fn().mockImplementation(async ({ data }) => ({ id: uuidv4(), createdAt: new Date(), ...data })),
+      findMany: vi.fn().mockImplementation(async () => []),
     },
     $queryRaw: vi.fn().mockImplementation(async () => [{ 1: 1 }]),
     $transaction: vi.fn().mockImplementation(async (callback) => {

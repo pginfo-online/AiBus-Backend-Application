@@ -76,10 +76,11 @@ export class CancellationsController {
         ? rawSeatNos.split(',')
         : [];
       const reason = req.body?.reason;
+      const refundToWallet = req.body?.refundToWallet === true;
       const userId = (req as any).user?.sub;
 
-      const result = await this.cancellationsService.cancelSeats(bookingId, seatNos, reason, userId);
-      ApiResponse.success(res, result, 'Booking cancelled and refund initiated');
+      const result = await this.cancellationsService.cancelSeats(bookingId, seatNos, reason, userId, refundToWallet);
+      ApiResponse.success(res, result, 'Booking cancelled and refund processed');
     } catch (error) {
       next(error);
     }

@@ -30,7 +30,7 @@ export declare class CancellationsService {
         SeatNos: string;
         PNR?: string;
     }): Promise<import("../../providers/types").GdsCancelResponse>;
-    cancelSeats(bookingIdentifier: string, seatNos: string[], reason?: string, userId?: string): Promise<{
+    cancelSeats(bookingIdentifier: string, seatNos: string[], reason?: string, userId?: string, refundToWallet?: boolean): Promise<{
         cancellation: {
             userId: string | null;
             id: string;
@@ -70,6 +70,8 @@ export declare class CancellationsService {
         providerResponse: import("../../providers/types").GdsCancelResponse;
         commissionReversal: number;
         netRefundToAgent: number | undefined;
+        walletCredited: boolean;
+        newWalletBalance: number | null;
     }>;
 }
 //# sourceMappingURL=cancellations.service.d.ts.map

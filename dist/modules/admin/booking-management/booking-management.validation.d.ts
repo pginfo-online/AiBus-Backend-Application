@@ -18,8 +18,8 @@ export declare const listBookingsQuerySchema: z.ZodObject<{
         totalFare: "totalFare";
     }>>>;
     sortOrder: z.ZodDefault<z.ZodOptional<z.ZodEnum<{
-        desc: "desc";
         asc: "asc";
+        desc: "desc";
     }>>>;
 }, z.core.$strict>;
 export declare const bookingIdParamsSchema: z.ZodObject<{

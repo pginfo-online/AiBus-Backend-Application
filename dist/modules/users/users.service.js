@@ -59,6 +59,36 @@ class UsersService {
         });
         return updated;
     }
+    async getWallet(userId) {
+        const prisma = (0, database_1.getPrismaClient)();
+        const user = await prisma.user.findUnique({
+            where: { id: userId },
+            select: {
+                id: true,
+                walletBalance: true,
+                walletTransactions: {
+                    orderBy: { createdAt: 'desc' },
+                    take: 50,
+                },
+            },
+        });
+        if (!user) {
+            throw new errors_1.NotFoundError('User not found');
+        }
+        return {
+            walletBalance: Number(user.walletBalance),
+            transactions: user.walletTransactions.map((tx) => ({
+                id: tx.id,
+                type: tx.type,
+                amount: Number(tx.amount),
+                balanceAfter: Number(tx.balanceAfter),
+                referenceType: tx.referenceType,
+                referenceId: tx.referenceId,
+                description: tx.description,
+                createdAt: tx.createdAt,
+            })),
+        };
+    }
 }
 exports.UsersService = UsersService;
 //# sourceMappingURL=users.service.js.map

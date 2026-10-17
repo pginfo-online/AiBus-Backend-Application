@@ -21,8 +21,8 @@ export declare const listRefundsQuerySchema: z.ZodObject<{
         amount: "amount";
     }>>>;
     sortOrder: z.ZodDefault<z.ZodOptional<z.ZodEnum<{
-        desc: "desc";
         asc: "asc";
+        desc: "desc";
     }>>>;
 }, z.core.$strict>;
 export declare const refundIdParamsSchema: z.ZodObject<{

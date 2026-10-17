@@ -4,7 +4,7 @@ import { addJob } from '../../infrastructure/queues';
 import { QueueName } from '../../shared/constants';
 import { NotFoundError, ValidationError, ProviderError } from '../../shared/errors';
 import { logger } from '../../infrastructure/logger';
-import { BookingStatus, CancellationStatus, RefundStatus, RefundDestination } from '@prisma/client';
+import { BookingStatus, CancellationStatus, RefundStatus, RefundDestination, TicketStatus, WalletTransactionType } from '@prisma/client';
 import { buildRefundLines, buildLedgerPostingData } from '../../infrastructure/ledger';
 
 export class CancellationsService {
@@ -79,18 +79,24 @@ export class CancellationsService {
     });
   }
 
-  public async cancelSeats(bookingIdentifier: string, seatNos: string[], reason?: string, userId?: string) {
+  public async cancelSeats(
+    bookingIdentifier: string,
+    seatNos: string[],
+    reason?: string,
+    userId?: string,
+    refundToWallet?: boolean
+  ) {
     const prisma = getPrismaClient();
 
     const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(bookingIdentifier);
     const booking = isUuid
       ? await prisma.booking.findUnique({
           where: { id: bookingIdentifier },
-          include: { seats: true, payments: true, commissionSnapshot: true },
+          include: { seats: true, payments: true, commissionSnapshot: true, ticket: true },
         })
       : await prisma.booking.findUnique({
           where: { bookingNumber: bookingIdentifier },
-          include: { seats: true, payments: true, commissionSnapshot: true },
+          include: { seats: true, payments: true, commissionSnapshot: true, ticket: true },
         });
 
     if (!booking) {
@@ -140,6 +146,9 @@ export class CancellationsService {
       }
 
       const isAgentBooking = Boolean(booking.agentId);
+      const targetUserId = userId ?? booking.userId ?? null;
+      // Customer wallet credit: when not an agent booking, user exists, and refundToWallet is requested (or true)
+      const creditToCustomerWallet = !isAgentBooking && Boolean(targetUserId) && refundToWallet === true;
 
       // 3. Atomically update DB records & financials
       const cancellationResult = await prisma.$transaction(async (tx) => {
@@ -147,7 +156,7 @@ export class CancellationsService {
         const cancellation = await tx.cancellation.create({
           data: {
             bookingId: booking.id,
-            userId: userId ?? booking.userId ?? null,
+            userId: targetUserId,
             status: CancellationStatus.COMPLETED,
             seatNos,
             providerNewHoldId: cancelRes.NewHoldId ? String(cancelRes.NewHoldId) : null,
@@ -170,6 +179,41 @@ export class CancellationsService {
           },
         });
 
+        // Update Ticket status to CANCELLED if ticket exists
+        if (booking.ticket) {
+          await tx.ticket.update({
+            where: { id: booking.ticket.id },
+            data: { status: TicketStatus.CANCELLED },
+          });
+        }
+
+        // Credit to customer wallet if requested
+        let customerNewWalletBalance: number | null = null;
+        if (creditToCustomerWallet && refundAmount > 0 && targetUserId) {
+          const updatedUser = await tx.user.update({
+            where: { id: targetUserId },
+            data: {
+              walletBalance: { increment: refundAmount },
+            },
+            select: { walletBalance: true },
+          });
+          customerNewWalletBalance = Number(updatedUser.walletBalance);
+
+          await tx.walletTransaction.create({
+            data: {
+              userId: targetUserId,
+              type: WalletTransactionType.REFUND,
+              amount: refundAmount,
+              balanceAfter: updatedUser.walletBalance,
+              referenceType: 'BOOKING_CANCELLATION',
+              referenceId: booking.bookingNumber,
+              description: `Refund for cancellation of booking #${booking.bookingNumber}`,
+            },
+          });
+        }
+
+        const isWalletDestination = isAgentBooking || creditToCustomerWallet;
+
         // Create Refund record
         const payment = booking.payments.find((p) => p.status === 'SUCCESS');
         const refund = await tx.refund.create({
@@ -177,12 +221,12 @@ export class CancellationsService {
             bookingId: booking.id,
             paymentId: payment?.id ?? null,
             cancellationId: cancellation.id,
-            userId: userId ?? booking.userId ?? null,
+            userId: targetUserId,
             amount: refundAmount,
-            status: isAgentBooking ? RefundStatus.COMPLETED : RefundStatus.PENDING,
-            destination: isAgentBooking ? RefundDestination.WALLET : RefundDestination.ORIGINAL_PAYMENT_METHOD,
+            status: isWalletDestination ? RefundStatus.COMPLETED : RefundStatus.PENDING,
+            destination: isWalletDestination ? RefundDestination.WALLET : RefundDestination.ORIGINAL_PAYMENT_METHOD,
             reason: reason || 'Seat cancellation processed',
-            completedAt: isAgentBooking ? new Date() : null,
+            completedAt: isWalletDestination ? new Date() : null,
           },
         });
 
@@ -235,11 +279,13 @@ export class CancellationsService {
           providerResponse: cancelRes,
           commissionReversal,
           netRefundToAgent: isAgentBooking ? netRefundToAgent : undefined,
+          walletCredited: isWalletDestination,
+          newWalletBalance: customerNewWalletBalance,
         };
       });
 
-      // 4. Enqueue gateway refund processing job only for customer credit-card/UPI payments
-      if (!isAgentBooking && refundAmount > 0) {
+      // 4. Enqueue gateway refund processing job only for customer credit-card/UPI payments if not credited to wallet
+      if (!isAgentBooking && !creditToCustomerWallet && refundAmount > 0) {
         try {
           await addJob(QueueName.REFUND_PROCESSING, 'process-refund', {
             refundId: cancellationResult.refund.id,
@@ -252,7 +298,7 @@ export class CancellationsService {
       }
 
       this.cancelLogger.info(
-        { bookingId: booking.id, refundAmount, isAgentBooking },
+        { bookingId: booking.id, refundAmount, isAgentBooking, creditToCustomerWallet },
         'Cancellation completed and financials settled'
       );
 

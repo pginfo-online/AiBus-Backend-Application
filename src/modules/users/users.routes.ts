@@ -9,6 +9,7 @@ usersRouter.use(authenticate);
 
 usersRouter.get('/profile', controller.getProfile);
 usersRouter.patch('/profile', controller.updateProfile);
+usersRouter.get('/wallet', controller.getWallet);
 
 export { usersRouter };
 export default usersRouter;
