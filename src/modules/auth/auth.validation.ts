@@ -31,7 +31,36 @@ export const changePasswordSchema = z.object({
     .regex(/[0-9]/, 'Password must contain a number'),
 });
 
+export const sendOtpSchema = z.object({
+  phone: z
+    .string()
+    .trim()
+    .transform((val) => val.replace(/\D/g, '').slice(-10))
+    .refine((val) => /^[6-9]\d{9}$/.test(val), {
+      message: 'Please enter a valid 10-digit Indian mobile number',
+    }),
+  appHash: z.string().max(30).optional(),
+});
+
+export const verifyOtpSchema = z.object({
+  phone: z
+    .string()
+    .trim()
+    .transform((val) => val.replace(/\D/g, '').slice(-10))
+    .refine((val) => /^[6-9]\d{9}$/.test(val), {
+      message: 'Please enter a valid 10-digit Indian mobile number',
+    }),
+  otp: z
+    .string()
+    .trim()
+    .regex(/^\d{4,6}$/, 'OTP must be 4 to 6 digits'),
+  firstName: z.string().trim().min(1).max(50).optional(),
+  lastName: z.string().trim().max(50).optional(),
+});
+
 export type RegisterInput = z.infer<typeof registerSchema>;
 export type LoginInput = z.infer<typeof loginSchema>;
 export type RefreshTokenInput = z.infer<typeof refreshTokenSchema>;
 export type ChangePasswordInput = z.infer<typeof changePasswordSchema>;
+export type SendOtpInput = z.infer<typeof sendOtpSchema>;
+export type VerifyOtpInput = z.infer<typeof verifyOtpSchema>;

@@ -82,6 +82,24 @@ const envSchema = z.object({
   CLOUDINARY_API_KEY: z.string().optional(),
   CLOUDINARY_API_SECRET: z.string().optional(),
 
+  // SMS Gateway (Dreamz Technology DLT)
+  SMS_GATEWAY_URL: z.string().url().default('http://trans.dreamztechnolgy.org/smsstatuswithid.aspx'),
+  SMS_GATEWAY_MOBILE: z.string().default('9923400506'),
+  SMS_GATEWAY_PASSWORD: z.string().default('WorknAi@2'),
+  SMS_GATEWAY_APIKEY: z.string().default('76bda706af0d42b5a7ea8a615567ad4f'),
+  SMS_GATEWAY_PEID: z.string().default('1701176380063580392'),
+  SMS_GATEWAY_TEMPLATE_ID: z.string().default('1777179197804384361'),
+  SMS_GATEWAY_SENDER_ID: z.string().default('PGINF'),
+  SMS_DEFAULT_APP_HASH: z.string().default('AbCdEfGhIjK'),
+  OTP_EXPIRY_SECONDS: z.coerce.number().int().positive().default(300), // 5 minutes
+  OTP_RESEND_COOLDOWN_SECONDS: z.coerce.number().int().positive().default(30),
+  OTP_LENGTH: z.coerce.number().int().min(4).max(6).default(6),
+  SMS_SIMULATE: z.preprocess((val) => {
+    if (typeof val === 'boolean') return val;
+    if (typeof val === 'string') return val.toLowerCase() === 'true';
+    return false;
+  }, z.boolean().default(false)),
+
   // Rate limiting
   RATE_LIMIT_WINDOW_MS: z.coerce.number().int().positive().default(60000),
   RATE_LIMIT_MAX_REQUESTS: z.coerce.number().int().positive().default(100),

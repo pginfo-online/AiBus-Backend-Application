@@ -314,6 +314,18 @@ export declare class AgentsService {
         toDate?: string;
     }): Promise<{
         bookings: ({
+            seats: {
+                id: string;
+                bookingId: string;
+                seatNo: string;
+                seatTypeId: number;
+                fareTotal: Prisma.Decimal;
+                fareBase: Prisma.Decimal;
+                fareTax: Prisma.Decimal;
+                deck: number;
+                row: number;
+                column: number;
+            }[];
             ticket: {
                 ticketNumber: string;
                 pnrNumber: string;
@@ -334,6 +346,17 @@ export declare class AgentsService {
                 reversedAt: Date | null;
                 reversalAmt: Prisma.Decimal | null;
             } | null;
+            passengers: {
+                name: string;
+                id: string;
+                bookingId: string;
+                seatNo: string;
+                seatTypeId: number;
+                age: number;
+                gender: string;
+                fare: Prisma.Decimal;
+                isAcSeat: boolean;
+            }[];
         } & {
             version: number;
             userId: string | null;

@@ -32,7 +32,10 @@ exports.createBookingSchema = zod_1.z.object({
     dropoffSnapshot: zod_1.z.any().optional(),
 });
 exports.cancelBookingSchema = zod_1.z.object({
-    seatNos: zod_1.z.array(zod_1.z.string().min(1)).min(1, 'At least one seat number is required'),
+    seatNos: zod_1.z.union([
+        zod_1.z.array(zod_1.z.string().min(1)),
+        zod_1.z.string().min(1).transform((s) => s.split(',').map((x) => x.trim()).filter(Boolean)),
+    ]).optional(),
     reason: zod_1.z.string().optional(),
     refundToWallet: zod_1.z.boolean().optional(),
 });

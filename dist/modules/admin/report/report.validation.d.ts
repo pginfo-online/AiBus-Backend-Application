@@ -5,8 +5,8 @@ export declare const reportQuerySchema: z.ZodObject<{
     operatorName: z.ZodOptional<z.ZodString>;
     status: z.ZodOptional<z.ZodString>;
     format: z.ZodDefault<z.ZodOptional<z.ZodEnum<{
-        csv: "csv";
         json: "json";
+        csv: "csv";
     }>>>;
 }, z.core.$strict>;
 export type ReportQuery = z.infer<typeof reportQuerySchema>;

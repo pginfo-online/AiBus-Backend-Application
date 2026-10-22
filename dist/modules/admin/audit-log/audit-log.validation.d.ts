@@ -29,8 +29,8 @@ export declare const exportAuditLogsQuerySchema: z.ZodObject<{
     startDate: z.ZodOptional<z.ZodString>;
     endDate: z.ZodOptional<z.ZodString>;
     format: z.ZodDefault<z.ZodOptional<z.ZodEnum<{
-        csv: "csv";
         json: "json";
+        csv: "csv";
     }>>>;
 }, z.core.$strict>;
 export type ListAuditLogsQuery = z.infer<typeof listAuditLogsQuerySchema>;

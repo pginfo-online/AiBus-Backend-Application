@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.changePasswordSchema = exports.refreshTokenSchema = exports.loginSchema = exports.registerSchema = void 0;
+exports.verifyOtpSchema = exports.sendOtpSchema = exports.changePasswordSchema = exports.refreshTokenSchema = exports.loginSchema = exports.registerSchema = void 0;
 const zod_1 = require("zod");
 exports.registerSchema = zod_1.z.object({
     email: zod_1.z.string().email('Invalid email address').toLowerCase().trim(),
@@ -28,5 +28,30 @@ exports.changePasswordSchema = zod_1.z.object({
         .min(8, 'New password must be at least 8 characters')
         .regex(/[A-Z]/, 'Password must contain uppercase letter')
         .regex(/[0-9]/, 'Password must contain a number'),
+});
+exports.sendOtpSchema = zod_1.z.object({
+    phone: zod_1.z
+        .string()
+        .trim()
+        .transform((val) => val.replace(/\D/g, '').slice(-10))
+        .refine((val) => /^[6-9]\d{9}$/.test(val), {
+        message: 'Please enter a valid 10-digit Indian mobile number',
+    }),
+    appHash: zod_1.z.string().max(30).optional(),
+});
+exports.verifyOtpSchema = zod_1.z.object({
+    phone: zod_1.z
+        .string()
+        .trim()
+        .transform((val) => val.replace(/\D/g, '').slice(-10))
+        .refine((val) => /^[6-9]\d{9}$/.test(val), {
+        message: 'Please enter a valid 10-digit Indian mobile number',
+    }),
+    otp: zod_1.z
+        .string()
+        .trim()
+        .regex(/^\d{4,6}$/, 'OTP must be 4 to 6 digits'),
+    firstName: zod_1.z.string().trim().min(1).max(50).optional(),
+    lastName: zod_1.z.string().trim().max(50).optional(),
 });
 //# sourceMappingURL=auth.validation.js.map

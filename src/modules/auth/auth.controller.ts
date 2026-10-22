@@ -59,6 +59,40 @@ export class AuthController {
     }
   };
 
+  public sendOtp = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+    try {
+      const ipAddress = req.ip;
+      const result = await this.authService.sendOtp(req.body, ipAddress);
+      ApiResponse.success(res, result, 'OTP sent successfully');
+    } catch (error) {
+      next(error);
+    }
+  };
+
+  public verifyOtp = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+    try {
+      const deviceInfo = req.headers['user-agent'];
+      const ipAddress = req.ip;
+      const result = await this.authService.verifyOtp(req.body, deviceInfo, ipAddress);
+
+      // Set refresh token in HTTP-only cookie as well for web clients
+      res.cookie('refreshToken', result.tokens.refreshToken, {
+        httpOnly: true,
+        secure: req.secure || req.headers['x-forwarded-proto'] === 'https',
+        sameSite: 'strict',
+        maxAge: 7 * 24 * 60 * 60 * 1000,
+      });
+
+      ApiResponse.success(
+        res,
+        result,
+        result.isNewUser ? 'Welcome to AiBus!' : 'Logged in successfully'
+      );
+    } catch (error) {
+      next(error);
+    }
+  };
+
   public logout = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     try {
       const rawToken = req.body?.refreshToken || req.cookies?.refreshToken;

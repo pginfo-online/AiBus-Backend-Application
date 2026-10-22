@@ -85,7 +85,8 @@ class CancellationsService {
         if (!booking.providerTicketNo) {
             throw new errors_1.ValidationError('No active ticket number found for this booking');
         }
-        const seatString = seatNos.join(',');
+        const resolvedSeatNos = seatNos && seatNos.length > 0 ? seatNos : booking.seats.map((s) => s.seatNo);
+        const seatString = resolvedSeatNos.join(',');
         // 1. Transition booking to CANCELLATION_REQUESTED
         await prisma.booking.update({
             where: { id: booking.id },
@@ -125,7 +126,7 @@ class CancellationsService {
                         bookingId: booking.id,
                         userId: targetUserId,
                         status: client_1.CancellationStatus.COMPLETED,
-                        seatNos,
+                        seatNos: resolvedSeatNos,
                         providerNewHoldId: cancelRes.NewHoldId ? String(cancelRes.NewHoldId) : null,
                         providerNewTicketNo: cancelRes.NewTicketNo ? String(cancelRes.NewTicketNo) : null,
                         providerNewPnrNo: cancelRes.NewPNRNo ? String(cancelRes.NewPNRNo) : null,

@@ -1,4 +1,4 @@
-import { RegisterInput, LoginInput } from './auth.validation';
+import { RegisterInput, LoginInput, SendOtpInput, VerifyOtpInput } from './auth.validation';
 export interface AuthTokens {
     accessToken: string;
     refreshToken: string;
@@ -19,6 +19,34 @@ export declare class AuthService {
     refreshTokens(rawRefreshToken: string, deviceInfo?: string, ipAddress?: string): Promise<AuthTokens>;
     logout(rawRefreshToken: string): Promise<void>;
     private generateTokenPair;
+    private memoryOtpStore;
+    private memoryCooldownStore;
+    private memoryCountStore;
+    private hashOtp;
+    private verifyHash;
+    private generateNumericOtp;
+    private getOtpRecord;
+    private saveOtpRecord;
+    private deleteOtpRecord;
+    private incrementOtpAttempts;
+    /**
+     * Fast onboarding: Request OTP for a phone number
+     */
+    sendOtp(input: SendOtpInput, ipAddress?: string): Promise<{
+        phone: string;
+        otpLength: number;
+        expiresInSeconds: number;
+        resendCooldownSeconds: number;
+        debugOtp?: string;
+    }>;
+    /**
+     * Fast onboarding: Verify OTP and log in / auto-register user
+     */
+    verifyOtp(input: VerifyOtpInput, deviceInfo?: string, ipAddress?: string): Promise<{
+        user: any;
+        tokens: AuthTokens;
+        isNewUser: boolean;
+    }>;
     private hashToken;
 }
 //# sourceMappingURL=auth.service.d.ts.map

@@ -39,7 +39,7 @@ export declare const createBookingSchema: z.ZodObject<{
     dropoffSnapshot: z.ZodOptional<z.ZodAny>;
 }, z.core.$strip>;
 export declare const cancelBookingSchema: z.ZodObject<{
-    seatNos: z.ZodArray<z.ZodString>;
+    seatNos: z.ZodOptional<z.ZodUnion<readonly [z.ZodArray<z.ZodString>, z.ZodPipe<z.ZodString, z.ZodTransform<string[], string>>]>>;
     reason: z.ZodOptional<z.ZodString>;
     refundToWallet: z.ZodOptional<z.ZodBoolean>;
 }, z.core.$strip>;

@@ -102,19 +102,27 @@ class CitiesService {
             }
         }
         cities = deduplicatedCities;
-        // Curated high-priority popular cities (matching UI reference ref-3)
+        // Curated high-priority popular cities (matching UI reference ref-1 and ref-3)
         const POPULAR_KEYS = [
+            'hyderabad',
             'bengaluru',
             'bangalore',
-            'hyderabad',
             'chennai',
+            'madras',
+            'goa',
+            'vijayawada',
+            'nellore',
             'pune',
             'mumbai',
+            'bombay',
             'delhi',
+            'latur',
             'coimbatore',
-            'vijayawada',
             'visakhapatnam',
             'ahmedabad',
+            'jaipur',
+            'indore',
+            'nagpur',
         ];
         if (popular) {
             const popularMatches = [];
@@ -126,21 +134,26 @@ class CitiesService {
             }
             return limit ? popularMatches.slice(0, limit) : popularMatches;
         }
-        // 3. Filter by query if provided (prefix match prioritized, then substring)
+        // 3. Filter by query if provided (prefix match prioritized, then substring, then state)
         if (query && query.trim()) {
             const q = query.toLowerCase().trim();
             const prefixMatches = [];
             const containsMatches = [];
+            const stateMatches = [];
             for (const c of cities) {
                 const cityName = (c.name || c.City || '').toLowerCase();
+                const stateName = (c.State || '').toLowerCase();
                 if (cityName.startsWith(q)) {
                     prefixMatches.push(c);
                 }
                 else if (cityName.includes(q)) {
                     containsMatches.push(c);
                 }
+                else if (stateName.startsWith(q) || stateName.includes(q)) {
+                    stateMatches.push(c);
+                }
             }
-            const combined = [...prefixMatches, ...containsMatches];
+            const combined = [...prefixMatches, ...containsMatches, ...stateMatches];
             return limit ? combined.slice(0, limit) : combined;
         }
         // If limit is specified without query, return popular cities first, then others up to limit

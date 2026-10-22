@@ -537,7 +537,12 @@ class AgentsService {
         const [bookings, total] = await Promise.all([
             prisma.booking.findMany({
                 where,
-                include: { commissionSnapshot: true, ticket: { select: { ticketNumber: true, pnrNumber: true, pdfUrl: true } } },
+                include: {
+                    commissionSnapshot: true,
+                    ticket: { select: { ticketNumber: true, pnrNumber: true, pdfUrl: true } },
+                    passengers: true,
+                    seats: true,
+                },
                 orderBy: { createdAt: 'desc' },
                 skip,
                 take: limit,
