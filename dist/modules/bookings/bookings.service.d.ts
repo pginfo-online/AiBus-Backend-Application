@@ -443,6 +443,17 @@ export declare class BookingsService {
         bookingId?: string;
         bookingNumber?: string;
     }): Promise<{
+        Status: number;
+        Message: string;
+        TicketNo: any;
+        PNRNo: any;
+        BookingId: any;
+        BookingNumber: any;
+        booking: any;
+        HoldId?: undefined;
+        bookingId?: undefined;
+        bookingNumber?: undefined;
+    } | {
         HoldId: string;
         Status: number;
         TicketNo: string | undefined;
@@ -450,6 +461,9 @@ export declare class BookingsService {
         Message: string | undefined;
         bookingId: any;
         bookingNumber: any;
+        BookingId?: undefined;
+        BookingNumber?: undefined;
+        booking?: undefined;
     }>;
     private generateBookingNumber;
 }

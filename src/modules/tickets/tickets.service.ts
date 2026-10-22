@@ -22,7 +22,7 @@ export class TicketsService {
     return this.gdsAdapter.getBookingDetails(pnr, ticketNo);
   }
 
-  public async getTicketByBookingId(bookingIdentifier: string) {
+  public async getTicketByBookingId(bookingIdentifier: string, forceRefresh: boolean = false) {
     const prisma = getPrismaClient();
 
     const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(bookingIdentifier);
@@ -53,8 +53,8 @@ export class TicketsService {
     }
 
     let gdsDetails = null;
-    // Only call external GDS if ticket record does not yet exist locally
-    if (booking.providerPnrNo && booking.providerTicketNo && !booking.ticket) {
+    // Only call external GDS if explicitly requested with forceRefresh, OR if ticket record is missing and provider identifiers exist
+    if (forceRefresh && booking.providerPnrNo && booking.providerTicketNo) {
       try {
         gdsDetails = await Promise.race([
           this.gdsAdapter.getBookingDetails(booking.providerPnrNo, booking.providerTicketNo),

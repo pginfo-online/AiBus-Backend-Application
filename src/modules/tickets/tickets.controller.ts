@@ -12,7 +12,8 @@ export class TicketsController {
   public getTicketByBookingId = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     try {
       const bookingId = Array.isArray(req.params.bookingId) ? req.params.bookingId[0] : req.params.bookingId;
-      const ticket = await this.ticketsService.getTicketByBookingId(bookingId);
+      const forceRefresh = req.query.refresh === 'true' || req.query.forceRefresh === 'true';
+      const ticket = await this.ticketsService.getTicketByBookingId(bookingId, forceRefresh);
       ApiResponse.success(res, ticket);
     } catch (error) {
       next(error);

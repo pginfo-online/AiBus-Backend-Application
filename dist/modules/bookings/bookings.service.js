@@ -392,6 +392,18 @@ class BookingsService {
         if (!targetHoldId) {
             throw new errors_1.ValidationError('HoldId or BookingId is required to check booking status');
         }
+        // Fast-path: If local booking is already CONFIRMED with ticket/provider info, return immediately
+        if (localBooking && localBooking.status === client_1.BookingStatus.CONFIRMED && localBooking.providerTicketNo) {
+            return {
+                Status: 1,
+                Message: 'Booking is confirmed',
+                TicketNo: localBooking.providerTicketNo,
+                PNRNo: localBooking.providerPnrNo || 'N/A',
+                BookingId: localBooking.id,
+                BookingNumber: localBooking.bookingNumber,
+                booking: localBooking,
+            };
+        }
         // Check if targetHoldId is a local SeatHold UUID
         const isHoldUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(targetHoldId);
         if (isHoldUuid) {

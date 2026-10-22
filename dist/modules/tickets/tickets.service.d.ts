@@ -4,7 +4,7 @@ export declare class TicketsService {
     private constructor();
     static getInstance(): TicketsService;
     getGdsBookingDetails(pnr: string, ticketNo: string): Promise<import("../../providers/types").GdsBookingDetailsResponse>;
-    getTicketByBookingId(bookingIdentifier: string): Promise<{
+    getTicketByBookingId(bookingIdentifier: string, forceRefresh?: boolean): Promise<{
         id: string;
         bookingId: string;
         ticketNumber: string;
