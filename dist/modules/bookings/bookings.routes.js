@@ -10,6 +10,8 @@ exports.bookingsRouter = bookingsRouter;
 const controller = new bookings_controller_1.BookingsController();
 // Create booking — allows both guest and authenticated users
 bookingsRouter.post('/', middleware_1.optionalAuth, (0, middleware_1.validate)({ body: bookings_validation_1.createBookingSchema }), controller.createBooking);
+// Consolidated checkout session (booking + payment intent in one atomic call)
+bookingsRouter.post('/checkout-session', middleware_1.optionalAuth, (0, middleware_1.validate)({ body: bookings_validation_1.createCheckoutSessionSchema }), controller.createCheckoutSession);
 // Get current user's bookings (authenticated)
 bookingsRouter.get('/my-bookings', middleware_1.authenticate, controller.getUserBookings);
 // Check booking status against Hold ID or Booking ID (Mantis GDS /ota/bookingstatusv2)

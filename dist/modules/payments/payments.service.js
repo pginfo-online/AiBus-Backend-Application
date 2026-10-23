@@ -403,6 +403,7 @@ class PaymentsService {
         // Prevent double-processing: check current booking state
         const currentBooking = await prisma.booking.findUnique({
             where: { id: payment.bookingId },
+            include: { seats: true, passengers: true, ticket: true },
         });
         if (!currentBooking) {
             throw new errors_1.NotFoundError('Booking not found');

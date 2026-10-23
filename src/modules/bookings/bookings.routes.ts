@@ -1,13 +1,16 @@
 import { Router } from 'express';
 import { BookingsController } from './bookings.controller';
 import { validate, optionalAuth, authenticate } from '../../app/middleware';
-import { createBookingSchema } from './bookings.validation';
+import { createBookingSchema, createCheckoutSessionSchema } from './bookings.validation';
 
 const bookingsRouter = Router();
 const controller = new BookingsController();
 
 // Create booking — allows both guest and authenticated users
 bookingsRouter.post('/', optionalAuth, validate({ body: createBookingSchema }), controller.createBooking);
+
+// Consolidated checkout session (booking + payment intent in one atomic call)
+bookingsRouter.post('/checkout-session', optionalAuth, validate({ body: createCheckoutSessionSchema }), controller.createCheckoutSession);
 
 // Get current user's bookings (authenticated)
 bookingsRouter.get('/my-bookings', authenticate, controller.getUserBookings);

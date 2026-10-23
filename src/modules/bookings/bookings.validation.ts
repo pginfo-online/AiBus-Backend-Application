@@ -30,6 +30,12 @@ export const createBookingSchema = z.object({
   dropoffSnapshot: z.any().optional(),
 });
 
+export const createCheckoutSessionSchema = createBookingSchema.extend({
+  gateway: z.enum(['RAZORPAY', 'PHONEPE', 'AUTO']).default('RAZORPAY').optional(),
+  paymentMode: z.string().optional(),
+  redirectUrl: z.string().optional(),
+});
+
 export const cancelBookingSchema = z.object({
   seatNos: z.union([
     z.array(z.string().min(1)),
@@ -47,5 +53,6 @@ export const bookingStatusSchema = z.object({
 });
 
 export type CreateBookingInput = z.infer<typeof createBookingSchema>;
+export type CreateCheckoutSessionInput = z.infer<typeof createCheckoutSessionSchema>;
 export type CancelBookingInput = z.infer<typeof cancelBookingSchema>;
 export type BookingStatusInput = z.infer<typeof bookingStatusSchema>;

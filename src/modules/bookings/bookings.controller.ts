@@ -20,6 +20,17 @@ export class BookingsController {
     }
   };
 
+  public createCheckoutSession = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+    try {
+      const userId = (req as any).user?.sub;
+      const agentId = (req as any).agentId;
+      const session = await this.bookingsService.createCheckoutSession(req.body, userId, agentId);
+      ApiResponse.created(res, session, 'Checkout session created successfully');
+    } catch (error) {
+      next(error);
+    }
+  };
+
   public getBooking = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     try {
       const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;

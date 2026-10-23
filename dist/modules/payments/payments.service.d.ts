@@ -349,6 +349,43 @@ export declare class PaymentsService {
             attempts: number;
         };
         booking: {
+            seats: {
+                id: string;
+                bookingId: string;
+                seatNo: string;
+                seatTypeId: number;
+                fareTotal: import("@prisma/client/runtime/library").Decimal;
+                fareBase: import("@prisma/client/runtime/library").Decimal;
+                fareTax: import("@prisma/client/runtime/library").Decimal;
+                deck: number;
+                row: number;
+                column: number;
+            }[];
+            ticket: {
+                id: string;
+                status: import(".prisma/client").$Enums.TicketStatus;
+                createdAt: Date;
+                updatedAt: Date;
+                bookingId: string;
+                storageKey: string | null;
+                ticketNumber: string;
+                pnrNumber: string;
+                pdfUrl: string | null;
+                bookingSnapshot: import("@prisma/client/runtime/library").JsonValue;
+                generatedAt: Date;
+            } | null;
+            passengers: {
+                name: string;
+                id: string;
+                bookingId: string;
+                seatNo: string;
+                seatTypeId: number;
+                age: number;
+                gender: string;
+                fare: import("@prisma/client/runtime/library").Decimal;
+                isAcSeat: boolean;
+            }[];
+        } & {
             version: number;
             userId: string | null;
             id: string;
@@ -606,6 +643,43 @@ export declare class PaymentsService {
             attempts: number;
         };
         booking: {
+            seats: {
+                id: string;
+                bookingId: string;
+                seatNo: string;
+                seatTypeId: number;
+                fareTotal: import("@prisma/client/runtime/library").Decimal;
+                fareBase: import("@prisma/client/runtime/library").Decimal;
+                fareTax: import("@prisma/client/runtime/library").Decimal;
+                deck: number;
+                row: number;
+                column: number;
+            }[];
+            ticket: {
+                id: string;
+                status: import(".prisma/client").$Enums.TicketStatus;
+                createdAt: Date;
+                updatedAt: Date;
+                bookingId: string;
+                storageKey: string | null;
+                ticketNumber: string;
+                pnrNumber: string;
+                pdfUrl: string | null;
+                bookingSnapshot: import("@prisma/client/runtime/library").JsonValue;
+                generatedAt: Date;
+            } | null;
+            passengers: {
+                name: string;
+                id: string;
+                bookingId: string;
+                seatNo: string;
+                seatTypeId: number;
+                age: number;
+                gender: string;
+                fare: import("@prisma/client/runtime/library").Decimal;
+                isAcSeat: boolean;
+            }[];
+        } & {
             version: number;
             userId: string | null;
             id: string;

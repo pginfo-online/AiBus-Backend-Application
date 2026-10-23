@@ -19,6 +19,17 @@ class BookingsController {
             next(error);
         }
     };
+    createCheckoutSession = async (req, res, next) => {
+        try {
+            const userId = req.user?.sub;
+            const agentId = req.agentId;
+            const session = await this.bookingsService.createCheckoutSession(req.body, userId, agentId);
+            response_1.ApiResponse.created(res, session, 'Checkout session created successfully');
+        }
+        catch (error) {
+            next(error);
+        }
+    };
     getBooking = async (req, res, next) => {
         try {
             const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;

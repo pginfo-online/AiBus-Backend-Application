@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.bookingStatusSchema = exports.cancelBookingSchema = exports.createBookingSchema = void 0;
+exports.bookingStatusSchema = exports.cancelBookingSchema = exports.createCheckoutSessionSchema = exports.createBookingSchema = void 0;
 const zod_1 = require("zod");
 const holds_validation_1 = require("../holds/holds.validation");
 exports.createBookingSchema = zod_1.z.object({
@@ -30,6 +30,11 @@ exports.createBookingSchema = zod_1.z.object({
     cancellationPolicy: zod_1.z.any().optional(),
     pickupSnapshot: zod_1.z.any().optional(),
     dropoffSnapshot: zod_1.z.any().optional(),
+});
+exports.createCheckoutSessionSchema = exports.createBookingSchema.extend({
+    gateway: zod_1.z.enum(['RAZORPAY', 'PHONEPE', 'AUTO']).default('RAZORPAY').optional(),
+    paymentMode: zod_1.z.string().optional(),
+    redirectUrl: zod_1.z.string().optional(),
 });
 exports.cancelBookingSchema = zod_1.z.object({
     seatNos: zod_1.z.union([

@@ -127,6 +127,93 @@ describe('Production-Grade Razorpay Payment Gateway Integration Tests', () => {
     expect(data.sdkPayload.prefill.contact).toBe('9876543210');
   });
 
+  it('1b. Consolidated Checkout Session: returns booking and paymentIntent in a single atomic call', async () => {
+    // 1. Create a hold
+    const holdRes = await request(app)
+      .post('/api/v1/holds')
+      .send({
+        fromCityId: 4292,
+        toCityId: 4562,
+        journeyDate: '2026-12-15',
+        busId: 6902,
+        pickupId: '44953',
+        dropoffId: '750',
+        contactInfo: {
+          customerName: 'Sanjay Dutt',
+          email: 'sanjay@example.com',
+          phone: '9876543211',
+          mobile: '9876543211',
+        },
+        passengers: [
+          {
+            seatNo: 'U1',
+            seatTypeId: 2,
+            fare: 950,
+            gender: 'M',
+            age: 32,
+            name: 'Sanjay Dutt',
+            isAcSeat: true,
+          },
+        ],
+      });
+    expect(holdRes.status).toBe(201);
+    const holdId = holdRes.body.data.holdId;
+
+    // 2. Call unified checkout session
+    const sessionRes = await request(app)
+      .post('/api/v1/bookings/checkout-session')
+      .set('Authorization', `Bearer ${authToken}`)
+      .send({
+        holdId,
+        fromCityId: 4292,
+        toCityId: 4562,
+        fromCityName: 'Bengaluru',
+        toCityName: 'Chennai',
+        journeyDate: '2026-12-15',
+        busId: 6902,
+        tripId: '15:99999',
+        pickupCode: '44953',
+        pickupLocation: 'Majestic',
+        pickupTime: '2026-12-15 22:00:00',
+        dropoffCode: '750',
+        dropoffLocation: 'Koyambedu',
+        dropoffTime: '2026-12-16 06:30:00',
+        operatorName: 'SRS Travels',
+        busType: 'AC Sleeper',
+        totalFare: 950,
+        baseFare: 870,
+        serviceTax: 80,
+        contactName: 'Sanjay Dutt',
+        contactEmail: 'sanjay@example.com',
+        contactPhone: '9876543211',
+        gateway: 'RAZORPAY',
+        paymentMode: 'UPI',
+        passengers: [
+          {
+            seatNo: 'U1',
+            seatTypeId: 2,
+            fare: 950,
+            gender: 'M',
+            age: 32,
+            name: 'Sanjay Dutt',
+            isAcSeat: true,
+          },
+        ],
+      });
+
+    expect(sessionRes.status).toBe(201);
+    expect(sessionRes.body.success).toBe(true);
+    const sessionData = sessionRes.body.data;
+    expect(sessionData.booking).toBeDefined();
+    expect(sessionData.booking.id).toBeDefined();
+    expect(sessionData.booking.status).toBe('PAYMENT_PENDING');
+    expect(sessionData.paymentIntent).toBeDefined();
+    expect(sessionData.paymentIntent.gateway).toBe('RAZORPAY');
+    expect(sessionData.paymentIntent.amount).toBe(950);
+    expect(sessionData.paymentIntent.gatewayOrderId).toBeDefined();
+    expect(sessionData.paymentIntent.sdkPayload.amount).toBe(95000);
+  });
+
   it('2. Cryptographic HMAC-SHA256 Verification: verifies valid signature and confirms booking', async () => {
     // 1. Create a hold
     const holdRes = await request(app)

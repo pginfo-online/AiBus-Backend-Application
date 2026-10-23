@@ -12,7 +12,7 @@ import {
   AuthorizationError,
 } from '../../shared/errors';
 import { logger } from '../../infrastructure/logger';
-import { CreateBookingInput } from './bookings.validation';
+import { CreateBookingInput, CreateCheckoutSessionInput } from './bookings.validation';
 import { BookingStatus, HoldStatus, TicketStatus, AgentStatus } from '@prisma/client';
 import { resolveCommission } from '../../infrastructure/commission';
 
@@ -242,6 +242,38 @@ export class BookingsService {
     // The payment lifecycle is: HELD → PAYMENT_PENDING → PAYMENT_SUCCESS → CONFIRMED.
     // Never call confirmBooking() here — it is called by PaymentsService.verifyPayment() only.
     return booking;
+  }
+
+  /**
+   * Unified Checkout Session Creation:
+   * Consolidates Booking persistence + Gateway Intent generation in a single atomic pipeline.
+   * Eliminates 3 separate mobile network hops and ensures instant checkout launch.
+   */
+  public async createCheckoutSession(
+    input: CreateCheckoutSessionInput,
+    userId?: string,
+    explicitAgentId?: string
+  ) {
+    // 1. Create or retrieve existing booking for active hold
+    const booking = await this.createBooking(input, userId, explicitAgentId);
+
+    // 2. Generate payment intent via PaymentsService
+    const { PaymentsService } = await import('../payments/payments.service');
+    const paymentsService = PaymentsService.getInstance();
+    const paymentIntent = await paymentsService.createPaymentIntent(
+      {
+        bookingId: booking.id,
+        gateway: (input.gateway as any) || 'RAZORPAY',
+        paymentMode: input.paymentMode as any,
+        redirectUrl: input.redirectUrl,
+      },
+      userId
+    );
+
+    return {
+      booking,
+      paymentIntent,
+    };
   }
 
   /**

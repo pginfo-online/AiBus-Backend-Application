@@ -509,6 +509,7 @@ export class PaymentsService {
     // Prevent double-processing: check current booking state
     const currentBooking = await prisma.booking.findUnique({
       where: { id: payment.bookingId },
+      include: { seats: true, passengers: true, ticket: true },
     });
 
     if (!currentBooking) {
