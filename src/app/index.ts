@@ -19,6 +19,7 @@ import cancellationsRoutes from '../modules/cancellations/cancellations.routes';
 import ticketsRoutes from '../modules/tickets/tickets.routes';
 import adminRoutes from '../modules/admin/admin.routes';
 import agentsRoutes from '../modules/agents/agents.routes';
+import couponsRoutes from '../modules/coupons/coupons.routes';
 import { pinoHttp } from 'pino-http';
 import { logger } from '../infrastructure/logger';
 import swaggerUi from 'swagger-ui-express';
@@ -123,8 +124,12 @@ export function createApp(): Express {
   app.use(`${apiPrefix}/tickets`, ticketsRoutes);
   app.use(`${apiPrefix}/admin`, adminRoutes);
   app.use(`${apiPrefix}/agents`, agentsRoutes);
+  app.use(`${apiPrefix}/coupons`, couponsRoutes);
+  app.use(`${apiPrefix}/offers`, couponsRoutes);
 
   // Frontend aliases (/api/bus/* & /api/cities etc.)
+  app.use('/api/coupons', couponsRoutes);
+  app.use('/api/offers', couponsRoutes);
   app.use('/api/bus/cities', citiesRoutes);
   app.use('/api/cities', citiesRoutes);
   app.use('/api/bus/search', searchRoutes);

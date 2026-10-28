@@ -28,6 +28,8 @@ export const createBookingSchema = z.object({
   cancellationPolicy: z.any().optional(),
   pickupSnapshot: z.any().optional(),
   dropoffSnapshot: z.any().optional(),
+  couponCode: z.string().trim().optional().nullable(),
+  useWallet: z.boolean().optional().default(false),
 });
 
 export const createCheckoutSessionSchema = createBookingSchema.extend({
