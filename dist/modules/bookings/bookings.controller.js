@@ -53,7 +53,7 @@ class BookingsController {
     checkBookingStatus = async (req, res, next) => {
         try {
             const holdId = req.params.holdId || req.body?.holdId || req.body?.HoldId || req.query?.holdId;
-            const bookingId = req.body?.bookingId || req.query?.bookingId;
+            const bookingId = req.params.id || req.body?.bookingId || req.query?.bookingId;
             const bookingNumber = req.body?.bookingNumber || req.query?.bookingNumber;
             const status = await this.bookingsService.checkBookingStatus({
                 holdId,

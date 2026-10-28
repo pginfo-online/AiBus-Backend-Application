@@ -37,6 +37,8 @@ export declare const createBookingSchema: z.ZodObject<{
     cancellationPolicy: z.ZodOptional<z.ZodAny>;
     pickupSnapshot: z.ZodOptional<z.ZodAny>;
     dropoffSnapshot: z.ZodOptional<z.ZodAny>;
+    couponCode: z.ZodNullable<z.ZodOptional<z.ZodString>>;
+    useWallet: z.ZodDefault<z.ZodOptional<z.ZodBoolean>>;
 }, z.core.$strip>;
 export declare const createCheckoutSessionSchema: z.ZodObject<{
     holdId: z.ZodNullable<z.ZodOptional<z.ZodString>>;
@@ -76,6 +78,8 @@ export declare const createCheckoutSessionSchema: z.ZodObject<{
     cancellationPolicy: z.ZodOptional<z.ZodAny>;
     pickupSnapshot: z.ZodOptional<z.ZodAny>;
     dropoffSnapshot: z.ZodOptional<z.ZodAny>;
+    couponCode: z.ZodNullable<z.ZodOptional<z.ZodString>>;
+    useWallet: z.ZodDefault<z.ZodOptional<z.ZodBoolean>>;
     gateway: z.ZodOptional<z.ZodDefault<z.ZodEnum<{
         RAZORPAY: "RAZORPAY";
         PHONEPE: "PHONEPE";

@@ -30,6 +30,8 @@ exports.createBookingSchema = zod_1.z.object({
     cancellationPolicy: zod_1.z.any().optional(),
     pickupSnapshot: zod_1.z.any().optional(),
     dropoffSnapshot: zod_1.z.any().optional(),
+    couponCode: zod_1.z.string().trim().optional().nullable(),
+    useWallet: zod_1.z.boolean().optional().default(false),
 });
 exports.createCheckoutSessionSchema = exports.createBookingSchema.extend({
     gateway: zod_1.z.enum(['RAZORPAY', 'PHONEPE', 'AUTO']).default('RAZORPAY').optional(),
