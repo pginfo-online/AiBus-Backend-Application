@@ -37,7 +37,7 @@ class DreamzSmsProvider {
     }
     /**
      * Formats the DLT approved message according to the registered template:
-     * "<#> Dear User, PGInfo login verification code is {#var#}. Valid for 5 minutes. Do not share. {#var#}"
+     * "<#> Dear User, aiBus login verification code is {#var#}. Valid for 5 minutes. Do not share. {#var#}"
      */
     formatMessage(otp, appHash) {
         const hash = (appHash && appHash.trim()) || env_1.env.SMS_DEFAULT_APP_HASH;

@@ -22,7 +22,7 @@ export declare class DreamzSmsProvider {
     private maskPhone;
     /**
      * Formats the DLT approved message according to the registered template:
-     * "<#> Dear User, PGInfo login verification code is {#var#}. Valid for 5 minutes. Do not share. {#var#}"
+     * "<#> Dear User, aiBus login verification code is {#var#}. Valid for 5 minutes. Do not share. {#var#}"
      */
     formatMessage(otp: string, appHash?: string): string;
     /**
