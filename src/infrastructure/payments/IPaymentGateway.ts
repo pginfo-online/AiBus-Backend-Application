@@ -2,7 +2,7 @@
 // Universal Payment Gateway Interface & Types (AiBus Payment Orchestrator)
 // ---------------------------------------------------------------------------
 
-export type GatewayName = 'RAZORPAY' | 'PHONEPE';
+export type GatewayName = 'RAZORPAY';
 export type PaymentMethodType = 'UPI' | 'CARD' | 'NETBANKING' | 'WALLET' | 'ALL';
 
 export interface PaymentIntentParams {
@@ -28,7 +28,7 @@ export interface PaymentIntentResult {
   currency: string;
   paymentUrl?: string;       // Web checkout URL or deep link
   upiIntentUrl?: string;     // upi://pay URL for native app launch
-  sdkPayload?: Record<string, unknown>; // Client SDK parameters (Razorpay options / PhonePe payload)
+  sdkPayload?: Record<string, unknown>; // Client SDK parameters (Razorpay options)
   expiresAt?: Date;
 }
 
@@ -56,6 +56,7 @@ export interface PaymentVerificationResult {
 export interface ProcessRefundParams {
   merchantRefundId: string;
   originalMerchantTxnId: string;
+  gatewayRefundId?: string;
   gatewayPaymentId?: string;
   amount: number; // In INR
   reason?: string;

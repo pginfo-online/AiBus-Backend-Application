@@ -1,4 +1,4 @@
-import { env, isDevelopment, isTest } from '../../config/env';
+import { env } from '../../config/env';
 import { getPrismaClient } from '../database';
 import { logger } from '../logger';
 import {
@@ -13,7 +13,6 @@ import {
   WebhookEventNormalized,
 } from './IPaymentGateway';
 import { RazorpayAdapter } from './adapters/RazorpayAdapter';
-import { PhonePeAdapter } from './adapters/PhonePeAdapter';
 import { NotFoundError, ValidationError } from '../../shared/errors';
 
 const orchestratorLogger = logger.child({ module: 'payment-orchestrator' });
@@ -37,7 +36,6 @@ export class PaymentOrchestrator {
 
   private constructor() {
     this.registerAdapter(new RazorpayAdapter());
-    this.registerAdapter(new PhonePeAdapter());
 
     this.healthStates.set('RAZORPAY', {
       failureCount: 0,
@@ -46,12 +44,6 @@ export class PaymentOrchestrator {
       isCircuitOpen: false,
     });
 
-    this.healthStates.set('PHONEPE', {
-      failureCount: 0,
-      successCount: 0,
-      consecutiveFailures: 0,
-      isCircuitOpen: false,
-    });
   }
 
   public static getInstance(): PaymentOrchestrator {
@@ -79,9 +71,9 @@ export class PaymentOrchestrator {
   public async initialize(): Promise<void> {
     try {
       const prisma = getPrismaClient();
-      const existing = await prisma.paymentGatewayConfig.findMany();
+      const existing = await prisma.paymentGatewayConfig.findUnique({ where: { gateway: 'RAZORPAY' } });
 
-      if (existing.length === 0) {
+      if (!existing) {
         orchestratorLogger.info('Seeding default PaymentGatewayConfig records...');
 
         // User currently has live Razorpay credentials!
@@ -96,22 +88,6 @@ export class PaymentOrchestrator {
             supportedMethods: ['UPI', 'CARD', 'NETBANKING', 'WALLET'],
             mode: env.RAZORPAY_KEY_ID?.startsWith('rzp_live') ? 'LIVE' : 'TEST',
             trafficWeight: 100,
-            failureThresholdPct: 15,
-            isHealthy: true,
-          },
-        });
-
-        // PhonePe is seeded disabled and prepared for seamless activation once credentials arrive
-        await prisma.paymentGatewayConfig.create({
-          data: {
-            gateway: 'PHONEPE',
-            name: 'PhonePe Standard Checkout (UPI & Cards)',
-            isEnabled: false,
-            isPrimary: false,
-            priority: 2,
-            supportedMethods: ['UPI', 'CARD'],
-            mode: 'TEST',
-            trafficWeight: 0,
             failureThresholdPct: 15,
             isHealthy: true,
           },
@@ -132,7 +108,7 @@ export class PaymentOrchestrator {
   public async refreshConfigCache(): Promise<void> {
     try {
       const prisma = getPrismaClient();
-      const configs = await prisma.paymentGatewayConfig.findMany();
+      const configs = await prisma.paymentGatewayConfig.findMany({ where: { gateway: 'RAZORPAY' } });
       this.configCache.clear();
       for (const c of configs) {
         this.configCache.set(c.gateway, c);
@@ -151,64 +127,31 @@ export class PaymentOrchestrator {
   }
 
   /**
-   * Smart Router: Resolves the optimal gateway for a transaction
-   * Evaluates admin config, health metrics, circuit breaker, and payment method affinity
+   * Resolve the enabled Razorpay adapter
    */
   public async resolveGateway(
     requestedGateway?: string,
-    paymentMethod?: string
   ): Promise<IPaymentGateway> {
     const configs = await this.getGatewayConfigs();
 
-    // 1. If explicit gateway requested and healthy/enabled, honor request
-    if (requestedGateway && requestedGateway !== 'AUTO') {
-      const gwName = requestedGateway.toUpperCase() as GatewayName;
-      const config = configs.get(gwName);
-      const isHealthy = this.isGatewayHealthy(gwName);
-
-      if (((config && config.isEnabled) || isTest) && isHealthy && config?.mode !== 'MAINTENANCE') {
-        return this.getAdapter(gwName);
-      }
-      orchestratorLogger.warn(
-        { requestedGateway, isHealthy, isEnabled: config?.isEnabled },
-        'Requested gateway is unavailable or degraded; routing engine resolving healthy fallback'
-      );
+    const config = configs.get('RAZORPAY');
+    if (requestedGateway && requestedGateway !== 'AUTO' && requestedGateway !== 'RAZORPAY') {
+      throw new Error('Unsupported payment gateway');
     }
-
-    // 2. Select primary gateway if healthy and enabled
-    for (const [, config] of configs) {
-      if (config.isPrimary && config.isEnabled && config.mode !== 'MAINTENANCE') {
-        const gwName = config.gateway as GatewayName;
-        if (this.isGatewayHealthy(gwName)) {
-          return this.getAdapter(gwName);
-        }
-      }
+    if ((config && (!config.isEnabled || config.mode === 'MAINTENANCE')) || !this.isGatewayHealthy('RAZORPAY')) {
+      throw new Error('Razorpay is temporarily unavailable');
     }
-
-    // 3. Fallback: select any enabled, healthy gateway
-    for (const [, config] of configs) {
-      if (config.isEnabled && config.mode !== 'MAINTENANCE') {
-        const gwName = config.gateway as GatewayName;
-        if (this.isGatewayHealthy(gwName)) {
-          return this.getAdapter(gwName);
-        }
-      }
-    }
-
-    // 4. Default fallback: Razorpay
-    orchestratorLogger.warn('No active gateway found in DB configs; defaulting to Razorpay');
     return this.getAdapter('RAZORPAY');
   }
 
   /**
-   * Create Payment Intent with Automatic Cascading Fallback
-   * If primary gateway fails during intent creation, automatically fails over to secondary
+   * Create a Razorpay payment intent and track provider availability
    */
-  public async createPaymentIntentWithFallback(
+  public async createPaymentIntent(
     params: PaymentIntentParams,
     requestedGateway?: string
   ): Promise<PaymentIntentResult> {
-    const primaryAdapter = await this.resolveGateway(requestedGateway, params.paymentMode);
+    const primaryAdapter = await this.resolveGateway(requestedGateway);
 
     try {
       const result = await primaryAdapter.createPaymentIntent(params);
@@ -221,39 +164,9 @@ export class PaymentOrchestrator {
           gateway: primaryAdapter.gatewayName,
           bookingId: params.bookingId,
         },
-        'Primary payment gateway intent creation failed; attempting automatic failover'
+        'Razorpay intent creation failed'
       );
       this.recordFailure(primaryAdapter.gatewayName);
-
-      // Identify alternative fallback gateway (only if configured and healthy)
-      const fallbackGatewayName: GatewayName =
-        primaryAdapter.gatewayName === 'RAZORPAY' ? 'PHONEPE' : 'RAZORPAY';
-      const fallbackAdapter = this.getAdapter(fallbackGatewayName);
-
-      if ((fallbackAdapter.isConfigured() || isTest) && this.isGatewayHealthy(fallbackGatewayName)) {
-        try {
-          const fallbackResult = await fallbackAdapter.createPaymentIntent(params);
-          this.recordSuccess(fallbackGatewayName);
-          orchestratorLogger.info(
-            {
-              originalGateway: primaryAdapter.gatewayName,
-              fallbackGateway: fallbackGatewayName,
-              bookingId: params.bookingId,
-            },
-            'Automatic gateway failover SUCCEEDED — transaction protected from downtime'
-          );
-          return fallbackResult;
-        } catch (fallbackErr: any) {
-          this.recordFailure(fallbackGatewayName);
-          orchestratorLogger.error(
-            {
-              fallbackErr: fallbackErr.message,
-              bookingId: params.bookingId,
-            },
-            'Both primary and fallback payment gateways failed'
-          );
-        }
-      }
 
       throw new Error(
         `Payment service temporarily unavailable. Please retry. (${primaryErr.message})`
@@ -269,13 +182,7 @@ export class PaymentOrchestrator {
     params: VerifyPaymentParams
   ): Promise<PaymentVerificationResult> {
     const adapter = this.getAdapter(gatewayHint);
-    const result = await adapter.verifyPayment(params);
-    if (result.success) {
-      this.recordSuccess(gatewayHint);
-    } else {
-      this.recordFailure(gatewayHint);
-    }
-    return result;
+    return adapter.verifyPayment(params);
   }
 
   /**
@@ -333,7 +240,7 @@ export class PaymentOrchestrator {
         state.circuitOpenedAt = new Date();
         orchestratorLogger.error(
           { gateway, consecutiveFailures: state.consecutiveFailures },
-          'Gateway error threshold breached — CIRCUIT TRIPPED OPEN. Traffic diverted.'
+          'Gateway error threshold breached — CIRCUIT TRIPPED OPEN. '
         );
       }
     }
@@ -353,42 +260,7 @@ export class PaymentOrchestrator {
 
   public async listGateways(): Promise<any[]> {
     const prisma = getPrismaClient();
-    let configs: any[] = [];
-    try {
-      configs = await prisma.paymentGatewayConfig.findMany({
-        orderBy: { priority: 'asc' },
-      });
-    } catch {
-      // In testing or database offline fallback
-    }
-
-    if (!configs || configs.length === 0) {
-      configs = [
-        {
-          id: 'cfg_rzp',
-          gateway: 'RAZORPAY',
-          name: 'Razorpay Payment Suite',
-          isEnabled: true,
-          isPrimary: true,
-          priority: 1,
-          mode: 'ACTIVE',
-          trafficWeight: 100,
-          supportedMethods: ['UPI', 'CARD', 'NETBANKING', 'WALLET'],
-        },
-        {
-          id: 'cfg_phonepe',
-          gateway: 'PHONEPE',
-          name: 'PhonePe PG Standard',
-          isEnabled: false,
-          isPrimary: false,
-          priority: 2,
-          mode: 'STANDBY',
-          trafficWeight: 0,
-          supportedMethods: ['UPI', 'CARD', 'NETBANKING'],
-        },
-      ];
-    }
-
+    const configs = await prisma.paymentGatewayConfig.findMany({ where: { gateway: 'RAZORPAY' } });
     return configs.map((c) => {
       const health = this.healthStates.get(c.gateway as GatewayName);
       return {
@@ -404,13 +276,7 @@ export class PaymentOrchestrator {
   public async updateGatewayConfig(gateway: GatewayName, updates: any): Promise<any> {
     const prisma = getPrismaClient();
 
-    if (updates.isPrimary === true) {
-      // Remove primary flag from other gateways
-      await prisma.paymentGatewayConfig.updateMany({
-        where: { gateway: { not: gateway } },
-        data: { isPrimary: false },
-      });
-    }
+    this.getAdapter(gateway);
 
     const updated = await prisma.paymentGatewayConfig.update({
       where: { gateway },

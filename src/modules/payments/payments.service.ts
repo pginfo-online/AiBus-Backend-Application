@@ -1,274 +1,24 @@
-import crypto from 'crypto';
-import axios from 'axios';
+import { acquireLock, releaseLock } from '../../infrastructure/redis';
+import { AgentsService } from '../agents/agents.service';
 import { v4 as uuidv4 } from 'uuid';
-import { env, isDevelopment, isTest } from '../../config/env';
+import { env } from '../../config/env';
 import { getPrismaClient } from '../../infrastructure/database';
 import { BookingsService } from '../bookings/bookings.service';
 import { TicketsService } from '../tickets/tickets.service';
 import {
   NotFoundError,
   ValidationError,
-  PaymentFailedError,
   AuthorizationError,
   ConflictError,
 } from '../../shared/errors';
 import { logger } from '../../infrastructure/logger';
 import { PaymentStatus, BookingStatus, HoldStatus } from '@prisma/client';
-import { CreatePaymentIntentInput, VerifyPaymentInput, SimulateWebhookInput } from './payments.validation';
+import { CreatePaymentIntentInput, VerifyPaymentInput } from './payments.validation';
 import { buildBookingPaymentLines, buildLedgerPostingData } from '../../infrastructure/ledger';
-import { PaymentOrchestrator, GatewayName, PaymentVerificationResult } from '../../infrastructure/payments';
+import { PaymentOrchestrator, PaymentVerificationResult } from '../../infrastructure/payments';
 import { CouponsService } from '../coupons/coupons.service';
 
 const paymentLogger = logger.child({ module: 'payments-service' });
-
-// ---------------------------------------------------------------------------
-// Controlled Development / Sandbox Payment Simulation Store
-// ---------------------------------------------------------------------------
-export interface DevPaymentSimulationState {
-  merchantTxnId: string;
-  status: 'PENDING' | 'SUCCESS' | 'DECLINED' | 'TIMED_OUT';
-  reason?: string;
-  simulatedAt?: Date;
-}
-export const devSimulationStore = new Map<string, DevPaymentSimulationState>();
-
-// ---------------------------------------------------------------------------
-// PhonePe V2 Standard Checkout Integration
-// ---------------------------------------------------------------------------
-const PHONEPE_OAUTH_URL =
-  env.PHONEPE_ENVIRONMENT === 'PRODUCTION'
-    ? 'https://api.phonepe.com/apis/identity-manager/v1/oauth/token'
-    : 'https://api-preprod.phonepe.com/apis/pg-sandbox/v1/oauth/token';
-
-const PHONEPE_CHECKOUT_BASE =
-  env.PHONEPE_ENVIRONMENT === 'PRODUCTION'
-    ? 'https://api.phonepe.com/apis/pg'
-    : 'https://api-preprod.phonepe.com/apis/pg-sandbox';
-
-interface PhonePeTokenCache {
-  accessToken: string;
-  expiresAt: number;
-}
-let tokenCache: PhonePeTokenCache | null = null;
-
-async function getPhonePeAccessToken(): Promise<string> {
-  const now = Date.now();
-  if (tokenCache && tokenCache.expiresAt > now + 60000) {
-    return tokenCache.accessToken;
-  }
-
-  const clientId = env.PHONEPE_CLIENT_ID || '';
-  const clientSecret = env.PHONEPE_CLIENT_SECRET || '';
-  const clientVersion = env.PHONEPE_CLIENT_VERSION || '1';
-
-  const params = new URLSearchParams();
-  params.append('client_id', clientId);
-  params.append('client_secret', clientSecret);
-  params.append('client_version', clientVersion);
-  params.append('grant_type', 'client_credentials');
-
-  try {
-    const res = await axios.post(PHONEPE_OAUTH_URL, params.toString(), {
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      timeout: 10000,
-    });
-    const data = res.data;
-    const expiresIn = Number(data.expires_in || 3600);
-    tokenCache = {
-      accessToken: data.access_token,
-      expiresAt: now + expiresIn * 1000,
-    };
-    return tokenCache.accessToken;
-  } catch (err: any) {
-    paymentLogger.error(
-      { err: err.message, status: err.response?.status, data: err.response?.data },
-      'PhonePe OAuth token generation failed'
-    );
-    if (isTest || isDevelopment) {
-      return `MOCK-OAUTH-TOKEN-${Date.now()}`;
-    }
-    throw err;
-  }
-}
-
-async function initiatePhonePeCheckout(params: {
-  merchantOrderId: string;
-  amountInPaise: number;
-  redirectUrl: string;
-  paymentMode?: string;
-}): Promise<{ orderId: string; redirectUrl: string; state: string }> {
-  try {
-    const token = await getPhonePeAccessToken();
-    const checkoutUrl = `${PHONEPE_CHECKOUT_BASE}/checkout/v2/pay`;
-    const payload: any = {
-      merchantOrderId: params.merchantOrderId,
-      amount: params.amountInPaise,
-      expireAfter: 1200,
-      paymentFlow: {
-        type: 'PG_CHECKOUT',
-        merchantUrls: {
-          redirectUrl: params.redirectUrl,
-        },
-      },
-    };
-
-    if (params.paymentMode && params.paymentMode !== 'ALL') {
-      payload.paymentFlow.paymentMode = {
-        type: params.paymentMode,
-      };
-    }
-
-    const res = await axios.post(checkoutUrl, payload, {
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `O-Bearer ${token}`,
-      },
-      timeout: 15000,
-    });
-
-    return {
-      orderId: res.data.orderId,
-      redirectUrl: res.data.redirectUrl,
-      state: res.data.state || 'PENDING',
-    };
-  } catch (err: any) {
-    paymentLogger.error(
-      { err: err.message, status: err.response?.status, data: err.response?.data },
-      'PhonePe Checkout /v2/pay API call failed'
-    );
-    if (isTest || isDevelopment) {
-      const mockOrderId = `OMO_DEV_${Date.now()}`;
-      return {
-        orderId: mockOrderId,
-        redirectUrl: `${params.redirectUrl}${params.redirectUrl.includes('?') ? '&' : '?'}orderId=${mockOrderId}&state=PENDING`,
-        state: 'PENDING',
-      };
-    }
-    throw err;
-  }
-}
-
-async function checkPhonePePaymentStatus(
-  merchantTxnId: string,
-  input?: VerifyPaymentInput
-): Promise<{
-  state: string;
-  success: boolean;
-  orderId?: string;
-  transactionId?: string;
-  amount?: number;
-}> {
-  // 1. Direct unit test or mock bypass
-  if (
-    input?.gatewayOrderId?.startsWith('PHONEPE-ORDER') ||
-    input?.gatewaySignature === 'VERIFIED_VIA_STATUS_API'
-  ) {
-    return {
-      state: 'COMPLETED',
-      success: true,
-      orderId: input?.gatewayOrderId || `ORDER-${Date.now()}`,
-      transactionId: input?.gatewayPaymentId || `PAY-${Date.now()}`,
-    };
-  }
-
-  // 2. Check current recorded status in database (e.g. if webhook already processed)
-  const prisma = getPrismaClient();
-  const recordedPayment = await prisma.payment.findUnique({
-    where: { merchantTxnId },
-  });
-
-  if (recordedPayment?.status === PaymentStatus.SUCCESS) {
-    return {
-      state: 'COMPLETED',
-      success: true,
-      orderId: recordedPayment.gatewayOrderId || input?.gatewayOrderId || `ORDER-${Date.now()}`,
-      transactionId: recordedPayment.gatewayPaymentId || input?.gatewayPaymentId || `PAY-${Date.now()}`,
-      amount: Number(recordedPayment.amount),
-    };
-  }
-
-  if (recordedPayment?.status === PaymentStatus.FAILED) {
-    return {
-      state: 'FAILED',
-      success: false,
-    };
-  }
-
-  // 3. In development / test mode, check controlled devSimulationStore
-  if (isDevelopment || isTest) {
-    const simState = devSimulationStore.get(merchantTxnId);
-    if (simState) {
-      if (simState.status === 'SUCCESS') {
-        return {
-          state: 'COMPLETED',
-          success: true,
-          orderId: input?.gatewayOrderId || `ORDER-DEV-${Date.now()}`,
-          transactionId: input?.gatewayPaymentId || `PAY-DEV-${Date.now()}`,
-        };
-      } else if (simState.status === 'DECLINED') {
-        return {
-          state: 'FAILED',
-          success: false,
-        };
-      } else if (simState.status === 'TIMED_OUT') {
-        return {
-          state: 'TIMED_OUT',
-          success: false,
-        };
-      } else if (simState.status === 'PENDING') {
-        return {
-          state: 'PENDING',
-          success: false,
-        };
-      }
-    }
-  }
-
-  // 4. Query live PhonePe Status Check API (preprod sandbox or production)
-  try {
-    const token = await getPhonePeAccessToken();
-    const statusUrl = `${PHONEPE_CHECKOUT_BASE}/checkout/v2/order/${merchantTxnId}/status`;
-
-    const res = await axios.get(statusUrl, {
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `O-Bearer ${token}`,
-      },
-      timeout: 15000,
-    });
-
-    const data = res.data;
-    const state = data?.state || 'UNKNOWN';
-    const isCompleted = state === 'COMPLETED';
-    const latestAttempt = Array.isArray(data?.paymentDetails) && data.paymentDetails.length > 0
-      ? data.paymentDetails[data.paymentDetails.length - 1]
-      : undefined;
-
-    return {
-      state,
-      success: isCompleted,
-      orderId: data?.orderId,
-      transactionId: latestAttempt?.transactionId || data?.orderId,
-      amount: data?.amount ? Number(data.amount) / 100 : undefined,
-    };
-  } catch (err: any) {
-    paymentLogger.warn(
-      { err: err.message, status: err.response?.status, data: err.response?.data, merchantTxnId },
-      'PhonePe status check API call failed'
-    );
-
-    // Controlled development fallback: DO NOT blindly succeed.
-    // If status is not yet confirmed by gateway or simulation, return PENDING.
-    if (isDevelopment || isTest) {
-      return {
-        state: 'PENDING',
-        success: false,
-      };
-    }
-
-    throw err;
-  }
-}
 
 export class PaymentsService {
   private static instance: PaymentsService;
@@ -288,6 +38,17 @@ export class PaymentsService {
   }
 
   public async createPaymentIntent(input: CreatePaymentIntentInput, userId?: string) {
+    const key = `lock:payment-intent:${input.bookingId}`;
+    const owner = uuidv4();
+    if (!await acquireLock(key, owner, 30)) throw new ConflictError('Payment initiation is in progress');
+    try {
+      return await this.createRazorpayIntent(input, userId);
+    } finally {
+      await releaseLock(key, owner).catch(() => paymentLogger.warn('Could not release payment intent lock'));
+    }
+  }
+
+  private async createRazorpayIntent(input: CreatePaymentIntentInput, userId?: string) {
     const prisma = getPrismaClient();
 
     const booking = await prisma.booking.findUnique({
@@ -295,9 +56,11 @@ export class PaymentsService {
       include: { holds: true },
     });
 
-    if (!booking) {
+    if (!booking || (booking.userId && booking.userId !== userId)) {
       throw new NotFoundError('Booking not found');
     }
+
+    if (booking.agentId) throw new ValidationError('Agent bookings must be paid from the agent wallet');
 
     if (booking.status === BookingStatus.CONFIRMED) {
       throw new ValidationError('Booking is already confirmed and completed');
@@ -323,7 +86,10 @@ export class PaymentsService {
       where: { bookingId: booking.id },
       orderBy: { createdAt: 'desc' },
     });
-    if (latestHold) {
+    if (!latestHold || latestHold.status !== HoldStatus.ACTIVE) {
+      throw new ValidationError('An active seat hold is required');
+    }
+    {
       const now = Date.now();
       const expiresAt = new Date(latestHold.expiresAt).getTime();
       if (expiresAt < now) {
@@ -352,7 +118,7 @@ export class PaymentsService {
     if (
       existingPayment &&
       !isExistingExpired &&
-      (!input.gateway || input.gateway === 'AUTO' || existingPayment.gateway === input.gateway)
+      existingPayment.gateway === 'RAZORPAY'
     ) {
       const meta = (existingPayment.metadata as any) || {};
       return {
@@ -363,7 +129,7 @@ export class PaymentsService {
         gateway: existingPayment.gateway,
         paymentUrl:
           meta.paymentUrl ||
-          `${env.PHONEPE_REDIRECT_URL || 'http://localhost:5173/payment-result'}?bookingId=${booking.id}&merchantTxnId=${existingPayment.merchantTxnId}`,
+          `/api/v1/payments/checkout/${existingPayment.merchantTxnId}`,
         upiIntentUrl: meta.upiIntentUrl,
         gatewayOrderId: existingPayment.gatewayOrderId,
         sdkPayload: meta.sdkPayload,
@@ -378,9 +144,9 @@ export class PaymentsService {
       });
     }
 
-    // Call PaymentOrchestrator to generate intent with automatic failover
+    // Create the Razorpay order
     const orchestrator = PaymentOrchestrator.getInstance();
-    const intentResult = await orchestrator.createPaymentIntentWithFallback(
+    const intentResult = await orchestrator.createPaymentIntent(
       {
         bookingId: booking.id,
         bookingNumber: booking.bookingNumber,
@@ -395,38 +161,30 @@ export class PaymentsService {
       input.gateway
     );
 
-    // Track initial state in development simulation store
-    if (isDevelopment || isTest) {
-      devSimulationStore.set(intentResult.merchantTxnId, {
-        merchantTxnId: intentResult.merchantTxnId,
-        status: 'PENDING',
+    const payment = await prisma.$transaction(async (tx) => {
+      const changed = await tx.booking.updateMany({
+        where: { id: booking.id, status: { in: eligibleStatuses } },
+        data: { status: BookingStatus.PAYMENT_PENDING },
       });
-    }
-
-    // Create payment record
-    const payment = await prisma.payment.create({
-      data: {
-        bookingId: booking.id,
-        userId: userId ?? booking.userId ?? null,
-        amount,
-        currency: 'INR',
-        status: PaymentStatus.PENDING,
-        gateway: intentResult.gateway,
-        paymentMethod: input.paymentMode,
-        merchantTxnId: intentResult.merchantTxnId,
-        gatewayOrderId: intentResult.gatewayOrderId,
-        metadata: {
-          paymentUrl: intentResult.paymentUrl,
-          upiIntentUrl: intentResult.upiIntentUrl,
-          sdkPayload: intentResult.sdkPayload as any,
-        } as any,
-      },
-    });
-
-    // Update booking status to PAYMENT_PENDING
-    await prisma.booking.update({
-      where: { id: booking.id },
-      data: { status: BookingStatus.PAYMENT_PENDING },
+      if (!changed.count) throw new ConflictError('Booking state changed during payment initiation');
+      return tx.payment.create({
+        data: {
+          bookingId: booking.id,
+          userId: userId ?? booking.userId ?? null,
+          amount,
+          currency: 'INR',
+          status: PaymentStatus.PENDING,
+          gateway: intentResult.gateway,
+          paymentMethod: input.paymentMode,
+          merchantTxnId: intentResult.merchantTxnId,
+          gatewayOrderId: intentResult.gatewayOrderId,
+          metadata: {
+            paymentUrl: intentResult.paymentUrl,
+            upiIntentUrl: intentResult.upiIntentUrl,
+            sdkPayload: intentResult.sdkPayload as any,
+          } as any,
+        },
+      });
     });
 
     paymentLogger.info(
@@ -453,7 +211,7 @@ export class PaymentsService {
     };
   }
 
-  public async verifyPayment(input: VerifyPaymentInput) {
+  public async verifyPayment(input: VerifyPaymentInput, userId?: string, fromWebhook = false) {
     const prisma = getPrismaClient();
 
     const payment = await prisma.payment.findUnique({
@@ -461,8 +219,26 @@ export class PaymentsService {
       include: { booking: true },
     });
 
-    if (!payment) {
+    if (!payment || payment.bookingId !== input.bookingId || payment.gateway !== 'RAZORPAY') {
       throw new NotFoundError('Payment transaction not found');
+    }
+
+    const orchestrator = PaymentOrchestrator.getInstance();
+    const verifyCapture = () => orchestrator.verifyPayment('RAZORPAY', {
+      merchantTxnId: payment.merchantTxnId,
+      gatewayOrderId: payment.gatewayOrderId ?? undefined,
+      gatewayPaymentId: input.gatewayPaymentId,
+      gatewaySignature: input.gatewaySignature,
+    });
+    let gatewayVerification: PaymentVerificationResult | undefined;
+    if (!fromWebhook && (!userId || payment.booking.userId !== userId)) {
+      if (payment.booking.userId || !input.gatewaySignature) {
+        throw new NotFoundError('Payment transaction not found');
+      }
+      gatewayVerification = await verifyCapture();
+      if (!gatewayVerification.success || gatewayVerification.amount !== Number(payment.amount)) {
+        throw new NotFoundError('Payment transaction not found');
+      }
     }
 
     // Idempotency: if already SUCCESS and booking CONFIRMED, return immediately
@@ -553,69 +329,34 @@ export class PaymentsService {
     // -----------------------------------------------------------------------
     // CRITICAL: Server-side payment verification via PaymentOrchestrator
     // -----------------------------------------------------------------------
-    const gateway = (payment.gateway as GatewayName) || 'RAZORPAY';
-    const orchestrator = PaymentOrchestrator.getInstance();
-
-    let gatewayVerification: PaymentVerificationResult;
-
     try {
-      gatewayVerification = await orchestrator.verifyPayment(gateway, {
-        merchantTxnId: input.merchantTxnId,
-        gatewayOrderId: input.gatewayOrderId || payment.gatewayOrderId || undefined,
-        gatewayPaymentId: input.gatewayPaymentId || undefined,
-        gatewaySignature: input.gatewaySignature || undefined,
+      gatewayVerification ??= await verifyCapture();
+    } catch {
+      return { status: 'PENDING', payment, booking: currentBooking };
+    }
+
+    if (!gatewayVerification.success || gatewayVerification.amount !== Number(payment.amount)
+      || !gatewayVerification.gatewayPaymentId) {
+      return { status: 'PENDING', payment, booking: currentBooking };
+    }
+
+    const updatedPayment = await prisma.$transaction(async (tx) => {
+      const claim = await tx.booking.updateMany({
+        where: { id: payment.bookingId, status: { in: [BookingStatus.PAYMENT_PENDING, BookingStatus.PAYMENT_FAILED] } },
+        data: { status: BookingStatus.PAYMENT_SUCCESS },
       });
-    } catch (gatewayErr: any) {
-      paymentLogger.warn(
-        { merchantTxnId: input.merchantTxnId, gateway, err: gatewayErr.message },
-        'Payment status check failed — returning PAYMENT_PENDING for retry'
-      );
-      return { status: 'PENDING', payment, booking: currentBooking };
-    }
-
-    paymentLogger.info(
-      { merchantTxnId: input.merchantTxnId, gateway, status: gatewayVerification.status, success: gatewayVerification.success },
-      'Payment gateway verification result'
-    );
-
-    // Handle pending status
-    if (gatewayVerification.status === 'PENDING') {
-      return { status: 'PENDING', payment, booking: currentBooking };
-    }
-
-    // Handle payment failure
-    if (!gatewayVerification.success) {
-      await prisma.$transaction([
-        prisma.payment.update({
-          where: { id: payment.id },
-          data: { status: PaymentStatus.FAILED },
-        }),
-        prisma.booking.update({
-          where: { id: payment.bookingId },
-          data: { status: BookingStatus.PAYMENT_FAILED },
-        }),
-      ]);
-      paymentLogger.warn(
-        { merchantTxnId: input.merchantTxnId, gateway, reason: gatewayVerification.failureReason },
-        'Payment failed or declined'
-      );
-      throw new PaymentFailedError(
-        gatewayVerification.failureReason || 'Payment failed or was declined by issuing bank'
-      );
-    }
-
-    // -----------------------------------------------------------------------
-    // Payment SUCCESS: mark payment, then call GDS BookSeats
-    // -----------------------------------------------------------------------
-
-    // Atomic: transition booking to PAYMENT_SUCCESS to claim it for this request
-    const updateResult = await prisma.booking.updateMany({
-      where: { id: payment.bookingId, status: BookingStatus.PAYMENT_PENDING },
-      data: { status: BookingStatus.PAYMENT_SUCCESS },
+      if (!claim.count) return null;
+      return tx.payment.update({
+        where: { id: payment.id },
+        data: {
+          status: PaymentStatus.SUCCESS,
+          gatewayPaymentId: gatewayVerification.gatewayPaymentId,
+          gatewaySignature: input.gatewaySignature,
+        },
+      });
     });
 
-    // If updateResult.count === 0, another request already claimed it (e.g. concurrent webhook)
-    if (updateResult.count === 0) {
+    if (!updatedPayment) {
       let latestBooking = await prisma.booking.findUnique({
         where: { id: payment.bookingId },
         include: { seats: true, passengers: true, ticket: true },
@@ -670,18 +411,6 @@ export class PaymentsService {
         booking: latestBooking || currentBooking,
       };
     }
-
-    // Mark payment SUCCESS
-    const updatedPayment = await prisma.payment.update({
-      where: { id: payment.id },
-      data: {
-        status: PaymentStatus.SUCCESS,
-        gatewayOrderId: input.gatewayOrderId ?? gatewayVerification.gatewayOrderId ?? payment.gatewayOrderId,
-        gatewayPaymentId: input.gatewayPaymentId ?? gatewayVerification.gatewayPaymentId ?? `PAY-${Date.now()}`,
-        gatewaySignature: input.gatewaySignature ?? 'VERIFIED',
-        webhookVerified: true,
-      },
-    });
 
     paymentLogger.info(
       { bookingId: payment.bookingId, paymentId: payment.id },
@@ -753,443 +482,59 @@ export class PaymentsService {
   }
 
   /**
-   * Handle PhonePe webhook event
-   * POST /api/v1/payments/webhook
-   * Body: { response: "<base64EncodedPayload>" }
-   * Header: X-VERIFY: SHA256(base64Payload + saltKey) + "###" + saltIndex
-   */
-  public async handleWebhook(rawBody: string, xVerifyHeader?: string) {
-    const prisma = getPrismaClient();
-    const eventId = `wh-${uuidv4()}`;
-
-    // -----------------------------------------------------------------------
-    // Step 1: Verify PhonePe webhook signature
-    // SHA256(base64EncodedResponse + saltKey) + "###" + saltIndex
-    // -----------------------------------------------------------------------
-    let verified = false;
-    if (xVerifyHeader && rawBody) {
-      const saltKey = env.PHONEPE_CLIENT_SECRET;
-      const saltIndex = env.PHONEPE_CLIENT_VERSION || '1';
-      const expectedHash = crypto
-        .createHash('sha256')
-        .update(rawBody + saltKey)
-        .digest('hex');
-      const expectedHeader = `${expectedHash}###${saltIndex}`;
-      verified = xVerifyHeader === expectedHeader;
-
-      if (!verified) {
-        paymentLogger.warn(
-          { eventId, receivedHeader: xVerifyHeader?.substring(0, 20) + '...' },
-          'Webhook signature verification failed — possible unauthorized request'
-        );
-      }
-    } else {
-      // Sandbox/development: allow without signature
-      verified = env.NODE_ENV === 'development';
-      paymentLogger.warn({ eventId }, 'Webhook received without X-VERIFY header');
-    }
-
-    // Persist webhook event for audit and idempotency
-    const webhookEvent = await prisma.webhookEvent.create({
-      data: {
-        eventId,
-        gateway: 'PHONEPE',
-        eventType: 'PAYMENT_STATUS_UPDATE',
-        payload: { raw: rawBody },
-        signature: xVerifyHeader,
-        verified,
-      },
-    });
-
-    if (!verified && env.NODE_ENV === 'production') {
-      await prisma.webhookEvent.update({
-        where: { id: webhookEvent.id },
-        data: { processingError: 'Webhook signature verification failed' },
-      });
-      paymentLogger.error({ eventId }, 'Rejected unverified webhook in production');
-      return { status: 'REJECTED', reason: 'Invalid signature' };
-    }
-
-    // -----------------------------------------------------------------------
-    // Step 2: Check for duplicate processing (idempotency)
-    // -----------------------------------------------------------------------
-    const existingProcessed = await prisma.webhookEvent.findFirst({
-      where: {
-        eventId: { not: webhookEvent.id },
-        gateway: 'PHONEPE',
-        processed: true,
-        payload: { path: ['raw'], equals: rawBody },
-      },
-    });
-
-    if (existingProcessed) {
-      paymentLogger.info({ eventId, existingId: existingProcessed.id }, 'Duplicate webhook — skipping (idempotent)');
-      await prisma.webhookEvent.update({
-        where: { id: webhookEvent.id },
-        data: { processed: true, processedAt: new Date() },
-      });
-      return { status: 'OK', note: 'DUPLICATE_SKIPPED' };
-    }
-
-    try {
-      // -----------------------------------------------------------------------
-      // Step 3: Decode and process PhonePe webhook payload
-      // -----------------------------------------------------------------------
-      let decodedPayload: any;
-      try {
-        decodedPayload = JSON.parse(Buffer.from(rawBody, 'base64').toString('utf-8'));
-      } catch {
-        throw new Error('Invalid webhook payload: could not decode base64 JSON');
-      }
-
-      const merchantTxnId = decodedPayload?.data?.merchantTransactionId || decodedPayload?.data?.merchantOrderId;
-      const phonepeCode = decodedPayload?.code;
-
-      paymentLogger.info({ eventId, merchantTxnId, code: phonepeCode }, 'Processing webhook event');
-
-      if (merchantTxnId) {
-        if (isDevelopment || isTest) {
-          devSimulationStore.set(merchantTxnId, {
-            merchantTxnId,
-            status: phonepeCode === 'PAYMENT_SUCCESS' ? 'SUCCESS' : phonepeCode === 'TIMED_OUT' ? 'TIMED_OUT' : 'DECLINED',
-            simulatedAt: new Date(),
-          });
-        }
-
-        // Look up payment by merchantTxnId (not by merchantUserId — that's the user)
-        const payment = await prisma.payment.findUnique({
-          where: { merchantTxnId },
-          include: { booking: true },
-        });
-
-        if (payment) {
-          if (phonepeCode === 'PAYMENT_SUCCESS') {
-            // Verify then confirm booking
-            await this.verifyPayment({
-              bookingId: payment.bookingId,
-              merchantTxnId,
-            }).catch((err) => {
-              paymentLogger.warn(
-                { err: err.message, merchantTxnId },
-                'verifyPayment from webhook encountered error (may be BOOKING_UNKNOWN/FAILED — handled by workers)'
-              );
-            });
-          } else if (
-            phonepeCode === 'PAYMENT_ERROR' ||
-            phonepeCode === 'PAYMENT_DECLINED' ||
-            phonepeCode === 'TIMED_OUT'
-          ) {
-            // Mark payment and booking as failed if still pending
-            if (payment.status === PaymentStatus.PENDING) {
-              await prisma.$transaction([
-                prisma.payment.update({
-                  where: { id: payment.id },
-                  data: { status: PaymentStatus.FAILED },
-                }),
-                prisma.booking.update({
-                  where: { id: payment.bookingId, status: BookingStatus.PAYMENT_PENDING },
-                  data: { status: BookingStatus.PAYMENT_FAILED },
-                }),
-              ]);
-              paymentLogger.warn({ merchantTxnId, code: phonepeCode }, 'Payment marked FAILED via webhook');
-            }
-          } else {
-            paymentLogger.info({ merchantTxnId, code: phonepeCode }, 'Unhandled PhonePe webhook code — logged only');
-          }
-        } else {
-          paymentLogger.warn({ merchantTxnId }, 'Webhook received for unknown merchantTxnId');
-        }
-      }
-
-      await prisma.webhookEvent.update({
-        where: { id: webhookEvent.id },
-        data: { processed: true, processedAt: new Date() },
-      });
-
-      return { status: 'OK' };
-    } catch (err: any) {
-      await prisma.webhookEvent.update({
-        where: { id: webhookEvent.id },
-        data: { processingError: err.message },
-      });
-      paymentLogger.error({ err: err.message, eventId }, 'Webhook processing error');
-      throw err;
-    }
-  }
-
-  /**
    * Razorpay Webhook Ingestion & Processing
    * Verifies cryptographic HMAC SHA256 signature and processes captured/failed events
    */
   public async handleRazorpayWebhook(
-    rawBody: string | any,
+    rawBody: string,
     headers: Record<string, string | string[] | undefined>
   ) {
     const prisma = getPrismaClient();
-    const orchestrator = PaymentOrchestrator.getInstance();
-    const razorpayAdapter = orchestrator.getAdapter('RAZORPAY');
-
-    const bodyString = typeof rawBody === 'string' ? rawBody : JSON.stringify(rawBody);
-    const isValid = razorpayAdapter.verifyWebhookSignature(bodyString, headers);
-    const eventId = `wh_rzp_${Date.now()}_${Math.random().toString(36).substring(7)}`;
-
-    // Persist webhook event for audit and idempotency
-    const webhookEvent = await prisma.webhookEvent.create({
-      data: {
-        eventId,
-        gateway: 'RAZORPAY',
-        eventType: 'PAYMENT_STATUS_UPDATE',
-        payload: { raw: bodyString },
-        signature: (headers['x-razorpay-signature'] as string) || undefined,
-        verified: isValid,
-      },
-    });
-
-    if (!isValid && !isDevelopment && !isTest) {
-      await prisma.webhookEvent.update({
-        where: { id: webhookEvent.id },
-        data: { processingError: 'Razorpay webhook signature verification failed' },
-      });
-      paymentLogger.error({ eventId }, 'Rejected unverified Razorpay webhook in production');
-      return { status: 'REJECTED', reason: 'Invalid signature' };
+    const razorpayAdapter = PaymentOrchestrator.getInstance().getAdapter('RAZORPAY');
+    if (typeof rawBody !== 'string' || !razorpayAdapter.verifyWebhookSignature(rawBody, headers)) {
+      throw new AuthorizationError('Invalid Razorpay webhook signature');
     }
 
-    try {
-      const parsed = razorpayAdapter.parseWebhookPayload(bodyString);
-      paymentLogger.info(
-        { eventId, eventType: parsed.eventType, merchantTxnId: parsed.merchantTxnId },
-        'Processing Razorpay webhook event'
-      );
-
-      if (parsed.merchantTxnId) {
-        // Look up payment by merchantTxnId or gatewayOrderId
-        let payment = await prisma.payment.findUnique({
-          where: { merchantTxnId: parsed.merchantTxnId },
-        });
-
-        if (!payment && parsed.gatewayOrderId) {
-          payment = await prisma.payment.findFirst({
-            where: { gatewayOrderId: parsed.gatewayOrderId },
-          });
-        }
-
-        if (payment) {
-          if (parsed.status === 'SUCCESS') {
-            await this.verifyPayment({
-              bookingId: payment.bookingId,
-              merchantTxnId: payment.merchantTxnId,
-              gatewayOrderId: parsed.gatewayOrderId || payment.gatewayOrderId || undefined,
-              gatewayPaymentId: parsed.gatewayPaymentId,
-              gatewaySignature: 'VERIFIED_VIA_WEBHOOK',
-            }).catch((err) => {
-              paymentLogger.warn(
-                { err: err.message, merchantTxnId: payment?.merchantTxnId },
-                'verifyPayment from Razorpay webhook encountered non-blocking warning'
-              );
-            });
-          } else if (parsed.status === 'FAILED') {
-            if (payment.status === PaymentStatus.PENDING) {
-              await prisma.$transaction([
-                prisma.payment.update({
-                  where: { id: payment.id },
-                  data: { status: PaymentStatus.FAILED },
-                }),
-                prisma.booking.update({
-                  where: { id: payment.bookingId, status: BookingStatus.PAYMENT_PENDING },
-                  data: { status: BookingStatus.PAYMENT_FAILED },
-                }),
-              ]);
-              paymentLogger.warn({ merchantTxnId: payment.merchantTxnId }, 'Payment marked FAILED via Razorpay webhook');
-            }
-          }
-        } else {
-          paymentLogger.warn({ merchantTxnId: parsed.merchantTxnId }, 'Razorpay webhook received for unknown merchantTxnId');
-        }
-      }
-
-      await prisma.webhookEvent.update({
-        where: { id: webhookEvent.id },
-        data: { processed: true, processedAt: new Date() },
-      });
-
-      return { status: 'OK' };
-    } catch (err: any) {
-      await prisma.webhookEvent.update({
-        where: { id: webhookEvent.id },
-        data: { processingError: err.message },
-      });
-      paymentLogger.error({ err: err.message, eventId }, 'Razorpay webhook processing error');
-      throw err;
+    const event = razorpayAdapter.parseWebhookPayload(rawBody);
+    if (event.status !== 'SUCCESS' || !event.gatewayPaymentId || !event.gatewayOrderId) {
+      return { status: 'IGNORED' };
     }
-  }
+    const header = headers['x-razorpay-event-id'];
+    const eventId = typeof header === 'string' && /^[a-zA-Z0-9_-]{1,128}$/.test(header)
+      ? header : event.eventId;
+    await prisma.webhookEvent.createMany({
+      data: [{
+        eventId, gateway: 'RAZORPAY', eventType: event.eventType, verified: true,
+        payload: { orderId: event.gatewayOrderId, paymentId: event.gatewayPaymentId },
+      }],
+      skipDuplicates: true,
+    });
+    const receipt = await prisma.webhookEvent.findUniqueOrThrow({ where: { eventId } });
+    if (receipt.processed) return { status: 'OK' };
 
-  /**
-   * Controlled Webhook Simulator for Local Development & Testing
-   * Only active when NODE_ENV !== 'production'.
-   * Constructs valid PhonePe signed webhook payload and exercises production webhook handler.
-   */
-  public async simulateWebhook(input: SimulateWebhookInput) {
-    if (env.NODE_ENV === 'production') {
-      throw new AuthorizationError('Webhook simulation is disabled in production environment');
+    const payment = await prisma.payment.findFirst({
+      where: { gateway: 'RAZORPAY', gatewayOrderId: event.gatewayOrderId },
+    });
+    if (payment) {
+      const result = await this.verifyPayment({
+        bookingId: payment.bookingId,
+        merchantTxnId: payment.merchantTxnId,
+        gatewayPaymentId: event.gatewayPaymentId,
+      }, undefined, true);
+      if (result.status === 'PENDING') throw new Error('Captured payment reconciliation is pending');
+    } else {
+      const topup = await prisma.walletTopup.findFirst({
+        where: { gateway: 'RAZORPAY', gatewayOrderId: event.gatewayOrderId },
+      });
+      if (!topup) throw new Error('Razorpay order is not recorded locally');
+      await AgentsService.getInstance().confirmTopup(topup.merchantTxnId, event.gatewayPaymentId, topup.agentId);
     }
 
-    const prisma = getPrismaClient();
-    const payment = await prisma.payment.findUnique({
-      where: { merchantTxnId: input.merchantTxnId },
-      include: { booking: true },
+    await prisma.webhookEvent.update({
+      where: { id: receipt.id },
+      data: { processed: true, processedAt: new Date() },
     });
-
-    if (!payment) {
-      throw new NotFoundError(`Payment transaction with merchantTxnId ${input.merchantTxnId} not found`);
-    }
-
-    const isSuccess = input.status === 'SUCCESS';
-    const isTimeout = input.status === 'TIMED_OUT';
-    const code = isSuccess ? 'PAYMENT_SUCCESS' : isTimeout ? 'TIMED_OUT' : 'PAYMENT_DECLINED';
-    const responseCode = isSuccess ? 'SUCCESS' : isTimeout ? 'TIMED_OUT' : 'PAYMENT_DECLINED';
-    const state = isSuccess ? 'COMPLETED' : 'FAILED';
-    const amountInPaise = Math.round(Number(payment.amount) * 100);
-
-    // Register state in devSimulationStore
-    devSimulationStore.set(input.merchantTxnId, {
-      merchantTxnId: input.merchantTxnId,
-      status: input.status,
-      reason: input.reason,
-      simulatedAt: new Date(),
-    });
-
-    // If Razorpay transaction, simulate official Razorpay webhook
-    if (payment.gateway === 'RAZORPAY') {
-      const rzpOrderId = payment.gatewayOrderId || `order_${Date.now()}`;
-      const rzpPaymentId = `pay_sim_${Date.now()}`;
-      const rzpEvent = isSuccess ? 'payment.captured' : 'payment.failed';
-      const rzpPayload = {
-        entity: 'event',
-        account_id: 'acc_sim_123',
-        event: rzpEvent,
-        contains: ['payment'],
-        payload: {
-          payment: {
-            entity: {
-              id: rzpPaymentId,
-              entity: 'payment',
-              amount: amountInPaise,
-              currency: 'INR',
-              status: isSuccess ? 'captured' : 'failed',
-              order_id: rzpOrderId,
-              method: 'upi',
-              captured: isSuccess,
-              description: `Bus Booking #${payment.booking.bookingNumber}`,
-              notes: {
-                merchantTxnId: input.merchantTxnId,
-                bookingId: payment.bookingId,
-              },
-              error_code: isSuccess ? null : 'BAD_REQUEST_ERROR',
-              error_description: isSuccess ? null : (input.reason || 'Payment failed at bank'),
-            },
-          },
-          order: {
-            entity: {
-              id: rzpOrderId,
-              entity: 'order',
-              amount: amountInPaise,
-              currency: 'INR',
-              receipt: input.merchantTxnId,
-              status: isSuccess ? 'paid' : 'attempted',
-            },
-          },
-        },
-      };
-
-      const rawRzpBody = JSON.stringify(rzpPayload);
-      const rzpSecret = env.RAZORPAY_WEBHOOK_SECRET || env.RAZORPAY_KEY_SECRET || 'mock_secret';
-      const rzpSignature = crypto.createHmac('sha256', rzpSecret).update(rawRzpBody).digest('hex');
-
-      const webhookResult = await this.handleRazorpayWebhook(rawRzpBody, {
-        'x-razorpay-signature': rzpSignature,
-      });
-
-      const updatedPayment = await prisma.payment.findUnique({
-        where: { id: payment.id },
-      });
-
-      const updatedBooking = await prisma.booking.findUnique({
-        where: { id: payment.bookingId },
-        include: { ticket: true },
-      });
-
-      const ticket = await prisma.ticket.findUnique({
-        where: { bookingId: payment.bookingId },
-      });
-
-      return {
-        simulationStatus: input.status,
-        gateway: 'RAZORPAY',
-        webhookResult,
-        payment: updatedPayment,
-        booking: updatedBooking,
-        bookingStatus: updatedBooking?.status,
-        ticket: ticket || updatedBooking?.ticket,
-      };
-    }
-
-    // 1. Construct canonical PhonePe webhook JSON payload
-    const payload = {
-      success: isSuccess,
-      code,
-      message: isSuccess
-        ? 'Payment Successful'
-        : (input.reason || (isTimeout ? 'Transaction timed out' : 'Payment Declined by issuing bank')),
-      data: {
-        merchantId: env.PHONEPE_MERCHANT_ID || 'M23XTGBCAO55H',
-        merchantTransactionId: input.merchantTxnId,
-        merchantOrderId: input.merchantTxnId,
-        transactionId: `GATEWAY-SIM-${Date.now()}`,
-        amount: amountInPaise,
-        state,
-        responseCode,
-        paymentInstrument: {
-          type: 'UPI',
-          utr: `UTR-SIM-${Date.now()}`,
-        },
-      },
-    };
-
-    // 2. Base64 encode the payload
-    const jsonString = JSON.stringify(payload);
-    const base64Response = Buffer.from(jsonString).toString('base64');
-
-    // 3. Compute authentic X-VERIFY signature using SHA256(base64Payload + saltKey) + "###" + saltIndex
-    const saltKey = env.PHONEPE_CLIENT_SECRET || 'OTNhYTFlNjYtNjY1Mi00YzlmLWJiZDQtZDg5YmVhMWQyNWQz';
-    const saltIndex = env.PHONEPE_CLIENT_VERSION || '1';
-    const hash = crypto.createHash('sha256').update(base64Response + saltKey).digest('hex');
-    const xVerify = `${hash}###${saltIndex}`;
-
-    // 4. Dispatch through real production webhook pipeline
-    const webhookResult = await this.handleWebhook(base64Response, xVerify);
-
-    // 5. Fetch updated records to confirm state transition
-    const updatedPayment = await prisma.payment.findUnique({
-      where: { id: payment.id },
-    });
-
-    const updatedBooking = await prisma.booking.findUnique({
-      where: { id: payment.bookingId },
-      include: { ticket: true },
-    });
-
-    const ticket = await prisma.ticket.findUnique({
-      where: { bookingId: payment.bookingId },
-    });
-
-    return {
-      simulationStatus: input.status,
-      webhookResult,
-      payment: updatedPayment,
-      booking: updatedBooking,
-      bookingStatus: updatedBooking?.status,
-      ticket: ticket || updatedBooking?.ticket,
-    };
+    return { status: 'OK' };
   }
 
   /**
@@ -1219,7 +564,7 @@ export class PaymentsService {
       return { success: true, booking, message: 'Booking is already confirmed' };
     }
 
-    if (booking.status !== BookingStatus.HELD && booking.status !== BookingStatus.PAYMENT_PENDING) {
+    if (booking.status !== BookingStatus.HELD) {
       throw new ValidationError(`Cannot pay for booking in status ${booking.status}`);
     }
 
@@ -1228,7 +573,7 @@ export class PaymentsService {
       where: { bookingId: booking.id },
       orderBy: { createdAt: 'desc' },
     });
-    if (latestHold && new Date(latestHold.expiresAt).getTime() < Date.now()) {
+    if (!latestHold || latestHold.status !== HoldStatus.ACTIVE || latestHold.expiresAt.getTime() <= Date.now()) {
       throw new ValidationError('Seat hold has expired. Please reselect your seats.');
     }
 
@@ -1265,6 +610,11 @@ export class PaymentsService {
 
     // Execute atomic wallet debit + double-entry ledger posting + payment creation
     const txResult = await prisma.$transaction(async (tx) => {
+      const claim = await tx.booking.updateMany({
+        where: { id: booking.id, status: BookingStatus.HELD },
+        data: { status: BookingStatus.PAYMENT_SUCCESS, version: { increment: 1 } },
+      });
+      if (!claim.count) throw new ConflictError('Booking has already been claimed for payment');
       let newCash = cashBal;
       let newCreditUsed = creditUsed;
       if (cashBal >= netFare) {
@@ -1277,7 +627,7 @@ export class PaymentsService {
 
       // Optimistic locking update
       const updateResult = await tx.agentWallet.updateMany({
-        where: { id: wallet.id, version: wallet.version },
+        where: { id: wallet.id, version: wallet.version, isFrozen: false },
         data: {
           cashBalance: newCash,
           creditUsed: newCreditUsed,
@@ -1292,7 +642,7 @@ export class PaymentsService {
       }
 
       // Post double-entry balanced ledger batch
-      const idempotencyPrefix = `BOOKING-${booking.id}-${Date.now()}`;
+      const idempotencyPrefix = `BOOKING-${booking.id}`;
       const ledgerLines = buildBookingPaymentLines({
         bookingId: booking.id,
         agentId,
@@ -1323,15 +673,7 @@ export class PaymentsService {
           status: PaymentStatus.SUCCESS,
           gateway: 'WALLET',
           paymentMethod: 'WALLET',
-        },
-      });
-
-      // Update booking to PAYMENT_SUCCESS
-      await tx.booking.update({
-        where: { id: booking.id },
-        data: {
-          status: BookingStatus.PAYMENT_SUCCESS,
-          version: { increment: 1 },
+          metadata: { cashDebited: cashBal - newCash, creditDebited: newCreditUsed - creditUsed },
         },
       });
 
@@ -1366,21 +708,12 @@ export class PaymentsService {
       include: { booking: true },
     });
 
-    const redirectBase = customRedirectUrl || 'aibus://payment-result';
+    const redirectBase = customRedirectUrl && /^(?:aibus|exp):\/\/[a-zA-Z0-9./:_?=%+&-]+$/.test(customRedirectUrl)
+      ? customRedirectUrl : 'aibus://payment-result';
     const sep = redirectBase.includes('?') ? '&' : '?';
 
-    if (!payment) {
-      return `<!DOCTYPE html>
-<html>
-<head><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>AiBus Payment Error</title>
-<style>body{background:#051634;color:#fff;font-family:-apple-system,sans-serif;text-align:center;padding:40px;}</style>
-</head>
-<body>
-  <h2>Transaction Not Found</h2>
-  <p>Reference: ${merchantTxnId}</p>
-  <a href="${redirectBase}${sep}status=FAILED&merchantTxnId=${merchantTxnId}&reason=Transaction+not+found" style="color:#E11D48;">Return to App</a>
-</body>
-</html>`;
+    if (!payment || payment.gateway !== 'RAZORPAY') {
+      throw new NotFoundError('Razorpay payment not found');
     }
 
     if (payment.status === PaymentStatus.SUCCESS) {
@@ -1400,7 +733,7 @@ export class PaymentsService {
 
     const meta = (payment.metadata as any) || {};
     const sdkPayload = meta.sdkPayload || {
-      key: env.RAZORPAY_KEY_ID || 'rzp_test_mock',
+      key: env.RAZORPAY_KEY_ID,
       amount: Math.round(Number(payment.amount) * 100),
       currency: payment.currency || 'INR',
       name: env.APP_NAME || 'AiBus',
@@ -1413,6 +746,8 @@ export class PaymentsService {
       },
       theme: { color: '#013C9A' },
     };
+
+    const { prefill: _prefill, ...publicSdkPayload } = sdkPayload;
 
     return `<!DOCTYPE html>
 <html lang="en">
@@ -1503,7 +838,7 @@ export class PaymentsService {
   </div>
 
   <script>
-    var options = ${JSON.stringify(sdkPayload)};
+    var options = ${JSON.stringify(publicSdkPayload).replace(/</g, '\\u003c')};
     var redirectBase = "${redirectBase}";
     var sep = redirectBase.indexOf('?') >= 0 ? '&' : '?';
     var bookingId = "${payment.bookingId}";
@@ -1568,10 +903,4 @@ export class PaymentsService {
 </html>`;
   }
 
-  /**
-   * Get current dev simulation status for a transaction (dev/test only)
-   */
-  public getDevSimulationStatus(merchantTxnId: string): DevPaymentSimulationState {
-    return devSimulationStore.get(merchantTxnId) || { merchantTxnId, status: 'PENDING' };
-  }
 }

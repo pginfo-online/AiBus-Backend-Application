@@ -1,6 +1,7 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.GdsAdapter = void 0;
+const crypto_1 = require("crypto");
 const circuitBreaker_1 = require("../circuitBreaker");
 const gdsPartnerClient_1 = require("./gdsPartnerClient");
 const gdsTransactionClient_1 = require("./gdsTransactionClient");
@@ -52,7 +53,7 @@ class GdsAdapter {
             throw err;
         }
         finally {
-            this.recordTransaction('HoldSeats', params, res, Date.now() - start, errorMsg);
+            this.recordTransaction('HoldSeats', { busId: params.BusId, passengerCount: params.Passengers?.length ?? 0 }, res, Date.now() - start, errorMsg);
         }
     }
     async bookSeats(holdId, totalFare = 1050) {
@@ -139,12 +140,12 @@ class GdsAdapter {
                     data: {
                         providerName: 'GDS',
                         operation,
-                        requestPayload: requestPayload ?? {},
-                        responsePayload: responsePayload ?? {},
+                        requestPayload: operation === 'HoldSeats' ? requestPayload : {},
+                        responsePayload: responsePayload ? { status: responsePayload.Status ?? null } : {},
                         responseStatus: responsePayload?.Status ?? (errorMessage ? 500 : 200),
                         durationMs,
-                        errorMessage,
-                        requestId: `gds-tx-${Date.now()}`,
+                        errorMessage: errorMessage ? 'GDS operation failed' : undefined,
+                        requestId: (0, crypto_1.randomUUID)(),
                     },
                 });
             }

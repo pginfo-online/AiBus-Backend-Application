@@ -34,7 +34,7 @@ export class BookingsController {
   public getBooking = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     try {
       const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
-      const booking = await this.bookingsService.getBooking(id);
+      const booking = await this.bookingsService.getBooking(id, req.user?.sub);
       ApiResponse.success(res, booking);
     } catch (error) {
       next(error);
@@ -61,7 +61,7 @@ export class BookingsController {
         holdId,
         bookingId,
         bookingNumber,
-      });
+      }, req.user?.sub);
 
       ApiResponse.success(res, status, status.Message || 'Booking status retrieved');
     } catch (error) {

@@ -59,14 +59,6 @@ const envSchema = z.object({
   GDS_REQUEST_TIMEOUT_MS: z.coerce.number().int().positive().default(15000),
   GDS_CONNECT_TIMEOUT_MS: z.coerce.number().int().positive().default(5000),
 
-  // PhonePe Payment Gateway
-  PHONEPE_MERCHANT_ID: z.string().optional(),
-  PHONEPE_CLIENT_ID: z.string().optional(),
-  PHONEPE_CLIENT_SECRET: z.string().optional(),
-  PHONEPE_CLIENT_VERSION: z.string().optional().default('1'),
-  PHONEPE_ENVIRONMENT: z.enum(['SANDBOX', 'PRODUCTION']).default('SANDBOX'),
-  PHONEPE_CALLBACK_URL: z.string().optional(),
-  PHONEPE_REDIRECT_URL: z.string().optional(),
 
   // Razorpay Payment Gateway
   RAZORPAY_KEY_ID: z.string().optional(),
@@ -74,7 +66,6 @@ const envSchema = z.object({
   RAZORPAY_WEBHOOK_SECRET: z.string().optional(),
 
   // Payment Orchestration & Smart Routing Defaults
-  PAYMENT_PRIMARY_GATEWAY: z.enum(['RAZORPAY', 'PHONEPE', 'AUTO']).default('RAZORPAY'),
   PAYMENT_HOLD_CUTOFF_SECONDS: z.coerce.number().int().positive().default(90), // 90s cutoff before hold expiry
 
   // Cloudinary
@@ -84,9 +75,9 @@ const envSchema = z.object({
 
   // SMS Gateway (Dreamz Technology DLT)
   SMS_GATEWAY_URL: z.string().url().default('http://trans.dreamztechnolgy.org/smsstatuswithid.aspx'),
-  SMS_GATEWAY_MOBILE: z.string().default('9923400506'),
-  SMS_GATEWAY_PASSWORD: z.string().default('WorknAi@2'),
-  SMS_GATEWAY_APIKEY: z.string().default('76bda706af0d42b5a7ea8a615567ad4f'),
+  SMS_GATEWAY_MOBILE: z.string().default(''),
+  SMS_GATEWAY_PASSWORD: z.string().default(''),
+  SMS_GATEWAY_APIKEY: z.string().default(''),
   SMS_GATEWAY_PEID: z.string().default('1701176380063580392'),
   SMS_GATEWAY_TEMPLATE_ID: z.string().default('1777179197804384361'),
   SMS_GATEWAY_SENDER_ID: z.string().default('PGINF'),

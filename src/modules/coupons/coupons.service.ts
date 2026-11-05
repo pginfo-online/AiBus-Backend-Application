@@ -1,3 +1,4 @@
+import { Prisma } from '@prisma/client';
 import { CouponStatus, CouponType } from '@prisma/client';
 import { getPrismaClient } from '../../infrastructure/database';
 import { logger } from '../../infrastructure/logger';
@@ -111,8 +112,9 @@ export class CouponsService {
     const prisma = getPrismaClient();
     const now = new Date();
 
-    const where: any = {
+    const where: Prisma.CouponWhereInput = {
       status: CouponStatus.ACTIVE,
+      OR: [{ usageLimit: null }, { usedCount: { lt: prisma.coupon.fields.usageLimit } }],
       validFrom: { lte: now },
       validUntil: { gte: now },
     };
@@ -130,17 +132,12 @@ export class CouponsService {
         where,
         skip,
         take,
-        orderBy: [{ type: 'asc' }, { value: 'desc' }, { createdAt: 'desc' }],
+        orderBy: [{ type: 'asc' }, { value: 'desc' }, { createdAt: 'desc' }, { id: 'asc' }],
       }),
     ]);
 
-    // Filter out any coupon that has reached global usage limit
-    const availableCoupons = coupons.filter(
-      (c) => c.usageLimit === null || c.usageLimit === undefined || c.usedCount < c.usageLimit
-    );
-
     return {
-      items: availableCoupons.map((c) => this.formatCoupon(c)),
+      items: coupons.map((c) => this.formatCoupon(c)),
       total,
     };
   }
@@ -219,7 +216,8 @@ export class CouponsService {
     }
 
     // 5. Check per-user usage limit if user is authenticated
-    if (input.userId && coupon.usageLimitPerUser) {
+    if (coupon.usageLimitPerUser) {
+      if (!input.userId) throw new ValidationError('Sign in to apply this coupon');
       const userUsageCount = await prisma.couponUsage.count({
         where: {
           couponId: coupon.id,
@@ -237,11 +235,10 @@ export class CouponsService {
     // 6. Check applicable routes (if configured)
     if (coupon.applicableRoutes) {
       const routes = coupon.applicableRoutes as any;
-      if (Array.isArray(routes) && routes.length > 0 && input.fromCityId && input.toCityId) {
+      if (Array.isArray(routes) && routes.length > 0) {
         const routeMatch = routes.some(
           (r: any) =>
-            (Number(r.fromCityId) === Number(input.fromCityId) && Number(r.toCityId) === Number(input.toCityId)) ||
-            (r.fromCityName && r.toCityName)
+            Number(r.fromCityId) === input.fromCityId && Number(r.toCityId) === input.toCityId
         );
         if (!routeMatch) {
           throw new ValidationError(`Coupon '${normalizedCode}' is not applicable on this route`);
@@ -252,9 +249,9 @@ export class CouponsService {
     // 7. Check applicable operators (if configured)
     if (coupon.applicableOperators) {
       const ops = coupon.applicableOperators as any;
-      if (Array.isArray(ops) && ops.length > 0 && input.operatorName) {
+      if (Array.isArray(ops) && ops.length > 0) {
         const opMatch = ops.some((op: string) =>
-          input.operatorName?.toLowerCase().includes(String(op).toLowerCase())
+          input.operatorName?.trim().toLowerCase() === String(op).trim().toLowerCase()
         );
         if (!opMatch) {
           throw new ValidationError(
@@ -313,27 +310,19 @@ export class CouponsService {
     userId: string,
     bookingId: string,
     discount: number,
-    txClient?: any
+    txClient?: Prisma.TransactionClient
   ): Promise<void> {
-    const prisma = txClient || getPrismaClient();
-
+    const record = async (tx: Prisma.TransactionClient) => {
+      // Lock the coupon row before checking the usage entry so concurrent confirmations serialize.
+      await tx.$queryRaw`SELECT id FROM coupons WHERE id = ${couponId}::uuid FOR UPDATE`;
+      const existing = await tx.couponUsage.findFirst({ where: { couponId, bookingId }, select: { id: true } });
+      if (existing) return;
+      await tx.couponUsage.create({ data: { couponId, userId, bookingId, discount } });
+      await tx.coupon.update({ where: { id: couponId }, data: { usedCount: { increment: 1 } } });
+    };
     try {
-      await Promise.all([
-        prisma.couponUsage.create({
-          data: {
-            couponId,
-            userId,
-            bookingId,
-            discount,
-          },
-        }),
-        prisma.coupon.update({
-          where: { id: couponId },
-          data: {
-            usedCount: { increment: 1 },
-          },
-        }),
-      ]);
+      if (txClient) await record(txClient);
+      else await getPrismaClient().$transaction(record);
 
       this.couponLogger.info(
         { couponId, userId, bookingId, discount },

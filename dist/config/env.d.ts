@@ -38,24 +38,9 @@ declare const envSchema: z.ZodObject<{
     GDS_CLIENT_SECRET: z.ZodString;
     GDS_REQUEST_TIMEOUT_MS: z.ZodDefault<z.ZodCoercedNumber<unknown>>;
     GDS_CONNECT_TIMEOUT_MS: z.ZodDefault<z.ZodCoercedNumber<unknown>>;
-    PHONEPE_MERCHANT_ID: z.ZodOptional<z.ZodString>;
-    PHONEPE_CLIENT_ID: z.ZodOptional<z.ZodString>;
-    PHONEPE_CLIENT_SECRET: z.ZodOptional<z.ZodString>;
-    PHONEPE_CLIENT_VERSION: z.ZodDefault<z.ZodOptional<z.ZodString>>;
-    PHONEPE_ENVIRONMENT: z.ZodDefault<z.ZodEnum<{
-        SANDBOX: "SANDBOX";
-        PRODUCTION: "PRODUCTION";
-    }>>;
-    PHONEPE_CALLBACK_URL: z.ZodOptional<z.ZodString>;
-    PHONEPE_REDIRECT_URL: z.ZodOptional<z.ZodString>;
     RAZORPAY_KEY_ID: z.ZodOptional<z.ZodString>;
     RAZORPAY_KEY_SECRET: z.ZodOptional<z.ZodString>;
     RAZORPAY_WEBHOOK_SECRET: z.ZodOptional<z.ZodString>;
-    PAYMENT_PRIMARY_GATEWAY: z.ZodDefault<z.ZodEnum<{
-        RAZORPAY: "RAZORPAY";
-        PHONEPE: "PHONEPE";
-        AUTO: "AUTO";
-    }>>;
     PAYMENT_HOLD_CUTOFF_SECONDS: z.ZodDefault<z.ZodCoercedNumber<unknown>>;
     CLOUDINARY_CLOUD_NAME: z.ZodOptional<z.ZodString>;
     CLOUDINARY_API_KEY: z.ZodOptional<z.ZodString>;
@@ -109,9 +94,6 @@ export declare const env: {
     GDS_CLIENT_SECRET: string;
     GDS_REQUEST_TIMEOUT_MS: number;
     GDS_CONNECT_TIMEOUT_MS: number;
-    PHONEPE_CLIENT_VERSION: string;
-    PHONEPE_ENVIRONMENT: "SANDBOX" | "PRODUCTION";
-    PAYMENT_PRIMARY_GATEWAY: "RAZORPAY" | "PHONEPE" | "AUTO";
     PAYMENT_HOLD_CUTOFF_SECONDS: number;
     SMS_GATEWAY_URL: string;
     SMS_GATEWAY_MOBILE: string;
@@ -135,11 +117,6 @@ export declare const env: {
     SEAT_LOCK_TTL_SECONDS: number;
     SHUTDOWN_TIMEOUT_MS: number;
     REDIS_PASSWORD?: string | undefined;
-    PHONEPE_MERCHANT_ID?: string | undefined;
-    PHONEPE_CLIENT_ID?: string | undefined;
-    PHONEPE_CLIENT_SECRET?: string | undefined;
-    PHONEPE_CALLBACK_URL?: string | undefined;
-    PHONEPE_REDIRECT_URL?: string | undefined;
     RAZORPAY_KEY_ID?: string | undefined;
     RAZORPAY_KEY_SECRET?: string | undefined;
     RAZORPAY_WEBHOOK_SECRET?: string | undefined;

@@ -15,7 +15,6 @@ export const validateCouponSchema = z.object({
   fromCityId: z.coerce.number().int().optional(),
   toCityId: z.coerce.number().int().optional(),
   busId: z.coerce.number().int().optional(),
-  userId: z.string().uuid().optional(),
 });
 
 export const couponCodeParamSchema = z.object({
@@ -23,5 +22,5 @@ export const couponCodeParamSchema = z.object({
 });
 
 export type ListCouponsQuery = z.infer<typeof listCouponsQuerySchema>;
-export type ValidateCouponInput = z.infer<typeof validateCouponSchema>;
+export type ValidateCouponInput = z.infer<typeof validateCouponSchema> & { userId?: string };
 export type CouponCodeParam = z.infer<typeof couponCodeParamSchema>;

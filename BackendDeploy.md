@@ -27,8 +27,8 @@ The AiBus backend is built with:
 - **Runtime**: Node.js (>= 18.0.0) with TypeScript compiled to JavaScript (`dist/`)
 - **Web Framework**: Express 5.x with Helmet, CORS, HPP, compression, and rate limiting
 - **ORM / Database**: Prisma Client 6.x connected to PostgreSQL (Supabase)
+- **External providers** include Mantis GDS for bus inventory and ticketing and Razorpay for payments and refunds.
 - **Caching & Queues**: Redis (ioredis) with BullMQ for asynchronous reconciliation, refunds, and notifications
-- **External Providers**: Mantis GDS (bus inventory, booking, ticketing), PhonePe (payment gateway & refunds)
 
 ```
                             +-----------------------------------+
@@ -66,7 +66,7 @@ Before starting deployment, ensure you have:
    - Option A: **Upstash Redis** (Recommended: free tier, serverless, automated TLS, global latency).
    - Option B: **Render Managed Redis** (Available on Render paid plans).
    - Option C: **Redis Cloud** ([https://redis.com](https://redis.com)).
-5. Production/Sandbox credentials for **Mantis GDS** and **PhonePe**.
+5. Configure Mantis GDS and Razorpay credentials for the intended environment.
 
 ---
 
@@ -210,13 +210,9 @@ Configure these environment variables in Render (**Environment** tab of your ser
 | `GDS_CLIENT_ID` | Yes | `50` | GDS Client ID |
 | `GDS_CLIENT_SECRET` | Yes | *Secret* | GDS Client Secret |
 | `GDS_REQUEST_TIMEOUT_MS` | No | `15000` | Upstream GDS timeout (ms) |
-| `PHONEPE_MERCHANT_ID` | Yes | `M23XTGBCAO55H` | PhonePe Merchant ID |
-| `PHONEPE_CLIENT_ID` | Yes | `M23XTGBCAO55H_...` | PhonePe Client ID |
-| `PHONEPE_CLIENT_SECRET` | Yes | *Secret* | PhonePe Salt Key / Secret |
-| `PHONEPE_CLIENT_VERSION` | No | `1` | PhonePe Salt Index |
-| `PHONEPE_ENVIRONMENT` | Yes | `SANDBOX` or `PRODUCTION` | PhonePe environment mode |
-| `PHONEPE_CALLBACK_URL` | Yes | `https://your-backend.onrender.com/api/v1/payments/webhook` | Webhook URL for payment updates |
-| `PHONEPE_REDIRECT_URL` | Yes | `https://your-frontend.onrender.com/payment/status` | User browser redirect URL after payment |
+| `RAZORPAY_KEY_ID` | Yes | *Secret-managed setting* | Razorpay account key ID |
+| `RAZORPAY_KEY_SECRET` | Yes | *Secret* | Razorpay API key secret |
+| `RAZORPAY_WEBHOOK_SECRET` | Yes | *Secret* | Signing secret for `/api/v1/payments/webhook/razorpay` |
 | `RATE_LIMIT_WINDOW_MS` | No | `60000` | Rate limiting window (1 min) |
 | `RATE_LIMIT_MAX_REQUESTS` | No | `100` | Max requests per IP per window |
 | `AUTH_RATE_LIMIT_WINDOW_MS` | No | `900000` | Auth rate limit window (15 min) |
@@ -402,8 +398,7 @@ curl -i https://your-backend.onrender.com/api/v1/buses/6901/chart
 
 1. **Keep-Alive & Reverse Proxy**:
    Render terminates TLS at its load balancer. The backend uses `app.set('trust proxy', 1)` so that IP rate limiting, client IP detection, and `X-Forwarded-Proto` work reliably.
-2. **Log Redaction**:
-   Pino logger automatically redacts sensitive keys: `authorization`, `cookie`, `password`, `token`, `GDS_CLIENT_SECRET`, `JWT_ACCESS_SECRET`, `PHONEPE_CLIENT_SECRET`, `creditCard`, and `cvv`.
+2. **Log Redaction** removes configured credentials and authorization values. Request logs omit query strings.
 3. **Payload Compression**:
    The Gzip compression middleware reduces large JSON payloads (bus search results and seat layout trees) by up to 85%, significantly reducing bandwidth and response latency.
 4. **Zero-Downtime Deploys**:

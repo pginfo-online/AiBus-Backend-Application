@@ -16,7 +16,6 @@ exports.validateCouponSchema = zod_1.z.object({
     fromCityId: zod_1.z.coerce.number().int().optional(),
     toCityId: zod_1.z.coerce.number().int().optional(),
     busId: zod_1.z.coerce.number().int().optional(),
-    userId: zod_1.z.string().uuid().optional(),
 });
 exports.couponCodeParamSchema = zod_1.z.object({
     code: zod_1.z.string().min(1).trim().toUpperCase(),

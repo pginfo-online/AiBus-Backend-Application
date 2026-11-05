@@ -5,8 +5,6 @@ import { requireAgentContext, requireAgentKycApproved } from '../agents/agents.m
 import {
   createPaymentIntentSchema,
   verifyPaymentSchema,
-  webhookPayloadSchema,
-  simulateWebhookSchema,
 } from './payments.validation';
 
 const paymentsRouter = Router();
@@ -40,18 +38,6 @@ paymentsRouter.post(
   controller.verifyPayment
 );
 
-// Payment gateway webhook (PhonePe)
-paymentsRouter.post(
-  '/webhook',
-  validate({ body: webhookPayloadSchema }),
-  controller.handleWebhook
-);
-paymentsRouter.post(
-  '/webhook/phonepe',
-  validate({ body: webhookPayloadSchema }),
-  controller.handleWebhook
-);
-
 // Payment gateway webhook (Razorpay)
 paymentsRouter.post(
   '/webhook/razorpay',
@@ -60,13 +46,6 @@ paymentsRouter.post(
 paymentsRouter.post(
   '/razorpay-webhook',
   controller.handleRazorpayWebhook
-);
-
-// Controlled webhook simulation (local development & testing only)
-paymentsRouter.post(
-  '/simulate-webhook',
-  validate({ body: simulateWebhookSchema }),
-  controller.simulateWebhook
 );
 
 // Payment gateway return/redirect URL handler

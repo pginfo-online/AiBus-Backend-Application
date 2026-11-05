@@ -5,7 +5,6 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.AgentsService = void 0;
 const bcryptjs_1 = __importDefault(require("bcryptjs"));
-const axios_1 = __importDefault(require("axios"));
 const uuid_1 = require("uuid");
 const database_1 = require("../../infrastructure/database");
 const logger_1 = require("../../infrastructure/logger");
@@ -17,35 +16,6 @@ const payments_1 = require("../../infrastructure/payments");
 const auth_service_1 = require("../auth/auth.service");
 const agentLogger = logger_1.logger.child({ module: 'agents-service' });
 // ---------------------------------------------------------------------------
-// PhonePe helpers (reuse pattern from PaymentsService)
-// ---------------------------------------------------------------------------
-const PHONEPE_CHECKOUT_BASE = env_1.env.PHONEPE_ENVIRONMENT === 'PRODUCTION'
-    ? 'https://api.phonepe.com/apis/pg'
-    : 'https://api-preprod.phonepe.com/apis/pg-sandbox';
-const PHONEPE_OAUTH_URL = env_1.env.PHONEPE_ENVIRONMENT === 'PRODUCTION'
-    ? 'https://api.phonepe.com/apis/identity-manager/v1/oauth/token'
-    : 'https://api-preprod.phonepe.com/apis/pg-sandbox/v1/oauth/token';
-let _ppTokenCache = null;
-async function getPhonePeToken() {
-    if (_ppTokenCache && _ppTokenCache.expiresAt > Date.now() + 60000) {
-        return _ppTokenCache.token;
-    }
-    if (env_1.isDevelopment || env_1.isTest)
-        return `MOCK-OAUTH-${Date.now()}`;
-    const params = new URLSearchParams({
-        client_id: env_1.env.PHONEPE_CLIENT_ID || '',
-        client_secret: env_1.env.PHONEPE_CLIENT_SECRET || '',
-        client_version: env_1.env.PHONEPE_CLIENT_VERSION || '1',
-        grant_type: 'client_credentials',
-    });
-    const res = await axios_1.default.post(PHONEPE_OAUTH_URL, params.toString(), {
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        timeout: 10000,
-    });
-    const expiresIn = Number(res.data.expires_in || 3600);
-    _ppTokenCache = { token: res.data.access_token, expiresAt: Date.now() + expiresIn * 1000 };
-    return _ppTokenCache.token;
-}
 // ---------------------------------------------------------------------------
 // AgentsService
 // ---------------------------------------------------------------------------
@@ -409,7 +379,7 @@ class AgentsService {
         return { entries, total, page, limit, pages: Math.ceil(total / limit) };
     }
     // --------------------------------------------------------------------------
-    // 7. Wallet Top-up Initiation (PhonePe)
+    // 7. Wallet Top-up Initiation
     // --------------------------------------------------------------------------
     async initiateTopup(agentId, input) {
         const prisma = (0, database_1.getPrismaClient)();
@@ -422,12 +392,16 @@ class AgentsService {
         // Idempotency check
         if (input.idempotencyKey) {
             const existing = await prisma.walletTopup.findUnique({ where: { idempotencyKey: input.idempotencyKey } });
-            if (existing)
+            if (existing) {
+                if (existing.agentId !== agentId || Number(existing.amount) !== input.amount) {
+                    throw new errors_1.ConflictError('Top-up idempotency key already used');
+                }
                 return { topup: existing, isIdempotent: true };
+            }
         }
-        const redirectUrl = input.redirectUrl || env_1.env.PHONEPE_REDIRECT_URL || 'http://localhost:5173/wallet';
+        const redirectUrl = input.redirectUrl;
         const orchestrator = payments_1.PaymentOrchestrator.getInstance();
-        const intentResult = await orchestrator.createPaymentIntentWithFallback({
+        const intentResult = await orchestrator.createPaymentIntent({
             bookingId: agentId,
             bookingNumber: `TOPUP-${agentId.slice(0, 8).toUpperCase()}`,
             amount: input.amount,
@@ -463,34 +437,39 @@ class AgentsService {
     // --------------------------------------------------------------------------
     // 8. Wallet Top-up Confirmation (called from payment webhook)
     // --------------------------------------------------------------------------
-    async confirmTopup(merchantTxnId, gatewayPaymentId) {
+    async confirmTopup(merchantTxnId, gatewayPaymentId, agentId) {
         const prisma = (0, database_1.getPrismaClient)();
         const topup = await prisma.walletTopup.findUnique({ where: { merchantTxnId } });
-        if (!topup)
-            throw new errors_1.NotFoundError(`Top-up not found: ${merchantTxnId}`);
+        if (!topup || topup.agentId !== agentId || topup.gateway !== 'RAZORPAY') {
+            throw new errors_1.NotFoundError('Top-up not found');
+        }
         if (topup.status === client_1.TopupStatus.COMPLETED) {
             agentLogger.info({ merchantTxnId }, 'Top-up already confirmed (idempotent)');
             return topup;
         }
         const amount = Number(topup.amount);
+        const verified = await payments_1.PaymentOrchestrator.getInstance().verifyPayment('RAZORPAY', {
+            merchantTxnId, gatewayOrderId: topup.gatewayOrderId ?? undefined, gatewayPaymentId,
+        });
+        if (!verified.success || verified.amount !== amount || !verified.gatewayPaymentId) {
+            throw new errors_1.ValidationError('Top-up payment has not been captured for this order and amount');
+        }
         const idempotencyPrefix = `topup:${topup.id}`;
         await prisma.$transaction(async (tx) => {
             // Mark topup completed
-            await tx.walletTopup.update({
-                where: { id: topup.id },
+            const claim = await tx.walletTopup.updateMany({
+                where: { id: topup.id, status: { in: [client_1.TopupStatus.INITIATED, client_1.TopupStatus.PAYMENT_PENDING] } },
                 data: {
                     status: client_1.TopupStatus.COMPLETED,
-                    gatewayPaymentId: gatewayPaymentId ?? null,
+                    gatewayPaymentId: verified.gatewayPaymentId,
                     webhookVerified: true,
                     completedAt: new Date(),
                 },
             });
-            // Credit wallet — optimistic lock on version
-            const wallet = await tx.agentWallet.findUnique({ where: { agentId: topup.agentId } });
-            if (!wallet)
-                throw new Error(`AgentWallet missing for agent ${topup.agentId}`);
-            await tx.agentWallet.updateMany({
-                where: { agentId: topup.agentId, version: wallet.version },
+            if (!claim.count)
+                return;
+            await tx.agentWallet.update({
+                where: { agentId: topup.agentId },
                 data: {
                     cashBalance: { increment: amount },
                     totalTopups: { increment: amount },

@@ -23,7 +23,7 @@ export class CancellationsService {
     return CancellationsService.instance;
   }
 
-  public async checkCancellability(bookingIdentifier: string, seatNos?: string[]) {
+  public async checkCancellability(bookingIdentifier: string, seatNos?: string[], userId?: string) {
     const prisma = getPrismaClient();
 
     const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(bookingIdentifier);
@@ -37,7 +37,7 @@ export class CancellationsService {
           include: { seats: true },
         });
 
-    if (!booking) {
+    if (!booking || !userId || booking.userId !== userId) {
       throw new NotFoundError('Booking not found');
     }
 
@@ -67,18 +67,6 @@ export class CancellationsService {
     };
   }
 
-  public async checkCancellabilityDirect(params: { ticketNo: string; seatNos: string; pnrNo?: string }) {
-    return this.gdsAdapter.isCancellable(params.ticketNo, params.seatNos, params.pnrNo);
-  }
-
-  public async cancelSeatsDirect(params: { TicketNo: string; SeatNos: string; PNR?: string }) {
-    return this.gdsAdapter.cancelSeats({
-      TicketNo: params.TicketNo,
-      SeatNos: params.SeatNos,
-      PNR: params.PNR,
-    });
-  }
-
   public async cancelSeats(
     bookingIdentifier: string,
     seatNos: string[],
@@ -99,7 +87,7 @@ export class CancellationsService {
           include: { seats: true, payments: true, commissionSnapshot: true, ticket: true },
         });
 
-    if (!booking) {
+    if (!booking || !userId || booking.userId !== userId) {
       throw new NotFoundError('Booking not found');
     }
 
@@ -111,17 +99,26 @@ export class CancellationsService {
       throw new ValidationError('No active ticket number found for this booking');
     }
 
-    const resolvedSeatNos = seatNos && seatNos.length > 0 ? seatNos : booking.seats.map((s) => s.seatNo);
+    const requestedSeats = new Set(seatNos);
+    const allSeats = booking.seats.map((seat) => seat.seatNo);
+    if (requestedSeats.size && (requestedSeats.size !== allSeats.length || allSeats.some((seat) => !requestedSeats.has(seat)))) {
+      throw new ValidationError('Cancellation currently requires all seats on the booking');
+    }
+    const resolvedSeatNos = allSeats;
     const seatString = resolvedSeatNos.join(',');
+    const payment = booking.payments.find((p) => p.status === 'SUCCESS');
+    if (!payment || !booking.providerPnrNo) throw new ValidationError('Booking has no settled payment or PNR');
 
-    // 1. Transition booking to CANCELLATION_REQUESTED
-    await prisma.booking.update({
-      where: { id: booking.id },
-      data: { status: BookingStatus.CANCELLATION_REQUESTED },
+    const quote = await this.gdsAdapter.isCancellable(booking.providerTicketNo, seatString, booking.providerPnrNo);
+    if (!quote.IsCancellable) throw new ValidationError('The operator declined cancellation');
+
+    const claim = await prisma.booking.updateMany({
+      where: { id: booking.id, status: BookingStatus.CONFIRMED },
+      data: { status: BookingStatus.CANCELLATION_REQUESTED, version: { increment: 1 } },
     });
+    if (!claim.count) throw new ValidationError('Cancellation is already in progress');
 
     try {
-      // 2. Call upstream GDS provider CancelSeats
       const cancelRes = await this.gdsAdapter.cancelSeats({
         TicketNo: booking.providerTicketNo,
         PNR: booking.providerPnrNo || undefined,
@@ -133,7 +130,8 @@ export class CancellationsService {
         throw new ProviderError('GDS', cancelRes.Message || 'Failed to cancel seats with provider');
       }
 
-      const refundAmount = Number(cancelRes.RefundAmount ?? 0);
+      const refundAmount = Math.min(cancelRes.RefundAmount, booking.agentId
+        ? Number(booking.commissionSnapshot?.grossFare ?? booking.totalFare) : Number(payment.amount));
       let commissionReversal = 0;
       let netRefundToAgent = refundAmount;
 
@@ -147,7 +145,7 @@ export class CancellationsService {
       }
 
       const isAgentBooking = Boolean(booking.agentId);
-      const targetUserId = userId ?? booking.userId ?? null;
+      const targetUserId = booking.userId;
       // Customer wallet credit: when not an agent booking, user exists, and refundToWallet is requested (or true)
       const creditToCustomerWallet = !isAgentBooking && Boolean(targetUserId) && refundToWallet === true;
 
@@ -216,7 +214,6 @@ export class CancellationsService {
         const isWalletDestination = isAgentBooking || creditToCustomerWallet;
 
         // Create Refund record
-        const payment = booking.payments.find((p) => p.status === 'SUCCESS');
         const refund = await tx.refund.create({
           data: {
             bookingId: booking.id,
@@ -224,10 +221,10 @@ export class CancellationsService {
             cancellationId: cancellation.id,
             userId: targetUserId,
             amount: refundAmount,
-            status: isWalletDestination ? RefundStatus.COMPLETED : RefundStatus.PENDING,
+            status: isWalletDestination || refundAmount === 0 ? RefundStatus.COMPLETED : RefundStatus.PENDING,
             destination: isWalletDestination ? RefundDestination.WALLET : RefundDestination.ORIGINAL_PAYMENT_METHOD,
             reason: reason || 'Seat cancellation processed',
-            completedAt: isWalletDestination ? new Date() : null,
+            completedAt: isWalletDestination || refundAmount === 0 ? new Date() : null,
           },
         });
 
@@ -292,7 +289,7 @@ export class CancellationsService {
             refundId: cancellationResult.refund.id,
             bookingId: booking.id,
             amount: refundAmount,
-          });
+          }, { jobId: `refund-${cancellationResult.refund.id}`, attempts: 8, backoff: { type: 'exponential', delay: 30_000 } });
         } catch (queueErr) {
           this.cancelLogger.warn({ queueErr }, 'Failed to queue refund processing job');
         }
@@ -305,11 +302,7 @@ export class CancellationsService {
 
       return cancellationResult;
     } catch (err: any) {
-      // Revert booking to CONFIRMED on provider cancellation rejection
-      await prisma.booking.update({
-        where: { id: booking.id },
-        data: { status: BookingStatus.CONFIRMED },
-      });
+      this.cancelLogger.error({ bookingId: booking.id }, 'Cancellation requires reconciliation');
       throw err;
     }
   }

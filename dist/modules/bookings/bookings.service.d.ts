@@ -149,14 +149,7 @@ export declare class BookingsService {
             confirmedAt: Date | null;
             cancelledAt: Date | null;
         };
-        paymentIntent: {
-            paymentId: string;
-            merchantTxnId: string;
-            amount: number;
-            currency: string;
-            gateway: string;
-            status: string;
-        };
+        paymentIntent: null;
     } | {
         booking: {
             seats: {
@@ -311,7 +304,7 @@ export declare class BookingsService {
         confirmedAt: Date | null;
         cancelledAt: Date | null;
     }>;
-    getBooking(id: string): Promise<{
+    getBooking(id: string, userId?: string): Promise<{
         seats: {
             id: string;
             bookingId: string;
@@ -607,28 +600,16 @@ export declare class BookingsService {
         HoldId?: string;
         bookingId?: string;
         bookingNumber?: string;
-    }): Promise<{
+    }, userId?: string): Promise<import("../../providers/types").GdsBookingStatusResponse | {
         Status: number;
         Message: string;
-        TicketNo: any;
-        PNRNo: any;
-        BookingId: any;
-        BookingNumber: any;
-        booking: any;
-        HoldId?: undefined;
-        bookingId?: undefined;
-        bookingNumber?: undefined;
+        TicketNo: string;
+        PNRNo: string;
     } | {
-        HoldId: string;
         Status: number;
-        TicketNo: string | undefined;
-        PNRNo: string | undefined;
-        Message: string | undefined;
-        bookingId: any;
-        bookingNumber: any;
-        BookingId?: undefined;
-        BookingNumber?: undefined;
-        booking?: undefined;
+        Message: string;
+        TicketNo?: undefined;
+        PNRNo?: undefined;
     }>;
     private generateBookingNumber;
 }

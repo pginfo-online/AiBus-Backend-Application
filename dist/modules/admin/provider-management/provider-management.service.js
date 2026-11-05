@@ -37,9 +37,9 @@ class ProviderManagementService {
                 status: 'ACTIVE',
             },
             {
-                name: 'PHONEPE',
+                name: 'RAZORPAY',
                 type: 'PAYMENT_GATEWAY',
-                description: 'PhonePe Standard Checkout & Webhooks',
+                description: 'Razorpay Checkout & Webhooks',
                 status: 'ACTIVE',
             },
         ];
@@ -79,14 +79,6 @@ class ProviderManagementService {
                     checkedAt: new Date().toISOString(),
                 };
             }
-        }
-        if (providerUpper === 'PHONEPE') {
-            return {
-                provider: 'PHONEPE',
-                status: 'HEALTHY',
-                message: 'PhonePe gateway client initialized and ready',
-                checkedAt: new Date().toISOString(),
-            };
         }
         throw new errors_1.NotFoundError(`Provider '${name}' not recognized`);
     }
@@ -172,12 +164,11 @@ class ProviderManagementService {
     async getProviderBalance(name) {
         const providerUpper = name.toUpperCase();
         if (providerUpper === 'GDS') {
+            const balance = await gdsAdapter_1.GdsAdapter.getInstance().getBalance();
             return {
                 provider: 'GDS',
-                currency: 'INR',
-                creditLimit: 500000.0,
-                availableBalance: 423500.0,
-                usedBalance: 76500.0,
+                currency: balance.Currency,
+                availableBalance: balance.Balance,
                 lastUpdated: new Date().toISOString(),
             };
         }

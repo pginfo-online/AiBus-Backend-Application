@@ -2,7 +2,7 @@ import { z } from 'zod';
 
 export const createPaymentIntentSchema = z.object({
   bookingId: z.string().uuid('Valid bookingId is required'),
-  gateway: z.enum(['PHONEPE', 'RAZORPAY', 'AUTO', 'MOCK']).default('AUTO'),
+  gateway: z.enum(['RAZORPAY', 'AUTO']).default('AUTO'),
   redirectUrl: z.string().optional(),
   paymentMode: z.enum(['UPI', 'CARD', 'NETBANKING', 'WALLET', 'ALL']).optional(),
 });
@@ -15,18 +15,5 @@ export const verifyPaymentSchema = z.object({
   gatewaySignature: z.string().optional(),
 });
 
-export const webhookPayloadSchema = z.object({
-  response: z.string(), // base64 encoded response from PhonePe
-});
-
-export const simulateWebhookSchema = z.object({
-  merchantTxnId: z.string().min(1, 'merchantTxnId is required'),
-  status: z.enum(['SUCCESS', 'DECLINED', 'TIMED_OUT']).default('SUCCESS'),
-  reason: z.string().optional(),
-});
-
 export type CreatePaymentIntentInput = z.infer<typeof createPaymentIntentSchema>;
 export type VerifyPaymentInput = z.infer<typeof verifyPaymentSchema>;
-export type WebhookPayloadInput = z.infer<typeof webhookPayloadSchema>;
-export type SimulateWebhookInput = z.infer<typeof simulateWebhookSchema>;
-

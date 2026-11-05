@@ -1,5 +1,5 @@
 import axios from 'axios';
-import { env, isDevelopment, isTest } from '../../config/env';
+import { env } from '../../config/env';
 import { logger } from '../../infrastructure/logger';
 import { getRedisClient, acquireLock, releaseLock } from '../../infrastructure/redis';
 import { RedisPrefix } from '../../shared/constants';
@@ -8,6 +8,7 @@ import { AuthenticationError } from '../../shared/errors';
 export class GdsAuthClient {
   private static instance: GdsAuthClient;
   private readonly authLogger = logger.child({ module: 'gds-auth' });
+  private refreshing?: Promise<string>;
   private memoryToken: string | null = null;
   private memoryTokenExpiresAt: number = 0;
 
@@ -21,49 +22,34 @@ export class GdsAuthClient {
   }
 
   public async getAccessToken(): Promise<string> {
-    const tokenCacheKey = `${RedisPrefix.PROVIDER_TOKEN}gds`;
-    const lockKey = `${RedisPrefix.LOCK_PROVIDER_AUTH}gds`;
+    if (this.memoryToken && Date.now() < this.memoryTokenExpiresAt) return this.memoryToken;
+    this.refreshing ??= this.refresh().finally(() => { this.refreshing = undefined; });
+    return this.refreshing;
+  }
+
+  private async refresh(): Promise<string> {
+    const tokenCacheKey = `${RedisPrefix.PROVIDER_TOKEN}gds:v2:${env.GDS_CLIENT_ID}`;
+    const lockKey = `${RedisPrefix.LOCK_PROVIDER_AUTH}gds:v2:${env.GDS_CLIENT_ID}`;
     const lockOwner = `auth-${Date.now()}-${Math.random()}`;
-
-    // 1. Check in-memory cache first
-    const now = Date.now();
-    if (this.memoryToken && now < this.memoryTokenExpiresAt) {
-      return this.memoryToken;
-    }
-
-    // 2. Check Redis cache
-    try {
-      const redis = getRedisClient();
-      const cachedToken = await redis.get(tokenCacheKey);
-      if (cachedToken) {
-        this.memoryToken = cachedToken;
-        this.memoryTokenExpiresAt = now + 60 * 1000; // 1 min local cache
-        return cachedToken;
-      }
-    } catch (err) {
-      this.authLogger.warn({ err }, 'Redis error while reading cached GDS token; proceeding to fetch fresh token');
-    }
-
-    // 3. Acquire distributed lock so only ONE request calls the GDS Auth endpoint
+    const redis = getRedisClient();
     let lockAcquired = false;
     try {
-      lockAcquired = await acquireLock(lockKey, lockOwner, 10);
-    } catch (lockErr) {
-      this.authLogger.warn({ lockErr }, 'Could not acquire Redis auth lock, fetching directly');
-    }
-
-    if (!lockAcquired) {
-      // Another process is refreshing the token. Wait 500ms and check cache again.
-      await new Promise((resolve) => setTimeout(resolve, 500));
-      try {
-        const redis = getRedisClient();
-        const cachedToken = await redis.get(tokenCacheKey);
-        if (cachedToken) {
+      const deadline = Date.now() + Math.min(env.GDS_REQUEST_TIMEOUT_MS, 5000);
+      do {
+        const [cachedToken, ttl] = await Promise.all([redis.get(tokenCacheKey), redis.pttl(tokenCacheKey)]);
+        if (cachedToken?.includes('|') && !cachedToken.startsWith('MOCK-') && !cachedToken.startsWith('DEV-') && ttl > 0) {
+          this.memoryToken = cachedToken;
+          this.memoryTokenExpiresAt = Date.now() + Math.min(ttl, 60_000);
           return cachedToken;
         }
-      } catch {
-        // Continue to fetch
-      }
+        lockAcquired = await acquireLock(lockKey, lockOwner, Math.ceil(env.GDS_REQUEST_TIMEOUT_MS / 1000) + 5);
+        if (lockAcquired) break;
+        await new Promise((resolve) => setTimeout(resolve, 150 + Math.random() * 100));
+      } while (Date.now() < deadline);
+      if (!lockAcquired) throw new AuthenticationError('GDS token refresh is in progress');
+    } catch (err) {
+      if (err instanceof AuthenticationError) throw err;
+      this.authLogger.warn('Redis unavailable for GDS token coordination');
     }
 
     try {
@@ -80,7 +66,7 @@ export class GdsAuthClient {
       }
 
       this.memoryToken = token;
-      this.memoryTokenExpiresAt = now + ttlSeconds * 1000;
+      this.memoryTokenExpiresAt = Date.now() + ttlSeconds * 1000;
       return token;
     } finally {
       if (lockAcquired) {
@@ -96,19 +82,14 @@ export class GdsAuthClient {
   private async fetchTokenFromUpstream(): Promise<string> {
     const authUrl = `${env.GDS_PARTNER_BASE_URL}/ota/v1/Auth`;
 
-    // In development or test, if mock secret is provided, avoid hitting live endpoint if mock credentials are set
-    if (env.GDS_CLIENT_SECRET.includes('sandbox') || env.GDS_CLIENT_SECRET.includes('test') || isTest) {
-      this.authLogger.info('Using local simulated GDS access token for development/sandbox credentials');
-      return `MOCK-GDS-TOKEN-${Date.now()}|${env.GDS_CLIENT_ID}-S|202610051210|prod|FFFF`;
-    }
 
     try {
-      this.authLogger.info({ url: authUrl, clientId: env.GDS_CLIENT_ID }, 'Requesting new GDS access token');
+      this.authLogger.info( 'Requesting new GDS access token');
 
       const response = await axios.post(
         authUrl,
         {
-          ClientId: env.GDS_CLIENT_ID,
+          ClientId: Number(env.GDS_CLIENT_ID),
           ClientSecret: env.GDS_CLIENT_SECRET,
         },
         {
@@ -117,14 +98,15 @@ export class GdsAuthClient {
             Accept: 'application/json',
           },
           timeout: env.GDS_REQUEST_TIMEOUT_MS,
+          maxRedirects: 0,
         }
       );
 
       // GDS returns the raw string token (or string within JSON)
       const token = typeof response.data === 'string' ? response.data.trim() : response.data;
 
-      if (!token) {
-        throw new AuthenticationError('GDS returned empty access token');
+      if (typeof token !== 'string' || !token.includes('|')) {
+        throw new AuthenticationError('GDS returned an invalid access token');
       }
 
       this.authLogger.info('Successfully acquired fresh GDS access token');
@@ -132,14 +114,8 @@ export class GdsAuthClient {
     } catch (error: any) {
       this.authLogger.error({ error: error.message }, 'Failed to fetch GDS access token');
 
-      if (isDevelopment || isTest) {
-        this.authLogger.warn('Falling back to local development simulated token due to upstream error');
-        return `DEV-FALLBACK-TOKEN-${Date.now()}|${env.GDS_CLIENT_ID}-S|202610051210|prod|FFFF`;
-      }
 
-      throw new AuthenticationError(
-        `Failed to authenticate with GDS provider: ${error.response?.data?.message || error.message}`
-      );
+      throw new AuthenticationError('Failed to authenticate with GDS provider');
     }
   }
 }

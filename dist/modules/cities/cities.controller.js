@@ -11,7 +11,7 @@ class CitiesController {
     getCities = async (req, res, next) => {
         try {
             const query = typeof req.query.q === 'string' ? req.query.q : undefined;
-            const limit = req.query.limit ? Math.min(Math.max(parseInt(req.query.limit, 10) || 20, 1), 100) : undefined;
+            const limit = req.query.limit ? Math.min(Math.max(parseInt(req.query.limit, 10) || 20, 1), 100) : 20;
             const popular = req.query.popular === 'true' || req.query.popular === '1';
             const cities = await this.citiesService.getCities(query, limit, popular);
             response_1.ApiResponse.success(res, cities);

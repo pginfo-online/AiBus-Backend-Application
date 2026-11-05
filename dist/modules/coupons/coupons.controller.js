@@ -40,7 +40,7 @@ class CouponsController {
     };
     validateCoupon = async (req, res, next) => {
         try {
-            const userId = req.user?.id || req.body.userId;
+            const userId = req.user?.sub;
             const result = await this.service.validateCoupon({
                 ...req.body,
                 userId,

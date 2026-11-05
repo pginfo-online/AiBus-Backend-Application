@@ -1,7 +1,11 @@
 "use strict";
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.errorHandler = errorHandler;
 exports.notFoundHandler = notFoundHandler;
+const axios_1 = __importDefault(require("axios"));
 const errors_1 = require("../../shared/errors");
 const logger_1 = require("../../infrastructure/logger");
 const env_1 = require("../../config/env");
@@ -37,6 +41,14 @@ function errorHandler(err, req, res, _next) {
                     : {}),
                 requestId,
             },
+        });
+        return;
+    }
+    if (axios_1.default.isAxiosError(err)) {
+        logger_1.logger.error({ requestId, code: err.code, upstreamStatus: err.response?.status }, 'Upstream HTTP call failed');
+        res.status(502).json({
+            success: false,
+            error: { code: 'UPSTREAM_ERROR', message: 'Upstream service request failed', requestId },
         });
         return;
     }

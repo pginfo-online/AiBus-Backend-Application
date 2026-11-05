@@ -82,7 +82,6 @@ export declare const createCheckoutSessionSchema: z.ZodObject<{
     useWallet: z.ZodDefault<z.ZodOptional<z.ZodBoolean>>;
     gateway: z.ZodOptional<z.ZodDefault<z.ZodEnum<{
         RAZORPAY: "RAZORPAY";
-        PHONEPE: "PHONEPE";
         AUTO: "AUTO";
     }>>>;
     paymentMode: z.ZodOptional<z.ZodString>;

@@ -1,6 +1,6 @@
 import crypto from 'crypto';
-import Razorpay from 'razorpay';
-import { env, isDevelopment, isTest } from '../../../config/env';
+import axios, { AxiosInstance } from 'axios';
+import { env } from '../../../config/env';
 import { logger } from '../../logger';
 import {
   IPaymentGateway,
@@ -18,7 +18,7 @@ const razorpayLogger = logger.child({ module: 'razorpay-adapter' });
 
 export class RazorpayAdapter implements IPaymentGateway {
   public readonly gatewayName: GatewayName = 'RAZORPAY';
-  private client: Razorpay | null = null;
+  private client: AxiosInstance | null = null;
 
   constructor() {
     this.initClient();
@@ -29,13 +29,15 @@ export class RazorpayAdapter implements IPaymentGateway {
     const keySecret = env.RAZORPAY_KEY_SECRET;
 
     if (keyId && keySecret) {
-      this.client = new Razorpay({
-        key_id: keyId,
-        key_secret: keySecret,
+      this.client = axios.create({
+        baseURL: 'https://api.razorpay.com/v1',
+        auth: { username: keyId, password: keySecret },
+        maxRedirects: 0,
+        timeout: 10_000,
       });
       razorpayLogger.info({ keyId: keyId.substring(0, 8) + '...' }, 'Razorpay client initialized with live/test credentials');
     } else {
-      razorpayLogger.warn('Razorpay credentials not fully configured in env; operating in simulation/mock mode');
+      razorpayLogger.warn('Razorpay credentials not fully configured in env; Razorpay operations are unavailable');
     }
   }
 
@@ -49,36 +51,36 @@ export class RazorpayAdapter implements IPaymentGateway {
    */
   public async createPaymentIntent(params: PaymentIntentParams): Promise<PaymentIntentResult> {
     const amountInPaise = Math.round(params.amount * 100);
-    const keyId = env.RAZORPAY_KEY_ID || 'rzp_test_mock';
-    const keySecret = env.RAZORPAY_KEY_SECRET || 'mock_secret';
-    const merchantTxnId = params.merchantTxnId || `RZP-${params.bookingNumber || 'BKG'}-${Date.now()}`;
+    if (!Number.isSafeInteger(amountInPaise) || amountInPaise < 100) {
+      throw new Error('Razorpay order amount must be at least INR 1');
+    }
+    const keyId = env.RAZORPAY_KEY_ID;
+    const merchantTxnId = params.merchantTxnId || crypto.randomUUID();
 
     let orderId: string;
 
-    if (this.client && this.isConfigured() && !isTest) {
+    if (this.client && this.isConfigured()) {
       try {
-        const order = await this.client.orders.create({
+        const { data: order } = await this.client.post<{ id: string }>('/orders', {
           amount: amountInPaise,
           currency: params.currency || 'INR',
           receipt: merchantTxnId,
           notes: {
             bookingId: params.bookingId,
             bookingNumber: params.bookingNumber,
-            customerEmail: params.customerEmail || '',
-            customerPhone: params.customerPhone || '',
+            merchantTxnId,
             isTopup: params.isTopup ? 'true' : 'false',
             ...(params.notes || {}),
           },
         });
+        if (!order.id?.startsWith('order_')) throw new Error('Invalid Razorpay order response');
         orderId = order.id;
       } catch (err: any) {
         razorpayLogger.error({ err: err.message, bookingId: params.bookingId }, 'Razorpay order creation failed');
         throw new Error(`Razorpay order creation failed: ${err.message}`);
       }
     } else {
-      // Test environment fallback when network is unavailable
-      orderId = `order_test_${Date.now()}`;
-      razorpayLogger.info({ orderId, merchantTxnId }, 'Test Razorpay order created for unit/integration testing');
+      throw new Error('Razorpay credentials are required');
     }
 
     // Prepare client-side payload for Web checkout & Mobile native UPI Intent
@@ -117,9 +119,6 @@ export class RazorpayAdapter implements IPaymentGateway {
       ? baseRedirect
       : `${baseRedirect}${baseRedirect.includes('?') ? '&' : '?'}gateway=RAZORPAY&orderId=${orderId}&merchantTxnId=${merchantTxnId}`;
 
-    // Standard NPCI UPI Intent URI format
-    const upiIntentUrl = `upi://pay?pa=aibus@razorpay&pn=AiBus&tr=${merchantTxnId}&am=${params.amount.toFixed(2)}&cu=INR&tn=Booking_${params.bookingNumber}`;
-
     return {
       gateway: 'RAZORPAY',
       merchantTxnId,
@@ -127,7 +126,6 @@ export class RazorpayAdapter implements IPaymentGateway {
       amount: params.amount,
       currency: params.currency || 'INR',
       paymentUrl,
-      upiIntentUrl,
       sdkPayload,
       expiresAt: new Date(Date.now() + 15 * 60 * 1000), // 15 mins
     };
@@ -138,136 +136,31 @@ export class RazorpayAdapter implements IPaymentGateway {
    * Supports both cryptographic HMAC SHA256 signature verification and API fetch
    */
   public async verifyPayment(params: VerifyPaymentParams): Promise<PaymentVerificationResult> {
-    const keySecret = env.RAZORPAY_KEY_SECRET || 'mock_secret';
     const { gatewayOrderId, gatewayPaymentId, gatewaySignature, merchantTxnId } = params;
+    const result = { gateway: this.gatewayName, merchantTxnId, success: false, status: 'PENDING' as const };
+    const secret = env.RAZORPAY_KEY_SECRET;
+    if (!this.client || !secret || !gatewayOrderId || !gatewayPaymentId) return result;
 
-    // 1. Webhook-verified payment (Razorpay webhook HMAC was already verified by handleRazorpayWebhook)
-    if (gatewaySignature === 'VERIFIED_VIA_WEBHOOK') {
-      razorpayLogger.info(
-        { merchantTxnId, gatewayOrderId, gatewayPaymentId },
-        'Razorpay payment verified via webhook signature'
-      );
-      return {
-        gateway: 'RAZORPAY',
-        success: true,
-        status: 'SUCCESS',
-        merchantTxnId,
-        gatewayOrderId,
-        gatewayPaymentId,
-      };
+    if (gatewaySignature !== undefined) {
+      const expected = crypto.createHmac('sha256', secret)
+        .update(`${gatewayOrderId}|${gatewayPaymentId}`).digest();
+      if (!/^[a-f0-9]{64}$/i.test(gatewaySignature)
+        || !crypto.timingSafeEqual(expected, Buffer.from(gatewaySignature, 'hex'))) return result;
     }
 
-    // 2. Cryptographic Signature Verification if client returned orderId, paymentId, signature
-    if (gatewayOrderId && gatewayPaymentId && gatewaySignature) {
-      const generatedSignature = crypto
-        .createHmac('sha256', keySecret)
-        .update(`${gatewayOrderId}|${gatewayPaymentId}`)
-        .digest('hex');
+    if (!/^pay_[a-zA-Z0-9]+$/.test(gatewayPaymentId)) return result;
+    const { data: payment } = await this.client.get<{
+      id: string; order_id: string; amount: number; currency: string; status: string; method: string;
+      acquirer_data?: { bank_transaction_id?: string; rrn?: string };
+    }>(`/payments/${gatewayPaymentId}`);
+    if (payment.id !== gatewayPaymentId || payment.order_id !== gatewayOrderId || payment.currency !== 'INR'
+      || !Number.isSafeInteger(Number(payment.amount)) || payment.status !== 'captured') return result;
 
-      let isSignatureValid = false;
-      try {
-        const expectedBuf = Buffer.from(generatedSignature, 'utf8');
-        const signatureBuf = Buffer.from(gatewaySignature, 'utf8');
-        if (expectedBuf.length === signatureBuf.length && crypto.timingSafeEqual(expectedBuf, signatureBuf)) {
-          isSignatureValid = true;
-        }
-      } catch {
-        isSignatureValid = false;
-      }
-
-      if (!isSignatureValid && (isDevelopment || isTest) && gatewaySignature.startsWith('mock_sig')) {
-        isSignatureValid = true;
-      }
-
-      if (isSignatureValid) {
-        razorpayLogger.info(
-          { merchantTxnId, gatewayPaymentId },
-          'Razorpay payment verified successfully via cryptographic HMAC signature'
-        );
-        return {
-          gateway: 'RAZORPAY',
-          success: true,
-          status: 'SUCCESS',
-          merchantTxnId,
-          gatewayOrderId,
-          gatewayPaymentId,
-        };
-      } else {
-        razorpayLogger.warn(
-          { merchantTxnId, gatewayOrderId, gatewayPaymentId },
-          'Razorpay payment signature mismatch'
-        );
-        return {
-          gateway: 'RAZORPAY',
-          success: false,
-          status: 'FAILED',
-          merchantTxnId,
-          gatewayOrderId,
-          gatewayPaymentId,
-          failureReason: 'Cryptographic signature mismatch',
-        };
-      }
-    }
-
-    // 3. Test environment synthetic transaction handling (when no signature is provided)
-    if (isTest && (gatewayPaymentId?.startsWith('pay_sim_') || gatewayOrderId?.startsWith('order_test_'))) {
-      razorpayLogger.info(
-        { merchantTxnId, gatewayOrderId, gatewayPaymentId },
-        'Synthetic Razorpay transaction verified for test environment'
-      );
-      return {
-        gateway: 'RAZORPAY',
-        success: true,
-        status: 'SUCCESS',
-        merchantTxnId,
-        gatewayOrderId,
-        gatewayPaymentId,
-      };
-    }
-
-    // 2. Direct API status check if paymentId is available
-    if (this.client && this.isConfigured() && gatewayPaymentId) {
-      try {
-        const payment = await this.client.payments.fetch(gatewayPaymentId);
-        const isCaptured = payment.status === 'captured';
-
-        return {
-          gateway: 'RAZORPAY',
-          success: isCaptured,
-          status: isCaptured ? 'SUCCESS' : payment.status === 'failed' ? 'FAILED' : 'PENDING',
-          merchantTxnId,
-          gatewayOrderId: payment.order_id || gatewayOrderId,
-          gatewayPaymentId: payment.id,
-          amount: Number(payment.amount) / 100,
-          paymentMethod: payment.method,
-          bankTransactionId: payment.acquirer_data?.bank_transaction_id || payment.acquirer_data?.rrn,
-          failureReason: payment.error_description || undefined,
-        };
-      } catch (err: any) {
-        razorpayLogger.warn({ err: err.message, gatewayPaymentId }, 'Failed to fetch Razorpay payment via API');
-        if (isDevelopment || isTest) {
-          return {
-            gateway: 'RAZORPAY',
-            success: false,
-            status: 'PENDING',
-            merchantTxnId,
-          };
-        }
-        throw err;
-      }
-    }
-
-    // Insufficient parameters or failed verification
-    razorpayLogger.warn(
-      { merchantTxnId, gatewayOrderId, gatewayPaymentId },
-      'Razorpay payment verification rejected — missing signature or payment confirmation'
-    );
     return {
-      gateway: 'RAZORPAY',
-      success: false,
-      status: 'FAILED',
-      merchantTxnId,
-      failureReason: 'Missing or invalid payment signature/payment ID from gateway',
+      ...result, success: true, status: 'SUCCESS',
+      gatewayOrderId, gatewayPaymentId: payment.id, amount: Number(payment.amount) / 100,
+      paymentMethod: payment.method,
+      bankTransactionId: payment.acquirer_data?.bank_transaction_id || payment.acquirer_data?.rrn,
     };
   }
 
@@ -288,14 +181,14 @@ export class RazorpayAdapter implements IPaymentGateway {
 
     if (this.client && this.isConfigured()) {
       try {
-        const refund = await this.client.payments.refund(params.gatewayPaymentId, {
-          amount: amountInPaise,
-          receipt: params.merchantRefundId,
-          notes: {
-            reason: params.reason || 'Ticket cancellation refund',
-            merchantRefundId: params.merchantRefundId,
-          },
-        });
+        const path = `/payments/${encodeURIComponent(params.gatewayPaymentId)}/refund`;
+        const { data: refund } = params.gatewayRefundId
+          ? await this.client.get<{ id: string; status: string }>(`${path}s/${encodeURIComponent(params.gatewayRefundId)}`)
+          : await this.client.post<{ id: string; status: string }>(path, {
+              amount: amountInPaise,
+              receipt: params.merchantRefundId,
+              notes: { reason: params.reason || 'Ticket cancellation refund' },
+            }, { headers: { 'X-Refund-Idempotency': params.merchantRefundId } });
 
         razorpayLogger.info(
           { refundId: refund.id, amount: params.amount, paymentId: params.gatewayPaymentId },
@@ -304,9 +197,9 @@ export class RazorpayAdapter implements IPaymentGateway {
 
         return {
           gateway: 'RAZORPAY',
-          success: true,
+          success: refund.status === 'processed',
           gatewayRefundId: refund.id,
-          code: 'REFUND_SUCCESS',
+          code: refund.status === 'processed' ? 'REFUND_SUCCESS' : refund.status === 'pending' ? 'REFUND_PENDING' : 'REFUND_FAILED',
           message: 'Refund successfully initiated via Razorpay',
         };
       } catch (err: any) {
@@ -323,16 +216,7 @@ export class RazorpayAdapter implements IPaymentGateway {
       }
     }
 
-    // Simulation for dev/test
-    const mockRefundId = `rfnd_sim_${Date.now()}`;
-    razorpayLogger.info({ mockRefundId, amount: params.amount }, 'Simulated Razorpay refund completed');
-    return {
-      gateway: 'RAZORPAY',
-      success: true,
-      gatewayRefundId: mockRefundId,
-      code: 'REFUND_SUCCESS',
-      message: 'Simulated refund processed',
-    };
+    return { gateway: 'RAZORPAY', success: false, code: 'NOT_CONFIGURED' };
   }
 
   /**
@@ -345,14 +229,13 @@ export class RazorpayAdapter implements IPaymentGateway {
   ): boolean {
     const signature = headers['x-razorpay-signature'];
     if (!signature || typeof signature !== 'string') {
-      if (isDevelopment || isTest) return true;
       return false;
     }
 
-    const secret = env.RAZORPAY_WEBHOOK_SECRET || env.RAZORPAY_KEY_SECRET;
+    const secret = env.RAZORPAY_WEBHOOK_SECRET;
     if (!secret) {
       razorpayLogger.warn('No Razorpay webhook secret configured; rejecting signature in production');
-      return isDevelopment || isTest;
+      return false;
     }
 
     const expectedSignature = crypto
@@ -378,7 +261,7 @@ export class RazorpayAdapter implements IPaymentGateway {
     const paymentEntity = payload.payload?.payment?.entity;
     const orderEntity = payload.payload?.order?.entity;
 
-    const eventId = payload.account_id ? `${payload.account_id}_${Date.now()}` : `rzp_evt_${Date.now()}`;
+    const eventId = crypto.createHash('sha256').update(rawBody).digest('hex');
     const gatewayOrderId = paymentEntity?.order_id || orderEntity?.id;
     const gatewayPaymentId = paymentEntity?.id;
     const merchantTxnId =

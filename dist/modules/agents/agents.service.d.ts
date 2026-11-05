@@ -284,14 +284,14 @@ export declare class AgentsService {
             webhookVerified: boolean;
             completedAt: Date | null;
         };
-        gateway: import("../../infrastructure/payments").GatewayName;
+        gateway: "RAZORPAY";
         checkoutUrl: string | undefined;
         upiIntentUrl: string | undefined;
         sdkPayload: Record<string, unknown> | undefined;
         merchantTxnId: string;
         isIdempotent: boolean;
     }>;
-    confirmTopup(merchantTxnId: string, gatewayPaymentId?: string): Promise<{
+    confirmTopup(merchantTxnId: string, gatewayPaymentId: string, agentId: string): Promise<{
         id: string;
         status: import(".prisma/client").$Enums.TopupStatus;
         createdAt: Date;

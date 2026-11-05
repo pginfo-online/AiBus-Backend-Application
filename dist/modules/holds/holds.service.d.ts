@@ -13,16 +13,18 @@ export declare class HoldsService {
         ttlSeconds: number;
         totalFare: number;
         seats: {
-            seatNo: string;
             seatTypeId: number;
             fare: number;
+            baseFare: number;
+            serviceTax: number;
+            seatNo: string;
             gender: "M" | "F";
             age: number;
             name: string;
             isAcSeat: boolean;
         }[];
     }>;
-    getHold(holdId: string): Promise<{
+    getHold(holdId: string, userId?: string): Promise<{
         userId: string | null;
         id: string;
         status: import(".prisma/client").$Enums.HoldStatus;
@@ -38,7 +40,7 @@ export declare class HoldsService {
         bookingId: string | null;
         seats: import("@prisma/client/runtime/library").JsonValue;
         releasedAt: Date | null;
-    } | null>;
-    checkHoldStatus(holdId: string): Promise<import("../../providers/types").GdsBookingStatusResponse>;
+    }>;
+    checkHoldStatus(holdId: string, userId?: string): Promise<import("../../providers/types").GdsBookingStatusResponse>;
 }
 //# sourceMappingURL=holds.service.d.ts.map

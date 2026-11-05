@@ -1,4 +1,4 @@
-export type GatewayName = 'RAZORPAY' | 'PHONEPE';
+export type GatewayName = 'RAZORPAY';
 export type PaymentMethodType = 'UPI' | 'CARD' | 'NETBANKING' | 'WALLET' | 'ALL';
 export interface PaymentIntentParams {
     bookingId: string;
@@ -47,6 +47,7 @@ export interface PaymentVerificationResult {
 export interface ProcessRefundParams {
     merchantRefundId: string;
     originalMerchantTxnId: string;
+    gatewayRefundId?: string;
     gatewayPaymentId?: string;
     amount: number;
     reason?: string;

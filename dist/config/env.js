@@ -55,20 +55,11 @@ const envSchema = zod_1.z.object({
     GDS_CLIENT_SECRET: zod_1.z.string().min(1),
     GDS_REQUEST_TIMEOUT_MS: zod_1.z.coerce.number().int().positive().default(15000),
     GDS_CONNECT_TIMEOUT_MS: zod_1.z.coerce.number().int().positive().default(5000),
-    // PhonePe Payment Gateway
-    PHONEPE_MERCHANT_ID: zod_1.z.string().optional(),
-    PHONEPE_CLIENT_ID: zod_1.z.string().optional(),
-    PHONEPE_CLIENT_SECRET: zod_1.z.string().optional(),
-    PHONEPE_CLIENT_VERSION: zod_1.z.string().optional().default('1'),
-    PHONEPE_ENVIRONMENT: zod_1.z.enum(['SANDBOX', 'PRODUCTION']).default('SANDBOX'),
-    PHONEPE_CALLBACK_URL: zod_1.z.string().optional(),
-    PHONEPE_REDIRECT_URL: zod_1.z.string().optional(),
     // Razorpay Payment Gateway
     RAZORPAY_KEY_ID: zod_1.z.string().optional(),
     RAZORPAY_KEY_SECRET: zod_1.z.string().optional(),
     RAZORPAY_WEBHOOK_SECRET: zod_1.z.string().optional(),
     // Payment Orchestration & Smart Routing Defaults
-    PAYMENT_PRIMARY_GATEWAY: zod_1.z.enum(['RAZORPAY', 'PHONEPE', 'AUTO']).default('RAZORPAY'),
     PAYMENT_HOLD_CUTOFF_SECONDS: zod_1.z.coerce.number().int().positive().default(90), // 90s cutoff before hold expiry
     // Cloudinary
     CLOUDINARY_CLOUD_NAME: zod_1.z.string().optional(),
@@ -76,9 +67,9 @@ const envSchema = zod_1.z.object({
     CLOUDINARY_API_SECRET: zod_1.z.string().optional(),
     // SMS Gateway (Dreamz Technology DLT)
     SMS_GATEWAY_URL: zod_1.z.string().url().default('http://trans.dreamztechnolgy.org/smsstatuswithid.aspx'),
-    SMS_GATEWAY_MOBILE: zod_1.z.string().default('9923400506'),
-    SMS_GATEWAY_PASSWORD: zod_1.z.string().default('WorknAi@2'),
-    SMS_GATEWAY_APIKEY: zod_1.z.string().default('76bda706af0d42b5a7ea8a615567ad4f'),
+    SMS_GATEWAY_MOBILE: zod_1.z.string().default(''),
+    SMS_GATEWAY_PASSWORD: zod_1.z.string().default(''),
+    SMS_GATEWAY_APIKEY: zod_1.z.string().default(''),
     SMS_GATEWAY_PEID: zod_1.z.string().default('1701176380063580392'),
     SMS_GATEWAY_TEMPLATE_ID: zod_1.z.string().default('1777179197804384361'),
     SMS_GATEWAY_SENDER_ID: zod_1.z.string().default('PGINF'),

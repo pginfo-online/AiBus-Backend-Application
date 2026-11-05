@@ -18,7 +18,11 @@ export class TicketsService {
     return TicketsService.instance;
   }
 
-  public async getGdsBookingDetails(pnr: string, ticketNo: string) {
+  public async getGdsBookingDetails(pnr: string, ticketNo: string, userId: string) {
+    const booking = await getPrismaClient().booking.findFirst({
+      where: { userId, providerPnrNo: pnr, providerTicketNo: ticketNo }, select: { id: true },
+    });
+    if (!booking) throw new NotFoundError('Booking not found');
     return this.gdsAdapter.getBookingDetails(pnr, ticketNo);
   }
 

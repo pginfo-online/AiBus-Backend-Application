@@ -4,13 +4,13 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.GdsPartnerClient = void 0;
+const gdsResponseHandling_1 = require("./gdsResponseHandling");
 const axios_1 = __importDefault(require("axios"));
 const env_1 = require("../../config/env");
 const logger_1 = require("../../infrastructure/logger");
 const gdsAuthClient_1 = require("./gdsAuthClient");
 const gdsSearchResponse_1 = require("./gdsSearchResponse");
 const gdsChartResponse_1 = require("./gdsChartResponse");
-const gdsMockData_1 = require("./gdsMockData");
 class GdsPartnerClient {
     client;
     authClient;
@@ -22,12 +22,15 @@ class GdsPartnerClient {
         this.client = axios_1.default.create({
             baseURL: env_1.env.GDS_PARTNER_BASE_URL,
             timeout: env_1.env.GDS_REQUEST_TIMEOUT_MS,
+            maxRedirects: 0,
+            maxContentLength: 16 * 1024 * 1024,
             headers: {
                 'Accept-Encoding': 'gzip, deflate',
                 'Content-Type': 'application/json',
             },
         });
         // Request interceptor to attach access-token
+        (0, gdsResponseHandling_1.installGdsResponseHandling)(this.client);
         this.client.interceptors.request.use(async (config) => {
             const token = await this.authClient.getAccessToken();
             config.headers['access-token'] = token;
@@ -68,25 +71,13 @@ class GdsPartnerClient {
                     State: String(item.State || item.state || '').trim(),
                 }))
                     .filter((c) => c.CityId > 0 && c.CityName.length > 0);
-                const seenCityIds = new Set();
-                const uniqueCities = [];
-                for (const c of parsedCities) {
-                    if (!seenCityIds.has(c.CityId)) {
-                        seenCityIds.add(c.CityId);
-                        uniqueCities.push(c);
-                    }
-                }
-                if (uniqueCities.length > 0) {
-                    return uniqueCities;
+                if (parsedCities.length > 0) {
+                    return parsedCities;
                 }
                 throw new Error('CityList returned 0 cities from GDS');
             }
             catch (err) {
                 this.partnerLogger.error({ err: err.message }, 'GDS CityList call failed');
-                if (env_1.isDevelopment || env_1.isTest) {
-                    this.partnerLogger.warn('Falling back to simulated city list');
-                    return gdsMockData_1.MOCK_CITIES;
-                }
                 throw err;
             }
         });
@@ -108,10 +99,6 @@ class GdsPartnerClient {
             }
             catch (err) {
                 this.partnerLogger.error({ err: err.message, params }, 'GDS Search call failed');
-                if (env_1.isDevelopment || env_1.isTest) {
-                    this.partnerLogger.warn('Falling back to simulated bus search results');
-                    return (0, gdsMockData_1.getMockBuses)(Number(params.fromCityId), Number(params.toCityId), params.journeyDate);
-                }
                 throw err;
             }
         });
@@ -151,10 +138,6 @@ class GdsPartnerClient {
                     params,
                     ...(errorDetails ? { providerError: errorDetails } : {}),
                 }, 'GDS Chart call failed');
-                if (env_1.isDevelopment || env_1.isTest) {
-                    this.partnerLogger.warn({ busId }, 'Falling back to simulated seat chart layout');
-                    return (0, gdsMockData_1.getMockChart)(busId);
-                }
                 throw err;
             }
         });
@@ -177,9 +160,6 @@ class GdsPartnerClient {
             }
             catch (err) {
                 this.partnerLogger.error({ err: err.message, params }, 'GDS SearchBus call failed');
-                if (env_1.isDevelopment || env_1.isTest) {
-                    return (0, gdsMockData_1.getMockBuses)(params.fromCityId, params.toCityId, params.journeyDate).filter((b) => b.RouteBusId === params.busId);
-                }
                 throw err;
             }
         });

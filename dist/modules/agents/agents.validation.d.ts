@@ -70,7 +70,6 @@ export declare const initiateTopupSchema: z.ZodObject<{
     amount: z.ZodNumber;
     gateway: z.ZodOptional<z.ZodDefault<z.ZodEnum<{
         RAZORPAY: "RAZORPAY";
-        PHONEPE: "PHONEPE";
         AUTO: "AUTO";
     }>>>;
     redirectUrl: z.ZodOptional<z.ZodString>;

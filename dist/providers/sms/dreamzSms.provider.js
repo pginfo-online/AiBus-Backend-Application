@@ -58,7 +58,7 @@ class DreamzSmsProvider {
         }
         const message = this.formatMessage(otp, appHash);
         // If simulation enabled or running in test mode without live credentials
-        if (env_1.env.SMS_SIMULATE || (env_1.isTest && !process.env.LIVE_SMS_TEST)) {
+        if (env_1.env.NODE_ENV !== 'production' && (env_1.env.SMS_SIMULATE || (env_1.isTest && !process.env.LIVE_SMS_TEST))) {
             this.smsLogger.info({ to: this.maskPhone(cleanPhone), simulated: true }, 'Simulated SMS OTP delivery');
             return {
                 success: true,
@@ -66,6 +66,13 @@ class DreamzSmsProvider {
                 statusDesc: 'simulated_success',
                 simulated: true,
             };
+        }
+        if (!env_1.env.SMS_GATEWAY_MOBILE || !env_1.env.SMS_GATEWAY_PASSWORD || !env_1.env.SMS_GATEWAY_APIKEY) {
+            throw new errors_1.AppError({
+                code: 'SMS_NOT_CONFIGURED',
+                message: 'SMS delivery is unavailable',
+                statusCode: 503,
+            });
         }
         return this.cb.execute(async () => {
             try {
@@ -84,6 +91,7 @@ class DreamzSmsProvider {
                 const response = await axios_1.default.get(env_1.env.SMS_GATEWAY_URL, {
                     params,
                     timeout: 8000,
+                    maxRedirects: 0,
                     headers: {
                         'User-Agent': 'AiBus-Backend-Auth/1.0',
                     },

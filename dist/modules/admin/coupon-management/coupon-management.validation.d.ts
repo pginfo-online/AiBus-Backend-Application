@@ -15,8 +15,8 @@ export declare const listCouponsQuerySchema: z.ZodObject<{
         DISABLED: "DISABLED";
     }>>;
     sortBy: z.ZodDefault<z.ZodOptional<z.ZodEnum<{
-        createdAt: "createdAt";
         code: "code";
+        createdAt: "createdAt";
         usedCount: "usedCount";
         validUntil: "validUntil";
     }>>>;

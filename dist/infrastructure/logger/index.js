@@ -29,7 +29,6 @@ const loggerOptions = {
             'GDS_CLIENT_SECRET',
             'JWT_ACCESS_SECRET',
             'JWT_REFRESH_SECRET',
-            'PHONEPE_CLIENT_SECRET',
             'CLOUDINARY_API_SECRET',
             'creditCard',
             'cvv',
@@ -47,7 +46,7 @@ const loggerOptions = {
         err: pino_1.default.stdSerializers.err,
         req: (req) => ({
             method: req.method,
-            url: req.url,
+            url: req.url?.split('?')[0],
             requestId: req.id,
             remoteAddress: req.remoteAddress,
             userAgent: req.headers?.['user-agent'],

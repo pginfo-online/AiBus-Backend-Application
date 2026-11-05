@@ -42,7 +42,7 @@ export class CouponsController {
 
   public validateCoupon = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     try {
-      const userId = (req as any).user?.id || req.body.userId;
+      const userId = req.user?.sub;
       const result = await this.service.validateCoupon({
         ...req.body,
         userId,
