@@ -16,6 +16,7 @@ const logger_1 = require("../../infrastructure/logger");
 const client_1 = require("@prisma/client");
 const ledger_1 = require("../../infrastructure/ledger");
 const payments_1 = require("../../infrastructure/payments");
+const coupons_service_1 = require("../coupons/coupons.service");
 const paymentLogger = logger_1.logger.child({ module: 'payments-service' });
 exports.devSimulationStore = new Map();
 // ---------------------------------------------------------------------------
@@ -544,6 +545,16 @@ class PaymentsService {
         try {
             const confirmedBooking = await this.bookingsService.confirmBooking(payment.bookingId);
             const ticket = await this.ticketsService.getTicketByBookingId(payment.bookingId);
+            // Record coupon usage if a coupon was applied to this booking
+            const couponMeta = confirmedBooking.dropoffSnapshot?.couponMetadata;
+            if (couponMeta && couponMeta.id) {
+                try {
+                    await coupons_service_1.CouponsService.getInstance().recordCouponUsage(couponMeta.id, confirmedBooking.userId || payment.userId || '00000000-0000-0000-0000-000000000000', confirmedBooking.id, Number(couponMeta.discount || 0));
+                }
+                catch (cErr) {
+                    paymentLogger.warn({ cErr: cErr.message }, 'Failed to record coupon usage asynchronously');
+                }
+            }
             return {
                 status: 'SUCCESS',
                 payment: updatedPayment,

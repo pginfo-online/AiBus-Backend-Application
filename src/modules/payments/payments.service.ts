@@ -17,6 +17,7 @@ import { PaymentStatus, BookingStatus, HoldStatus } from '@prisma/client';
 import { CreatePaymentIntentInput, VerifyPaymentInput, SimulateWebhookInput } from './payments.validation';
 import { buildBookingPaymentLines, buildLedgerPostingData } from '../../infrastructure/ledger';
 import { PaymentOrchestrator, GatewayName, PaymentVerificationResult } from '../../infrastructure/payments';
+import { CouponsService } from '../coupons/coupons.service';
 
 const paymentLogger = logger.child({ module: 'payments-service' });
 
@@ -691,6 +692,22 @@ export class PaymentsService {
     try {
       const confirmedBooking = await this.bookingsService.confirmBooking(payment.bookingId);
       const ticket = await this.ticketsService.getTicketByBookingId(payment.bookingId);
+
+      // Record coupon usage if a coupon was applied to this booking
+      const couponMeta = (confirmedBooking.dropoffSnapshot as any)?.couponMetadata;
+      if (couponMeta && couponMeta.id) {
+        try {
+          await CouponsService.getInstance().recordCouponUsage(
+            couponMeta.id,
+            confirmedBooking.userId || payment.userId || '00000000-0000-0000-0000-000000000000',
+            confirmedBooking.id,
+            Number(couponMeta.discount || 0)
+          );
+        } catch (cErr: any) {
+          paymentLogger.warn({ cErr: cErr.message }, 'Failed to record coupon usage asynchronously');
+        }
+      }
+
       return {
         status: 'SUCCESS',
         payment: updatedPayment,

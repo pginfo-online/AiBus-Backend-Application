@@ -42,6 +42,7 @@ const errors_1 = require("../../shared/errors");
 const logger_1 = require("../../infrastructure/logger");
 const client_1 = require("@prisma/client");
 const commission_1 = require("../../infrastructure/commission");
+const coupons_service_1 = require("../coupons/coupons.service");
 class BookingsService {
     static instance;
     gdsAdapter;
@@ -140,10 +141,54 @@ class BookingsService {
                 return existingBookingWithHold;
             }
         }
-        // 2. Generate unique booking number
+        // 2. Authoritative Coupon Validation & Discount Calculation
+        let couponDiscount = 0;
+        let appliedCoupon = null;
+        let effectivePayableFare = Number(input.totalFare);
+        if (input.couponCode) {
+            const couponsService = coupons_service_1.CouponsService.getInstance();
+            const validation = await couponsService.validateCoupon({
+                code: input.couponCode,
+                totalFare: Number(input.totalFare),
+                operatorName: input.operatorName,
+                fromCityId: input.fromCityId,
+                toCityId: input.toCityId,
+                busId: input.busId,
+                userId: userId ?? undefined,
+            });
+            couponDiscount = validation.discountAmount;
+            effectivePayableFare = validation.finalPayableAmount;
+            appliedCoupon = validation.coupon;
+        }
+        // 3. Optional Customer Wallet Debit
+        let walletDeducted = 0;
+        if (input.useWallet && userId && effectivePayableFare > 0) {
+            const userRecord = await prisma.user.findUnique({
+                where: { id: userId },
+                select: { walletBalance: true },
+            });
+            const currentBal = Number(userRecord?.walletBalance || 0);
+            if (currentBal > 0) {
+                walletDeducted = Math.min(currentBal, effectivePayableFare);
+                effectivePayableFare = Math.round((effectivePayableFare - walletDeducted) * 100) / 100;
+            }
+        }
+        const totalDiscountAmount = Math.round((couponDiscount + walletDeducted) * 100) / 100;
+        // 4. Generate unique booking number
         const bookingNumber = this.generateBookingNumber();
-        // 3. Persist Booking, Seats, Passengers, and CommissionSnapshot in atomic transaction
+        // 5. Persist Booking, Seats, Passengers, and CommissionSnapshot in atomic transaction
         const booking = await prisma.$transaction(async (tx) => {
+            const dropoffSnapshotWithCoupon = {
+                ...(input.dropoffSnapshot || {}),
+                couponMetadata: appliedCoupon
+                    ? {
+                        id: appliedCoupon.id,
+                        code: appliedCoupon.code,
+                        discount: couponDiscount,
+                    }
+                    : null,
+                walletDeducted,
+            };
             const createdBooking = await tx.booking.create({
                 data: {
                     userId: userId ?? null,
@@ -168,15 +213,16 @@ class BookingsService {
                     dropoffTime: input.dropoffTime,
                     operatorName: input.operatorName,
                     busType: input.busType,
-                    totalFare: input.totalFare,
+                    totalFare: effectivePayableFare,
                     baseFare: input.baseFare,
                     serviceTax: input.serviceTax,
+                    discountAmount: totalDiscountAmount,
                     contactName: input.contactName,
                     contactEmail: input.contactEmail,
                     contactPhone: input.contactPhone,
                     cancellationPolicy: input.cancellationPolicy ?? null,
                     pickupSnapshot: input.pickupSnapshot ?? null,
-                    dropoffSnapshot: input.dropoffSnapshot ?? null,
+                    dropoffSnapshot: dropoffSnapshotWithCoupon,
                     seats: {
                         create: input.passengers.map((p) => ({
                             seatNo: p.seatNo,
@@ -242,6 +288,21 @@ class BookingsService {
     async createCheckoutSession(input, userId, explicitAgentId) {
         // 1. Create or retrieve existing booking for active hold
         const booking = await this.createBooking(input, userId, explicitAgentId);
+        // If total payable amount is 0 (100% discount or wallet covered), auto-confirm immediately
+        if (Number(booking.totalFare) <= 0) {
+            const confirmed = await this.confirmBooking(booking.id);
+            return {
+                booking: confirmed,
+                paymentIntent: {
+                    paymentId: `PAY-ZERO-${Date.now()}`,
+                    merchantTxnId: `TXN-ZERO-${booking.bookingNumber}`,
+                    amount: 0,
+                    currency: 'INR',
+                    gateway: 'WALLET_COUPON',
+                    status: 'SUCCESS',
+                },
+            };
+        }
         // 2. Generate payment intent via PaymentsService
         const { PaymentsService } = await Promise.resolve().then(() => __importStar(require('../payments/payments.service')));
         const paymentsService = PaymentsService.getInstance();

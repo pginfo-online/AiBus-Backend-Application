@@ -25,6 +25,7 @@ const cancellations_routes_1 = __importDefault(require("../modules/cancellations
 const tickets_routes_1 = __importDefault(require("../modules/tickets/tickets.routes"));
 const admin_routes_1 = __importDefault(require("../modules/admin/admin.routes"));
 const agents_routes_1 = __importDefault(require("../modules/agents/agents.routes"));
+const coupons_routes_1 = __importDefault(require("../modules/coupons/coupons.routes"));
 const pino_http_1 = require("pino-http");
 const logger_1 = require("../infrastructure/logger");
 const swagger_ui_express_1 = __importDefault(require("swagger-ui-express"));
@@ -108,7 +109,11 @@ function createApp() {
     app.use(`${apiPrefix}/tickets`, tickets_routes_1.default);
     app.use(`${apiPrefix}/admin`, admin_routes_1.default);
     app.use(`${apiPrefix}/agents`, agents_routes_1.default);
+    app.use(`${apiPrefix}/coupons`, coupons_routes_1.default);
+    app.use(`${apiPrefix}/offers`, coupons_routes_1.default);
     // Frontend aliases (/api/bus/* & /api/cities etc.)
+    app.use('/api/coupons', coupons_routes_1.default);
+    app.use('/api/offers', coupons_routes_1.default);
     app.use('/api/bus/cities', cities_routes_1.default);
     app.use('/api/cities', cities_routes_1.default);
     app.use('/api/bus/search', search_routes_1.default);
