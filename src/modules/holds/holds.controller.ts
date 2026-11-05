@@ -22,7 +22,7 @@ export class HoldsController {
   public getHold = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     try {
       const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
-      const hold = await this.holdsService.getHold(id);
+      const hold = await this.holdsService.getHold(id, req.user?.sub);
       if (!hold) {
         ApiResponse.error(res, 'Hold not found', 'NOT_FOUND', 404);
         return;
@@ -41,7 +41,7 @@ export class HoldsController {
         return;
       }
 
-      const status = await this.holdsService.checkHoldStatus(holdId);
+      const status = await this.holdsService.checkHoldStatus(String(holdId), req.user?.sub);
       ApiResponse.success(res, status, status.Message || 'Hold status retrieved');
     } catch (error) {
       next(error);

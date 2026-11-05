@@ -16,6 +16,5 @@ var __exportStar = (this && this.__exportStar) || function(m, exports) {
 Object.defineProperty(exports, "__esModule", { value: true });
 __exportStar(require("./IPaymentGateway"), exports);
 __exportStar(require("./adapters/RazorpayAdapter"), exports);
-__exportStar(require("./adapters/PhonePeAdapter"), exports);
 __exportStar(require("./PaymentOrchestrator"), exports);
 //# sourceMappingURL=index.js.map

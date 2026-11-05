@@ -33,19 +33,8 @@ export class PaymentsController {
 
   public verifyPayment = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     try {
-      const result = await this.paymentsService.verifyPayment(req.body);
+      const result = await this.paymentsService.verifyPayment(req.body, (req as any).user?.sub);
       ApiResponse.success(res, result, 'Payment verified and booking confirmed');
-    } catch (error) {
-      next(error);
-    }
-  };
-
-  public handleWebhook = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
-    try {
-      const rawBody = req.body.response;
-      const xVerify = req.headers['x-verify'] as string | undefined;
-      const result = await this.paymentsService.handleWebhook(rawBody, xVerify);
-      ApiResponse.success(res, result);
     } catch (error) {
       next(error);
     }
@@ -53,18 +42,9 @@ export class PaymentsController {
 
   public handleRazorpayWebhook = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     try {
-      const rawBody = (req as any).rawBody || req.body;
+      const rawBody = (req as any).rawBody;
       const result = await this.paymentsService.handleRazorpayWebhook(rawBody, req.headers as any);
       ApiResponse.success(res, result);
-    } catch (error) {
-      next(error);
-    }
-  };
-
-  public simulateWebhook = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
-    try {
-      const result = await this.paymentsService.simulateWebhook(req.body);
-      ApiResponse.success(res, result, 'Webhook simulated and processed successfully');
     } catch (error) {
       next(error);
     }
@@ -94,6 +74,8 @@ export class PaymentsController {
       const merchantTxnId = String(req.params.merchantTxnId || '');
       const redirectUrlParam = (req.query.redirectUrl as string) || undefined;
       const checkoutHtml = await this.paymentsService.generateCheckoutHtml(merchantTxnId, redirectUrlParam);
+      res.setHeader('Cache-Control', 'no-store');
+      res.setHeader('Referrer-Policy', 'no-referrer');
       res.setHeader('Content-Type', 'text/html; charset=utf-8');
       res.send(checkoutHtml);
     } catch (error) {

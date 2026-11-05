@@ -32,9 +32,6 @@ var __importStar = (this && this.__importStar) || (function () {
         return result;
     };
 })();
-var __importDefault = (this && this.__importDefault) || function (mod) {
-    return (mod && mod.__esModule) ? mod : { "default": mod };
-};
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.startBookingReconciliationWorker = startBookingReconciliationWorker;
 exports.startHoldExpiryWorker = startHoldExpiryWorker;
@@ -44,8 +41,6 @@ exports.startTicketGenerationWorker = startTicketGenerationWorker;
 exports.startLedgerReconciliationWorker = startLedgerReconciliationWorker;
 exports.scheduleDailyReconciliationJob = scheduleDailyReconciliationJob;
 exports.initializeWorkers = initializeWorkers;
-const axios_1 = __importDefault(require("axios"));
-const crypto_1 = __importDefault(require("crypto"));
 const queues_1 = require("../infrastructure/queues");
 const constants_1 = require("../shared/constants");
 const database_1 = require("../infrastructure/database");
@@ -54,56 +49,9 @@ const logger_1 = require("../infrastructure/logger");
 const client_1 = require("@prisma/client");
 const env_1 = require("../config/env");
 const ledger_management_service_1 = require("../modules/admin/ledger-management/ledger-management.service");
+const ledger_1 = require("../infrastructure/ledger");
 const payments_1 = require("../infrastructure/payments");
 const workerLogger = logger_1.logger.child({ module: 'background-workers' });
-// ---------------------------------------------------------------------------
-// PhonePe Refund API Helper
-// ---------------------------------------------------------------------------
-const PHONEPE_API_BASE = env_1.env.PHONEPE_ENVIRONMENT === 'PRODUCTION'
-    ? 'https://api.phonepe.com/apis/hermes'
-    : 'https://api-preprod.phonepe.com/apis/pg-sandbox';
-async function callPhonePeRefund(params) {
-    const merchantId = env_1.env.PHONEPE_MERCHANT_ID;
-    const saltKey = env_1.env.PHONEPE_CLIENT_SECRET;
-    const saltIndex = env_1.env.PHONEPE_CLIENT_VERSION || '1';
-    const payload = {
-        merchantId,
-        merchantUserId: 'AIBUS_SYSTEM',
-        originalTransactionId: params.originalMerchantTxnId,
-        merchantTransactionId: params.merchantRefundId,
-        amount: Math.round(params.amount * 100), // Convert to paise
-        callbackUrl: env_1.env.PHONEPE_CALLBACK_URL || '',
-    };
-    const base64Payload = Buffer.from(JSON.stringify(payload)).toString('base64');
-    const endpoint = '/v3/credit/backToSource';
-    const hash = crypto_1.default
-        .createHash('sha256')
-        .update(base64Payload + endpoint + saltKey)
-        .digest('hex');
-    const xVerify = `${hash}###${saltIndex}`;
-    try {
-        const response = await axios_1.default.post(`${PHONEPE_API_BASE}${endpoint}`, { request: base64Payload }, {
-            headers: {
-                'Content-Type': 'application/json',
-                'X-VERIFY': xVerify,
-                'X-MERCHANT-ID': merchantId,
-            },
-            timeout: 15000,
-        });
-        const data = response.data;
-        workerLogger.info({ merchantRefundId: params.merchantRefundId, code: data?.code }, 'PhonePe refund API response');
-        return {
-            success: data?.success === true || data?.code === 'REFUND_SUCCESS',
-            refundId: data?.data?.transactionId,
-            code: data?.code || 'UNKNOWN',
-        };
-    }
-    catch (err) {
-        workerLogger.error({ err: err.message, status: err.response?.status, merchantRefundId: params.merchantRefundId }, 'PhonePe refund API call failed');
-        // Don't throw — let the worker mark the refund as FAILED and retry
-        return { success: false, code: err.response?.data?.code || 'API_ERROR' };
-    }
-}
 /**
  * 1. Booking Reconciliation Worker
  * Resolves BOOKING_UNKNOWN states caused by network timeouts during BookSeats call
@@ -117,12 +65,16 @@ function startBookingReconciliationWorker() {
         const booking = await prisma.booking.findUnique({
             where: { id: bookingId },
         });
-        if (!booking || booking.status !== client_1.BookingStatus.BOOKING_UNKNOWN) {
+        if (!booking || (booking.status !== client_1.BookingStatus.BOOKING_UNKNOWN
+            && booking.status !== client_1.BookingStatus.BOOKING_REQUESTED
+            && booking.status !== client_1.BookingStatus.BOOKING_FAILED)) {
             workerLogger.info({ bookingId }, 'Booking is not in UNKNOWN status, skipping reconciliation');
             return;
         }
-        const statusResponse = await gdsAdapter.checkBookingStatus(providerHoldId);
-        if (statusResponse.Status === 1) {
+        const statusResponse = booking.status === client_1.BookingStatus.BOOKING_FAILED
+            ? { Status: -1, TicketNo: undefined, PNRNo: undefined }
+            : await gdsAdapter.checkBookingStatus(providerHoldId);
+        if (statusResponse.Status === 1 && statusResponse.TicketNo && statusResponse.PNRNo) {
             // Booking was confirmed at provider! Atomically update booking + create ticket
             await prisma.$transaction(async (tx) => {
                 await tx.booking.update({
@@ -175,36 +127,68 @@ function startBookingReconciliationWorker() {
             workerLogger.info({ bookingId }, 'Reconciliation SUCCESS: Booking marked CONFIRMED and ticket issued');
         }
         else if (statusResponse.Status === -1 || statusResponse.Status === -2) {
-            // Provider definitively failed — mark BOOKING_FAILED and trigger refund
-            await prisma.booking.update({
-                where: { id: bookingId },
-                data: { status: client_1.BookingStatus.BOOKING_FAILED },
-            });
-            // Queue refund for the payment
-            const payment = await prisma.payment.findFirst({
-                where: { bookingId, status: client_1.PaymentStatus.SUCCESS },
-            });
-            if (payment) {
-                const { addJob } = await Promise.resolve().then(() => __importStar(require('../infrastructure/queues')));
-                const refund = await prisma.refund.create({
+            const refund = await prisma.$transaction(async (tx) => {
+                const key = `booking-failure:${bookingId}`;
+                const transitioned = await tx.booking.updateMany({
+                    where: { id: bookingId, status: { in: [client_1.BookingStatus.BOOKING_UNKNOWN, client_1.BookingStatus.BOOKING_REQUESTED] } },
+                    data: { status: client_1.BookingStatus.BOOKING_FAILED, version: { increment: 1 } },
+                });
+                if (!transitioned.count) {
+                    return tx.refund.findUnique({ where: { idempotencyKey: key } });
+                }
+                const payment = await tx.payment.findFirst({ where: { bookingId, status: client_1.PaymentStatus.SUCCESS } });
+                if (!payment)
+                    return null;
+                const walletRefund = payment.gateway === 'WALLET' && Boolean(booking.agentId);
+                const refund = await tx.refund.create({
                     data: {
-                        bookingId,
-                        paymentId: payment.id,
-                        userId: booking.userId ?? null,
-                        amount: Number(booking.totalFare),
-                        status: client_1.RefundStatus.PENDING,
+                        bookingId, paymentId: payment.id, userId: booking.userId,
+                        amount: payment.amount, idempotencyKey: key,
+                        status: walletRefund ? client_1.RefundStatus.COMPLETED : client_1.RefundStatus.PENDING,
+                        destination: walletRefund ? 'WALLET' : 'ORIGINAL_PAYMENT_METHOD',
+                        completedAt: walletRefund ? new Date() : null,
                         reason: 'Booking failed at provider after reconciliation',
                     },
                 });
-                await addJob(constants_1.QueueName.REFUND_PROCESSING, 'process-refund', {
-                    refundId: refund.id,
-                    bookingId,
-                    amount: Number(booking.totalFare),
-                    gatewayPaymentId: payment.gatewayPaymentId,
-                    merchantTxnId: payment.merchantTxnId,
+                if (walletRefund && booking.agentId) {
+                    const agentId = booking.agentId;
+                    const snapshot = await tx.commissionSnapshot.findUnique({ where: { bookingId } });
+                    const wallet = await tx.agentWallet.findUniqueOrThrow({ where: { agentId } });
+                    const amount = Number(payment.amount);
+                    const commissionReversal = Number(snapshot?.commissionAmt ?? 0);
+                    const metadata = payment.metadata;
+                    const creditRepayment = Math.min(Number(wallet.creditUsed), metadata?.creditDebited ?? 0, amount);
+                    await tx.agentWallet.update({
+                        where: { agentId, version: wallet.version },
+                        data: {
+                            cashBalance: { increment: amount - creditRepayment },
+                            creditUsed: { decrement: creditRepayment },
+                            totalRefunds: { increment: amount },
+                            version: { increment: 1 },
+                        },
+                    });
+                    const lines = (0, ledger_1.buildRefundLines)({
+                        bookingId, cancellationId: refund.id, agentId,
+                        refundAmount: amount + commissionReversal, commissionReversal, idempotencyPrefix: key,
+                    });
+                    await tx.ledgerEntry.createMany({ data: (0, ledger_1.buildLedgerPostingData)({ agentId, bookingId, createdBy: 'SYSTEM', lines }) });
+                    if (snapshot) {
+                        await tx.commissionSnapshot.update({
+                            where: { bookingId }, data: { reversalAmt: commissionReversal, reversedAt: new Date() },
+                        });
+                    }
+                    await tx.payment.update({ where: { id: payment.id }, data: { status: client_1.PaymentStatus.REFUNDED } });
+                }
+                return refund;
+            });
+            if (refund && refund.status !== client_1.RefundStatus.COMPLETED) {
+                const { addJob } = await Promise.resolve().then(() => __importStar(require('../infrastructure/queues')));
+                const job = await addJob(constants_1.QueueName.REFUND_PROCESSING, 'process-refund', { refundId: refund.id }, {
+                    jobId: `refund-${refund.id}`, attempts: 8, backoff: { type: 'exponential', delay: 30_000 },
                 });
+                if (!job)
+                    throw new Error('Could not enqueue refund');
             }
-            workerLogger.warn({ bookingId }, 'Reconciliation: Provider confirmed booking failure; auto-refund triggered');
         }
         else {
             // Status 0 or unknown = still in progress at provider; retry via BullMQ exponential backoff
@@ -232,13 +216,13 @@ function startHoldExpiryWorker() {
 }
 /**
  * 3. Refund Processing Worker
- * Dispatches refunds to payment gateway (Razorpay / PhonePe) and updates database records
+ * Dispatches refunds to payment gateway (Razorpay) and updates database records
  */
 function startRefundWorker() {
     return (0, queues_1.createWorker)(constants_1.QueueName.REFUND_PROCESSING, async (job) => {
-        const { refundId, amount, gatewayPaymentId, merchantTxnId } = job.data;
+        const { refundId, gatewayPaymentId, merchantTxnId } = job.data;
         const prisma = (0, database_1.getPrismaClient)();
-        workerLogger.info({ refundId, amount }, 'Processing refund...');
+        workerLogger.info({ refundId }, 'Processing refund');
         const refund = await prisma.refund.findUnique({
             where: { id: refundId },
             include: { payment: true, booking: true },
@@ -258,15 +242,16 @@ function startRefundWorker() {
         });
         const originalTxnId = merchantTxnId || refund.payment?.merchantTxnId;
         const originalPaymentId = gatewayPaymentId || refund.payment?.gatewayPaymentId;
-        const targetGateway = refund.payment?.gateway || 'RAZORPAY';
-        if (originalTxnId || originalPaymentId) {
-            const merchantRefundId = `REF-${refundId.slice(0, 8)}-${Date.now()}`;
+        const targetGateway = refund.payment?.gateway;
+        if (targetGateway === 'RAZORPAY' && originalPaymentId) {
+            const merchantRefundId = refundId;
             const orchestrator = payments_1.PaymentOrchestrator.getInstance();
             const refundResult = await orchestrator.processRefund(targetGateway, {
                 merchantRefundId,
                 originalMerchantTxnId: originalTxnId || merchantRefundId,
-                gatewayPaymentId: originalPaymentId || undefined,
-                amount,
+                gatewayPaymentId: originalPaymentId,
+                gatewayRefundId: refund.gatewayRefundId ?? undefined,
+                amount: Number(refund.amount),
                 reason: 'AiBus booking cancellation/refund',
             });
             if (refundResult.success) {
@@ -297,13 +282,16 @@ function startRefundWorker() {
                         });
                     }
                 });
-                workerLogger.info({ refundId, amount, gateway: refundResult.gateway, gatewayRefundId: refundResult.gatewayRefundId }, 'Refund successfully processed via gateway');
+                workerLogger.info({ refundId, amount: Number(refund.amount), gateway: refundResult.gateway, gatewayRefundId: refundResult.gatewayRefundId }, 'Refund successfully processed via gateway');
             }
             else {
-                // Refund API failed — mark as FAILED; BullMQ will retry
-                await prisma.refund.update({
-                    where: { id: refundId },
-                    data: { status: client_1.RefundStatus.FAILED },
+                const pending = refundResult.code === 'REFUND_PENDING';
+                await prisma.refund.updateMany({
+                    where: { id: refundId, status: { not: client_1.RefundStatus.COMPLETED } },
+                    data: {
+                        status: pending ? client_1.RefundStatus.PROCESSING : client_1.RefundStatus.FAILED,
+                        gatewayRefundId: refundResult.gatewayRefundId,
+                    },
                 });
                 workerLogger.error({ refundId, gateway: targetGateway, code: refundResult.code, message: refundResult.message }, 'Gateway refund API returned failure — will retry');
                 throw new Error(`${targetGateway} refund failed with code: ${refundResult.code}`);
@@ -315,7 +303,7 @@ function startRefundWorker() {
                 where: { id: refundId },
                 data: { status: client_1.RefundStatus.FAILED },
             });
-            workerLogger.error({ refundId }, 'Cannot process refund: no original gateway transaction ID available — manual review required');
+            workerLogger.error({ refundId }, 'Cannot process refund automatically: original Razorpay payment required');
         }
     });
 }

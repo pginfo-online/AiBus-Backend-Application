@@ -1,11 +1,11 @@
 import { v4 as uuidv4 } from 'uuid';
-import { env, isDevelopment } from '../../config/env';
+import { env } from '../../config/env';
 import { GdsAdapter } from '../../providers/gds/gdsAdapter';
 import { getPrismaClient } from '../../infrastructure/database';
 import { acquireLock, releaseLock } from '../../infrastructure/redis';
 import { addJob } from '../../infrastructure/queues';
 import { RedisPrefix, QueueName } from '../../shared/constants';
-import { SeatUnavailableError, ProviderError } from '../../shared/errors';
+import { SeatUnavailableError, ProviderError, NotFoundError } from '../../shared/errors';
 import { logger } from '../../infrastructure/logger';
 import { HoldSeatsInput } from './holds.validation';
 import { HoldStatus } from '@prisma/client';
@@ -30,6 +30,9 @@ export class HoldsService {
     const prisma = getPrismaClient();
     const requestId = `hold-${uuidv4()}`;
     const acquiredLocks: string[] = [];
+    if (new Set(input.passengers.map((p) => p.seatNo)).size !== input.passengers.length) {
+      throw new SeatUnavailableError('Select each seat only once');
+    }
 
     this.holdsLogger.info(
       { busId: input.busId, journeyDate: input.journeyDate, seats: input.passengers.map((p) => p.seatNo) },
@@ -96,14 +99,23 @@ export class HoldsService {
       // -----------------------------------------------------------------------
       // Layer 2: Call upstream GDS provider HoldSeats
       // -----------------------------------------------------------------------
-      const gdsPassengers = input.passengers.map((p) => ({
-        SeatNo: p.seatNo,
-        SeatTypeId: p.seatTypeId,
-        Fare: p.fare,
-        Gender: p.gender,
-        Age: p.age,
-        Name: p.name,
-        IsAcSeat: p.isAcSeat,
+      const chart = await this.gdsAdapter.getSeatChart(input.busId, {
+        fromCityId: input.fromCityId, toCityId: input.toCityId, journeyDate: input.journeyDate,
+      });
+      const layout = new Map(chart.Layout.map((seat) => [seat.seat_no, seat]));
+      const passengers = input.passengers.map((passenger) => {
+        const seat = layout.get(passenger.seatNo);
+        if (!seat || ![1, passenger.gender === 'M' ? 2 : 3].includes(seat.seat_status)) {
+          throw new SeatUnavailableError(`Seat ${passenger.seatNo} is no longer available`);
+        }
+        return {
+          ...passenger, seatTypeId: seat.seat_type, fare: seat.total_fare,
+          baseFare: seat.base_fare, serviceTax: seat.service_tax,
+        };
+      });
+      const gdsPassengers = passengers.map((p) => ({
+        SeatNo: p.seatNo, SeatTypeId: p.seatTypeId, Fare: p.fare, Gender: p.gender,
+        Age: p.age, Name: p.name, IsAcSeat: p.isAcSeat,
       }));
 
       const gdsResponse = await this.gdsAdapter.holdSeats({
@@ -135,7 +147,8 @@ export class HoldsService {
       // -----------------------------------------------------------------------
       // Layer 3: Persist Hold record in database (upsert prevents unique constraint conflicts)
       // -----------------------------------------------------------------------
-      const expiresAt = new Date(Date.now() + env.SEAT_HOLD_TTL_SECONDS * 1000);
+      const ttlSeconds = Math.min(env.SEAT_HOLD_TTL_SECONDS, (gdsResponse.ExpiryMinutes ?? 10) * 60);
+      const expiresAt = new Date(Date.now() + ttlSeconds * 1000);
       const strHoldId = String(gdsResponse.HoldId);
 
       const holdRecord = await prisma.seatHold.upsert({
@@ -154,7 +167,7 @@ export class HoldsService {
           toCityId: input.toCityId,
           journeyDate: input.journeyDate,
           busId: input.busId,
-          seats: input.passengers as any,
+          seats: passengers,
           expiresAt,
         },
         update: {
@@ -164,7 +177,7 @@ export class HoldsService {
           toCityId: input.toCityId,
           journeyDate: input.journeyDate,
           busId: input.busId,
-          seats: input.passengers as any,
+          seats: passengers,
           expiresAt,
         },
       });
@@ -177,7 +190,7 @@ export class HoldsService {
           QueueName.HOLD_EXPIRY_CLEANUP,
           'expire-hold',
           { holdId: holdRecord.id, providerHoldId: strHoldId },
-          { delay: env.SEAT_HOLD_TTL_SECONDS * 1000 }
+          { delay: ttlSeconds * 1000 }
         );
       } catch (queueErr) {
         this.holdsLogger.warn({ queueErr }, 'Failed to enqueue hold expiry cleanup job');
@@ -193,9 +206,9 @@ export class HoldsService {
         holdId: strHoldId,
         providerHoldId: strHoldId,
         expiresAt,
-        ttlSeconds: env.SEAT_HOLD_TTL_SECONDS,
-        totalFare: gdsResponse.TotalFare || input.passengers.reduce((sum, p) => sum + p.fare, 0),
-        seats: input.passengers,
+        ttlSeconds,
+        totalFare: gdsResponse.TotalFare || passengers.reduce((sum, p) => sum + p.fare, 0),
+        seats: passengers,
       };
     } finally {
       // Release Layer 1 distributed advisory locks
@@ -209,25 +222,23 @@ export class HoldsService {
     }
   }
 
-  public async getHold(holdId: string) {
+  public async getHold(holdId: string, userId?: string) {
     const prisma = getPrismaClient();
-    return prisma.seatHold.findUnique({
-      where: { id: holdId },
-    });
+    const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(holdId);
+    if (!isUuid && !userId) throw new NotFoundError('Seat hold not found');
+    const hold = isUuid
+      ? await prisma.seatHold.findUnique({ where: { id: holdId } })
+      : await prisma.seatHold.findUnique({
+          where: { providerName_providerHoldId: { providerName: 'GDS', providerHoldId: holdId } },
+        });
+    if (!hold || (hold.userId && hold.userId !== userId) || (!hold.userId && !isUuid)) {
+      throw new NotFoundError('Seat hold not found');
+    }
+    return hold;
   }
 
-  public async checkHoldStatus(holdId: string) {
-    const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(holdId);
-    let providerHoldId = holdId;
-
-    if (isUuid) {
-      const prisma = getPrismaClient();
-      const hold = await prisma.seatHold.findUnique({ where: { id: holdId } });
-      if (hold?.providerHoldId) {
-        providerHoldId = hold.providerHoldId;
-      }
-    }
-
-    return this.gdsAdapter.checkBookingStatus(providerHoldId);
+  public async checkHoldStatus(holdId: string, userId?: string) {
+    const hold = await this.getHold(holdId, userId);
+    return this.gdsAdapter.checkBookingStatus(hold.providerHoldId);
   }
 }

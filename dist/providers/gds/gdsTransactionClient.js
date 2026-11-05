@@ -5,12 +5,12 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.GdsTransactionClient = void 0;
 exports.buildGdsHoldSeatsPayload = buildGdsHoldSeatsPayload;
+const gdsResponseHandling_1 = require("./gdsResponseHandling");
 const axios_1 = __importDefault(require("axios"));
 const env_1 = require("../../config/env");
 const logger_1 = require("../../infrastructure/logger");
 const gdsAuthClient_1 = require("./gdsAuthClient");
 const errors_1 = require("../../shared/errors");
-const gdsMockData_1 = require("./gdsMockData");
 function buildGdsHoldSeatsPayload(request) {
     const passengers = (request.Passengers || []).map((p) => ({
         Name: p.Name,
@@ -49,11 +49,14 @@ class GdsTransactionClient {
         this.client = axios_1.default.create({
             baseURL: env_1.env.GDS_TRANSACTION_BASE_URL,
             timeout: env_1.env.GDS_REQUEST_TIMEOUT_MS,
+            maxRedirects: 0,
+            maxContentLength: 16 * 1024 * 1024,
             headers: {
                 'Accept-Encoding': 'gzip, deflate',
                 'Content-Type': 'application/json',
             },
         });
+        (0, gdsResponseHandling_1.installGdsResponseHandling)(this.client);
         this.client.interceptors.request.use(async (config) => {
             const token = await this.authClient.getAccessToken();
             config.headers['access-token'] = token;
@@ -91,15 +94,7 @@ class GdsTransactionClient {
                 throw new errors_1.ProviderError('GDS', msg);
             }
             catch (err) {
-                const errorData = err.response?.data;
-                const gdsMsg = errorData?.Error?.Msg ||
-                    errorData?.Message ||
-                    errorData?.message ||
-                    errorData?.data?.Message ||
-                    (typeof errorData === 'string' ? errorData : null) ||
-                    err.message ||
-                    'Failed to hold seats with provider';
-                const providerError = errorData?.Error;
+                const providerError = err.response?.data?.Error;
                 this.txLogger.error({
                     err: err.message,
                     status: err.response?.status,
@@ -113,17 +108,11 @@ class GdsTransactionClient {
                     ...(providerError && {
                         providerError: {
                             code: providerError.Code,
-                            message: providerError.Msg,
                             traceId: providerError.TraceId,
                         },
                     }),
                 }, 'GDS HoldSeats failed');
-                if (env_1.isDevelopment || env_1.isTest) {
-                    const totalFare = request.Passengers?.reduce((sum, p) => sum + (p.Fare || 1050), 0) || 1050;
-                    this.txLogger.warn({ totalFare }, 'Falling back to simulated HoldSeats response in dev/test');
-                    return (0, gdsMockData_1.getMockHoldResponse)(totalFare);
-                }
-                throw new errors_1.ProviderError('GDS', gdsMsg);
+                throw err;
             }
         });
     }
@@ -138,8 +127,7 @@ class GdsTransactionClient {
                 const response = await this.client.post('/ota/BookSeats', payload);
                 const raw = response.data;
                 const data = raw?.data || raw;
-                this.txLogger.info({ response: data }, 'Mantis GDS BookSeats Response');
-                if (data && (data.TicketNo || data.PNRNo || data.HoldId)) {
+                if (data?.TicketNo && data?.PNRNo && (data.Status === undefined || data.Status === 1)) {
                     return {
                         HoldId: String(data.HoldId || holdId),
                         TicketNo: String(data.TicketNo || data.ticketNo || ''),
@@ -153,20 +141,8 @@ class GdsTransactionClient {
                 throw new errors_1.ProviderError('GDS', msg);
             }
             catch (err) {
-                const errorData = err.response?.data;
-                const gdsMsg = errorData?.Error?.Msg ||
-                    errorData?.Message ||
-                    errorData?.message ||
-                    errorData?.data?.Message ||
-                    (typeof errorData === 'string' ? errorData : null) ||
-                    err.message ||
-                    'Failed to book seats with provider';
-                this.txLogger.error({ err: err.message, status: err.response?.status, errorData, holdId }, 'GDS BookSeats failed');
-                if (env_1.isDevelopment || env_1.isTest) {
-                    this.txLogger.warn({ holdId }, 'Falling back to simulated BookSeats response in dev/test');
-                    return (0, gdsMockData_1.getMockBookResponse)(String(holdId), totalFare || 1050);
-                }
-                throw new errors_1.ProviderError('GDS', gdsMsg);
+                this.txLogger.error({ err: err.message, status: err.response?.status, holdId }, 'GDS BookSeats failed');
+                throw err;
             }
         });
     }
@@ -181,8 +157,11 @@ class GdsTransactionClient {
                 const response = await this.client.post('/ota/bookingstatusv2', payload);
                 const raw = response.data;
                 const data = raw?.data || raw;
-                this.txLogger.info({ response: data, holdId }, 'Mantis GDS bookingstatusv2 Response');
-                const status = typeof data?.Status === 'number' ? data.Status : (data?.TicketNo ? 1 : -1);
+                this.txLogger.info({ status: data?.Status }, 'Mantis GDS bookingstatusv2 response');
+                const status = data?.Status;
+                if (![1, 0, -1, -2].includes(status) || (status === 1 && (!data.TicketNo || !data.PNRNo))) {
+                    throw new errors_1.ProviderError('GDS', 'Invalid booking status response');
+                }
                 return {
                     HoldId: String(data?.HoldId || holdId),
                     Status: status,
@@ -193,15 +172,7 @@ class GdsTransactionClient {
             }
             catch (err) {
                 this.txLogger.error({ err: err.message, holdId }, 'GDS bookingstatusv2 failed');
-                const errorData = err.response?.data;
-                const gdsMsg = errorData?.Error?.Msg ||
-                    errorData?.Message ||
-                    errorData?.message ||
-                    errorData?.data?.Message ||
-                    (typeof errorData === 'string' ? errorData : null) ||
-                    err.message ||
-                    'Failed to check booking status with provider';
-                throw new errors_1.ProviderError('GDS', gdsMsg);
+                throw err;
             }
         });
     }
@@ -221,9 +192,8 @@ class GdsTransactionClient {
                 });
                 const raw = response.data;
                 const data = raw?.data || raw;
-                this.txLogger.info({ response: data }, 'Mantis GDS IsCancellable Response');
                 return {
-                    IsCancellable: Boolean(data?.IsCancellable ?? data?.isCancellable ?? true),
+                    IsCancellable: data?.IsCancellable === true,
                     ChargePct: Number(data?.ChargePct ?? data?.chargePct ?? data?.RefundPercentage ?? 0),
                     ChargeAmt: Number(data?.ChargeAmt ?? data?.chargeAmt ?? data?.CancellationCharge ?? 0),
                     TotalFare: Number(data?.TotalFare ?? data?.totalFare ?? data?.CancSeatsTotalFare ?? 0),
@@ -234,19 +204,7 @@ class GdsTransactionClient {
             }
             catch (err) {
                 this.txLogger.error({ err: err.message, ticketNo, seatNos, pnrNo }, 'GDS IsCancellable failed');
-                if (env_1.isDevelopment || env_1.isTest) {
-                    this.txLogger.warn({ ticketNo }, 'Falling back to simulated IsCancellable response in dev/test');
-                    return (0, gdsMockData_1.getMockIsCancellable)(ticketNo);
-                }
-                const errorData = err.response?.data;
-                const gdsMsg = errorData?.Error?.Msg ||
-                    errorData?.Message ||
-                    errorData?.message ||
-                    errorData?.data?.Message ||
-                    (typeof errorData === 'string' ? errorData : null) ||
-                    err.message ||
-                    'Failed to check cancellability with provider';
-                throw new errors_1.ProviderError('GDS', gdsMsg);
+                throw err;
             }
         });
     }
@@ -264,7 +222,10 @@ class GdsTransactionClient {
                 const response = await this.client.post('/ota/CancelSeats', payload);
                 const raw = response.data;
                 const data = raw?.data || raw;
-                this.txLogger.info({ response: data }, 'Mantis GDS CancelSeats Response');
+                if (raw?.success !== true || typeof data?.RefundAmount !== 'number'
+                    || !Number.isFinite(data.RefundAmount) || data.RefundAmount < 0) {
+                    throw new errors_1.ProviderError('GDS', 'Invalid cancellation response');
+                }
                 return {
                     Status: data?.Status ?? 1,
                     NewHoldId: data?.NewHoldId ? String(data.NewHoldId) : undefined,
@@ -281,19 +242,7 @@ class GdsTransactionClient {
             }
             catch (err) {
                 this.txLogger.error({ err: err.message, request }, 'GDS CancelSeats failed');
-                if (env_1.isDevelopment || env_1.isTest) {
-                    this.txLogger.warn('Falling back to simulated CancelSeats response in dev/test');
-                    return (0, gdsMockData_1.getMockCancelResponse)(850, 200);
-                }
-                const errorData = err.response?.data;
-                const gdsMsg = errorData?.Error?.Msg ||
-                    errorData?.Message ||
-                    errorData?.message ||
-                    errorData?.data?.Message ||
-                    (typeof errorData === 'string' ? errorData : null) ||
-                    err.message ||
-                    'Failed to cancel seats with provider';
-                throw new errors_1.ProviderError('GDS', gdsMsg);
+                throw err;
             }
         });
     }
@@ -306,40 +255,26 @@ class GdsTransactionClient {
                 });
                 const raw = response.data;
                 const data = raw?.data || raw;
-                this.txLogger.info({ response: data }, 'Mantis GDS BookingDetails Response');
                 return data;
             }
             catch (err) {
                 this.txLogger.error({ err: err.message, pnr, ticketNo }, 'GDS BookingDetails failed');
-                if (env_1.isDevelopment || env_1.isTest) {
-                    return (0, gdsMockData_1.getMockBookingDetails)(pnr, ticketNo);
-                }
-                const errorData = err.response?.data;
-                const gdsMsg = errorData?.Error?.Msg ||
-                    errorData?.Message ||
-                    errorData?.message ||
-                    errorData?.data?.Message ||
-                    (typeof errorData === 'string' ? errorData : null) ||
-                    err.message ||
-                    'Failed to get booking details from provider';
-                throw new errors_1.ProviderError('GDS', gdsMsg);
+                throw err;
             }
         });
     }
     async getBalance() {
-        if (env_1.env.GDS_CLIENT_SECRET.includes('sandbox') || env_1.env.GDS_CLIENT_SECRET.includes('test') || env_1.isTest) {
-            return (0, gdsMockData_1.getMockBalance)();
-        }
         return this.circuitBreaker.execute(async () => {
             try {
                 const response = await this.client.get('/ota/balance');
-                return response.data;
+                const data = response.data?.data;
+                if (typeof data?.Balance !== 'number' || !Number.isFinite(data.Balance)) {
+                    throw new errors_1.ProviderError('GDS', 'Invalid balance response');
+                }
+                return { Balance: data.Balance, Currency: 'INR' };
             }
             catch (err) {
                 this.txLogger.error({ err: err.message }, 'GDS balance call failed');
-                if (env_1.isDevelopment || env_1.isTest) {
-                    return (0, gdsMockData_1.getMockBalance)();
-                }
                 throw err;
             }
         });

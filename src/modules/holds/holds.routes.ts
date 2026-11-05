@@ -10,7 +10,7 @@ const controller = new HoldsController();
 holdsRouter.post('/', optionalAuth, validate({ body: holdSeatsSchema }), controller.holdSeats);
 holdsRouter.post('/status', optionalAuth, controller.checkHoldStatus);
 holdsRouter.get('/:id/status', optionalAuth, controller.checkHoldStatus);
-holdsRouter.get('/:id', controller.getHold);
+holdsRouter.get('/:id', optionalAuth, controller.getHold);
 
 export { holdsRouter };
 export default holdsRouter;

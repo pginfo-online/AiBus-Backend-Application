@@ -32,19 +32,8 @@ class PaymentsController {
     };
     verifyPayment = async (req, res, next) => {
         try {
-            const result = await this.paymentsService.verifyPayment(req.body);
+            const result = await this.paymentsService.verifyPayment(req.body, req.user?.sub);
             response_1.ApiResponse.success(res, result, 'Payment verified and booking confirmed');
-        }
-        catch (error) {
-            next(error);
-        }
-    };
-    handleWebhook = async (req, res, next) => {
-        try {
-            const rawBody = req.body.response;
-            const xVerify = req.headers['x-verify'];
-            const result = await this.paymentsService.handleWebhook(rawBody, xVerify);
-            response_1.ApiResponse.success(res, result);
         }
         catch (error) {
             next(error);
@@ -52,18 +41,9 @@ class PaymentsController {
     };
     handleRazorpayWebhook = async (req, res, next) => {
         try {
-            const rawBody = req.rawBody || req.body;
+            const rawBody = req.rawBody;
             const result = await this.paymentsService.handleRazorpayWebhook(rawBody, req.headers);
             response_1.ApiResponse.success(res, result);
-        }
-        catch (error) {
-            next(error);
-        }
-    };
-    simulateWebhook = async (req, res, next) => {
-        try {
-            const result = await this.paymentsService.simulateWebhook(req.body);
-            response_1.ApiResponse.success(res, result, 'Webhook simulated and processed successfully');
         }
         catch (error) {
             next(error);
@@ -91,6 +71,8 @@ class PaymentsController {
             const merchantTxnId = String(req.params.merchantTxnId || '');
             const redirectUrlParam = req.query.redirectUrl || undefined;
             const checkoutHtml = await this.paymentsService.generateCheckoutHtml(merchantTxnId, redirectUrlParam);
+            res.setHeader('Cache-Control', 'no-store');
+            res.setHeader('Referrer-Policy', 'no-referrer');
             res.setHeader('Content-Type', 'text/html; charset=utf-8');
             res.send(checkoutHtml);
         }

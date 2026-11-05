@@ -33,7 +33,7 @@ export const createBookingSchema = z.object({
 });
 
 export const createCheckoutSessionSchema = createBookingSchema.extend({
-  gateway: z.enum(['RAZORPAY', 'PHONEPE', 'AUTO']).default('RAZORPAY').optional(),
+  gateway: z.enum(['RAZORPAY', 'AUTO']).default('RAZORPAY').optional(),
   paymentMode: z.string().optional(),
   redirectUrl: z.string().optional(),
 });

@@ -59,19 +59,17 @@ services:
         value: 15000
       - key: GDS_CONNECT_TIMEOUT_MS
         value: 5000
-      - key: PHONEPE_MERCHANT_ID
+      - key: RAZORPAY_KEY_ID
         sync: false
-      - key: PHONEPE_CLIENT_ID
+      - key: RAZORPAY_KEY_SECRET
         sync: false
-      - key: PHONEPE_CLIENT_SECRET
+      - key: RAZORPAY_WEBHOOK_SECRET
         sync: false
-      - key: PHONEPE_CLIENT_VERSION
-        value: "1"
-      - key: PHONEPE_ENVIRONMENT
-        value: SANDBOX
-      - key: PHONEPE_CALLBACK_URL
+      - key: SMS_GATEWAY_MOBILE
         sync: false
-      - key: PHONEPE_REDIRECT_URL
+      - key: SMS_GATEWAY_PASSWORD
+        sync: false
+      - key: SMS_GATEWAY_APIKEY
         sync: false
       - key: RATE_LIMIT_WINDOW_MS
         value: 60000

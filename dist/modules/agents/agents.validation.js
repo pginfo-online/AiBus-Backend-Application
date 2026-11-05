@@ -76,7 +76,7 @@ exports.updateStaffRoleSchema = zod_1.z.object({
 // ---------------------------------------------------------------------------
 exports.initiateTopupSchema = zod_1.z.object({
     amount: zod_1.z.number().min(100).max(500000), // INR: min 100, max 5 lakh
-    gateway: zod_1.z.enum(['RAZORPAY', 'PHONEPE', 'AUTO']).default('AUTO').optional(),
+    gateway: zod_1.z.enum(['RAZORPAY', 'AUTO']).default('AUTO').optional(),
     redirectUrl: zod_1.z.string().url().optional(),
     idempotencyKey: zod_1.z.string().uuid().optional(),
 });

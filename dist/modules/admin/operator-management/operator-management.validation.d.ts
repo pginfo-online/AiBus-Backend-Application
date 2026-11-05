@@ -13,8 +13,8 @@ export declare const listOperatorsQuerySchema: z.ZodObject<{
     state: z.ZodOptional<z.ZodString>;
     sortBy: z.ZodDefault<z.ZodOptional<z.ZodEnum<{
         name: "name";
-        createdAt: "createdAt";
         code: "code";
+        createdAt: "createdAt";
         totalBookings: "totalBookings";
         totalRevenue: "totalRevenue";
     }>>>;

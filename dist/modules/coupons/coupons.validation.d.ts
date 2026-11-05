@@ -16,12 +16,13 @@ export declare const validateCouponSchema: z.ZodObject<{
     fromCityId: z.ZodOptional<z.ZodCoercedNumber<unknown>>;
     toCityId: z.ZodOptional<z.ZodCoercedNumber<unknown>>;
     busId: z.ZodOptional<z.ZodCoercedNumber<unknown>>;
-    userId: z.ZodOptional<z.ZodString>;
 }, z.core.$strip>;
 export declare const couponCodeParamSchema: z.ZodObject<{
     code: z.ZodString;
 }, z.core.$strip>;
 export type ListCouponsQuery = z.infer<typeof listCouponsQuerySchema>;
-export type ValidateCouponInput = z.infer<typeof validateCouponSchema>;
+export type ValidateCouponInput = z.infer<typeof validateCouponSchema> & {
+    userId?: string;
+};
 export type CouponCodeParam = z.infer<typeof couponCodeParamSchema>;
 //# sourceMappingURL=coupons.validation.d.ts.map

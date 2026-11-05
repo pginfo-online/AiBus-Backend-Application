@@ -1,6 +1,4 @@
 import bcrypt from 'bcryptjs';
-import crypto from 'crypto';
-import axios from 'axios';
 import { v4 as uuidv4 } from 'uuid';
 import { getPrismaClient } from '../../infrastructure/database';
 import { logger } from '../../infrastructure/logger';
@@ -35,40 +33,6 @@ import { AuthService } from '../auth/auth.service';
 const agentLogger = logger.child({ module: 'agents-service' });
 
 // ---------------------------------------------------------------------------
-// PhonePe helpers (reuse pattern from PaymentsService)
-// ---------------------------------------------------------------------------
-const PHONEPE_CHECKOUT_BASE =
-  env.PHONEPE_ENVIRONMENT === 'PRODUCTION'
-    ? 'https://api.phonepe.com/apis/pg'
-    : 'https://api-preprod.phonepe.com/apis/pg-sandbox';
-
-const PHONEPE_OAUTH_URL =
-  env.PHONEPE_ENVIRONMENT === 'PRODUCTION'
-    ? 'https://api.phonepe.com/apis/identity-manager/v1/oauth/token'
-    : 'https://api-preprod.phonepe.com/apis/pg-sandbox/v1/oauth/token';
-
-let _ppTokenCache: { token: string; expiresAt: number } | null = null;
-
-async function getPhonePeToken(): Promise<string> {
-  if (_ppTokenCache && _ppTokenCache.expiresAt > Date.now() + 60000) {
-    return _ppTokenCache.token;
-  }
-  if (isDevelopment || isTest) return `MOCK-OAUTH-${Date.now()}`;
-
-  const params = new URLSearchParams({
-    client_id: env.PHONEPE_CLIENT_ID || '',
-    client_secret: env.PHONEPE_CLIENT_SECRET || '',
-    client_version: env.PHONEPE_CLIENT_VERSION || '1',
-    grant_type: 'client_credentials',
-  });
-  const res = await axios.post(PHONEPE_OAUTH_URL, params.toString(), {
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    timeout: 10000,
-  });
-  const expiresIn = Number(res.data.expires_in || 3600);
-  _ppTokenCache = { token: res.data.access_token, expiresAt: Date.now() + expiresIn * 1000 };
-  return _ppTokenCache.token;
-}
 
 // ---------------------------------------------------------------------------
 // AgentsService
@@ -485,7 +449,7 @@ export class AgentsService {
   }
 
   // --------------------------------------------------------------------------
-  // 7. Wallet Top-up Initiation (PhonePe)
+  // 7. Wallet Top-up Initiation
   // --------------------------------------------------------------------------
   public async initiateTopup(agentId: string, input: InitiateTopupInput) {
     const prisma = getPrismaClient();
@@ -498,13 +462,18 @@ export class AgentsService {
     // Idempotency check
     if (input.idempotencyKey) {
       const existing = await prisma.walletTopup.findUnique({ where: { idempotencyKey: input.idempotencyKey } });
-      if (existing) return { topup: existing, isIdempotent: true };
+      if (existing) {
+        if (existing.agentId !== agentId || Number(existing.amount) !== input.amount) {
+          throw new ConflictError('Top-up idempotency key already used');
+        }
+        return { topup: existing, isIdempotent: true };
+      }
     }
 
-    const redirectUrl = input.redirectUrl || env.PHONEPE_REDIRECT_URL || 'http://localhost:5173/wallet';
+    const redirectUrl = input.redirectUrl;
 
     const orchestrator = PaymentOrchestrator.getInstance();
-    const intentResult = await orchestrator.createPaymentIntentWithFallback(
+    const intentResult = await orchestrator.createPaymentIntent(
       {
         bookingId: agentId,
         bookingNumber: `TOPUP-${agentId.slice(0, 8).toUpperCase()}`,
@@ -550,37 +519,42 @@ export class AgentsService {
   // --------------------------------------------------------------------------
   // 8. Wallet Top-up Confirmation (called from payment webhook)
   // --------------------------------------------------------------------------
-  public async confirmTopup(merchantTxnId: string, gatewayPaymentId?: string) {
+  public async confirmTopup(merchantTxnId: string, gatewayPaymentId: string, agentId: string) {
     const prisma = getPrismaClient();
 
     const topup = await prisma.walletTopup.findUnique({ where: { merchantTxnId } });
-    if (!topup) throw new NotFoundError(`Top-up not found: ${merchantTxnId}`);
+    if (!topup || topup.agentId !== agentId || topup.gateway !== 'RAZORPAY') {
+      throw new NotFoundError('Top-up not found');
+    }
     if (topup.status === TopupStatus.COMPLETED) {
       agentLogger.info({ merchantTxnId }, 'Top-up already confirmed (idempotent)');
       return topup;
     }
 
     const amount = Number(topup.amount);
+    const verified = await PaymentOrchestrator.getInstance().verifyPayment('RAZORPAY', {
+      merchantTxnId, gatewayOrderId: topup.gatewayOrderId ?? undefined, gatewayPaymentId,
+    });
+    if (!verified.success || verified.amount !== amount || !verified.gatewayPaymentId) {
+      throw new ValidationError('Top-up payment has not been captured for this order and amount');
+    }
     const idempotencyPrefix = `topup:${topup.id}`;
 
     await prisma.$transaction(async (tx) => {
       // Mark topup completed
-      await tx.walletTopup.update({
-        where: { id: topup.id },
+      const claim = await tx.walletTopup.updateMany({
+        where: { id: topup.id, status: { in: [TopupStatus.INITIATED, TopupStatus.PAYMENT_PENDING] } },
         data: {
           status: TopupStatus.COMPLETED,
-          gatewayPaymentId: gatewayPaymentId ?? null,
+          gatewayPaymentId: verified.gatewayPaymentId,
           webhookVerified: true,
           completedAt: new Date(),
         },
       });
 
-      // Credit wallet — optimistic lock on version
-      const wallet = await tx.agentWallet.findUnique({ where: { agentId: topup.agentId } });
-      if (!wallet) throw new Error(`AgentWallet missing for agent ${topup.agentId}`);
-
-      await tx.agentWallet.updateMany({
-        where: { agentId: topup.agentId, version: wallet.version },
+      if (!claim.count) return;
+      await tx.agentWallet.update({
+        where: { agentId: topup.agentId },
         data: {
           cashBalance: { increment: amount },
           totalTopups: { increment: amount },

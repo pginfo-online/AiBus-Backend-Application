@@ -34,7 +34,7 @@ exports.createBookingSchema = zod_1.z.object({
     useWallet: zod_1.z.boolean().optional().default(false),
 });
 exports.createCheckoutSessionSchema = exports.createBookingSchema.extend({
-    gateway: zod_1.z.enum(['RAZORPAY', 'PHONEPE', 'AUTO']).default('RAZORPAY').optional(),
+    gateway: zod_1.z.enum(['RAZORPAY', 'AUTO']).default('RAZORPAY').optional(),
     paymentMode: zod_1.z.string().optional(),
     redirectUrl: zod_1.z.string().optional(),
 });

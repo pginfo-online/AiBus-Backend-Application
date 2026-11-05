@@ -1,3 +1,6 @@
+import { BookingsService } from '../bookings/bookings.service';
+import { getPrismaClient } from '../../infrastructure/database';
+import { NotFoundError } from '../../shared/errors';
 import { Request, Response, NextFunction } from 'express';
 import { TicketsService } from './tickets.service';
 import { ApiResponse } from '../../shared/utils/response';
@@ -12,6 +15,7 @@ export class TicketsController {
   public getTicketByBookingId = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     try {
       const bookingId = Array.isArray(req.params.bookingId) ? req.params.bookingId[0] : req.params.bookingId;
+      await BookingsService.getInstance().getBooking(bookingId, req.user?.sub);
       const forceRefresh = req.query.refresh === 'true' || req.query.forceRefresh === 'true';
       const ticket = await this.ticketsService.getTicketByBookingId(bookingId, forceRefresh);
       ApiResponse.success(res, ticket);
@@ -23,6 +27,11 @@ export class TicketsController {
   public getTicketByTicketNumber = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     try {
       const ticketNumber = Array.isArray(req.params.ticketNumber) ? req.params.ticketNumber[0] : req.params.ticketNumber;
+      const owner = await getPrismaClient().booking.findFirst({
+        where: { userId: req.user!.sub, OR: [{ providerTicketNo: ticketNumber }, { ticket: { ticketNumber } }] },
+        select: { id: true },
+      });
+      if (!owner) throw new NotFoundError('Ticket not found');
       const ticket = await this.ticketsService.getTicketByTicketNumber(ticketNumber);
       ApiResponse.success(res, ticket);
     } catch (error) {
@@ -40,7 +49,7 @@ export class TicketsController {
         return;
       }
 
-      const result = await this.ticketsService.getGdsBookingDetails(pnr, ticketNo);
+      const result = await this.ticketsService.getGdsBookingDetails(pnr, ticketNo, req.user!.sub);
       ApiResponse.success(res, result, 'Provider booking details retrieved successfully');
     } catch (error) {
       next(error);
@@ -51,6 +60,7 @@ export class TicketsController {
     try {
       const rawId = req.params.bookingId || req.params.id;
       const identifier = Array.isArray(rawId) ? rawId[0] : String(rawId || '');
+      await BookingsService.getInstance().getBooking(identifier, req.user?.sub);
       const { buffer, fileName } = await this.ticketsService.generateTicketPdfBuffer(identifier);
 
       res.setHeader('Content-Type', 'application/pdf');

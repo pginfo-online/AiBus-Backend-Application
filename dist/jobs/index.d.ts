@@ -10,7 +10,7 @@ export declare function startBookingReconciliationWorker(): import("bullmq").Wor
 export declare function startHoldExpiryWorker(): import("bullmq").Worker<unknown, any, string, import("bullmq").RedisQueueBackend, import("bullmq").JobProgress, import("bullmq").ConnectionOptions>;
 /**
  * 3. Refund Processing Worker
- * Dispatches refunds to payment gateway (Razorpay / PhonePe) and updates database records
+ * Dispatches refunds to payment gateway (Razorpay) and updates database records
  */
 export declare function startRefundWorker(): import("bullmq").Worker<unknown, any, string, import("bullmq").RedisQueueBackend, import("bullmq").JobProgress, import("bullmq").ConnectionOptions>;
 /**

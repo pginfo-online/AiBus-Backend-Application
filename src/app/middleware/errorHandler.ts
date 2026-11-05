@@ -1,3 +1,4 @@
+import axios from 'axios';
 import { Request, Response, NextFunction } from 'express';
 import { AppError } from '../../shared/errors';
 import { logger } from '../../infrastructure/logger';
@@ -46,6 +47,15 @@ export function errorHandler(
           : {}),
         requestId,
       },
+    });
+    return;
+  }
+
+  if (axios.isAxiosError(err)) {
+    logger.error({ requestId, code: err.code, upstreamStatus: err.response?.status }, 'Upstream HTTP call failed');
+    res.status(502).json({
+      success: false,
+      error: { code: 'UPSTREAM_ERROR', message: 'Upstream service request failed', requestId },
     });
     return;
   }

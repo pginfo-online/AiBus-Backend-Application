@@ -218,7 +218,11 @@ class AgentsController {
         try {
             const merchantTxnId = req.params.merchantTxnId || req.body.merchantTxnId;
             const gatewayPaymentId = req.body.gatewayPaymentId || req.body.transactionId;
-            const result = await this.agentsService.confirmTopup(merchantTxnId, gatewayPaymentId);
+            if (typeof merchantTxnId !== 'string' || typeof gatewayPaymentId !== 'string') {
+                res.status(400).json({ success: false, message: 'Transaction and payment IDs are required' });
+                return;
+            }
+            const result = await this.agentsService.confirmTopup(merchantTxnId, gatewayPaymentId, req.agentId);
             res.json({
                 success: true,
                 message: 'Top-up confirmed and credited to wallet',

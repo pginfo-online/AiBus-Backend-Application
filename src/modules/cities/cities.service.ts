@@ -3,11 +3,14 @@ import { getPrismaClient } from '../../infrastructure/database';
 import { getRedisClient } from '../../infrastructure/redis';
 import { RedisPrefix } from '../../shared/constants';
 import { logger } from '../../infrastructure/logger';
-import { MOCK_CITIES } from '../../providers/gds/gdsMockData';
-import { GdsCity } from '../../providers/types';
+import { ProviderError } from '../../shared/errors';
+
+type CityResult = { id: string; providerCityId: number; name: string; City: string; CityId: number; State?: string };
 
 export class CitiesService {
   private static instance: CitiesService;
+  private cityCache?: { rows: CityResult[]; expiresAt: number };
+  private loadingCities?: Promise<CityResult[]>;
   private gdsAdapter: GdsAdapter;
   private citiesLogger = logger.child({ module: 'cities-service' });
 
@@ -22,89 +25,56 @@ export class CitiesService {
     return CitiesService.instance;
   }
 
-  public async getCities(query?: string, limit?: number, popular?: boolean) {
-    const cacheKey = `${RedisPrefix.CACHE_CITIES}gds`;
-    let cities: Array<{ id: string; providerCityId: number; name: string; City: string; CityId: number; State?: string }> = [];
-
-    // 1. Try reading from Redis cache
+  private async loadCities(): Promise<CityResult[]> {
+    const cacheKey = `${RedisPrefix.CACHE_CITIES}gds:v2`;
+    const redis = getRedisClient();
     try {
-      const redis = getRedisClient();
       const cached = await redis.get(cacheKey);
       if (cached) {
-        const parsed = JSON.parse(cached);
-        if (Array.isArray(parsed) && parsed.length > 0) {
-          cities = parsed;
-        }
+        const rows = JSON.parse(cached);
+        if (Array.isArray(rows) && rows.length) return rows;
       }
     } catch (err) {
-      this.citiesLogger.warn({ err }, 'Redis error reading cities cache');
+      this.citiesLogger.warn({ err }, 'Redis city cache read failed');
     }
 
-    // 2. If not cached, fetch directly from live GDS provider (/ota/CityList)
-    if (!cities || cities.length === 0) {
+    try {
+      const cities = await this.gdsAdapter.getCities();
+      const seen = new Set<string>();
+      const rows = cities.flatMap(({ CityId, CityName, State }) => {
+        const key = `${CityId}:${CityName.toLowerCase()}`;
+        if (seen.has(key)) return [];
+        seen.add(key);
+        return [{ id: String(CityId), providerCityId: CityId, name: CityName, City: CityName, CityId, State }];
+      });
       try {
-        const gdsCities = await this.gdsAdapter.getCities();
-        if (Array.isArray(gdsCities) && gdsCities.length > 0) {
-          cities = gdsCities.map((c) => ({
-            id: String(c.CityId),
-            providerCityId: c.CityId,
-            name: c.CityName,
-            City: c.CityName,
-            CityId: c.CityId,
-            State: c.State || '',
-          }));
-
-          // Cache for 24 hours in Redis as per Mantis API guidelines
-          try {
-            const redis = getRedisClient();
-            await redis.set(cacheKey, JSON.stringify(cities), 'EX', 24 * 60 * 60);
-          } catch (cacheErr) {
-            this.citiesLogger.warn({ cacheErr }, 'Failed to cache cities in Redis');
-          }
-        }
-      } catch (gdsErr: any) {
-        this.citiesLogger.error({ gdsErr: gdsErr.message }, 'Live GDS provider failed to return cities, checking DB/fallback');
-        try {
-          const prisma = getPrismaClient();
-          const dbCities = await prisma.city.findMany({ where: { active: true } });
-          if (dbCities.length > 0) {
-            cities = dbCities.map((c) => ({
-              id: String(c.providerCityId || c.id),
-              providerCityId: c.providerCityId ?? 0,
-              name: c.name,
-              City: c.name,
-              CityId: c.providerCityId ?? 0,
-              State: c.state || '',
-            }));
-          }
-        } catch (dbErr) {
-          this.citiesLogger.warn({ dbErr }, 'DB fallback failed for cities');
-        }
-
-        if (!cities || cities.length === 0) {
-          cities = MOCK_CITIES.map((c) => ({
-            id: String(c.CityId),
-            providerCityId: c.CityId,
-            name: c.CityName,
-            City: c.CityName,
-            CityId: c.CityId,
-            State: c.State || '',
-          }));
-        }
+        await redis.set(cacheKey, JSON.stringify(rows), 'EX', 86400);
+      } catch (err) {
+        this.citiesLogger.warn({ err }, 'Redis city cache write failed');
       }
+      return rows;
+    } catch {
+      if (this.cityCache?.rows.length) return this.cityCache.rows;
+      const rows = await getPrismaClient().city.findMany({
+        where: { active: true, providerName: 'GDS', providerCityId: { not: null } },
+      });
+      if (!rows.length) throw new ProviderError('GDS', 'City catalog unavailable');
+      return rows.flatMap((city) => city.providerCityId === null ? [] : [{
+        id: String(city.providerCityId), providerCityId: city.providerCityId,
+        name: city.name, City: city.name, CityId: city.providerCityId, State: city.state ?? '',
+      }]);
     }
+  }
 
-    // Deduplicate cities by providerCityId and name
-    const seenCityKeys = new Set<string>();
-    const deduplicatedCities: typeof cities = [];
-    for (const c of cities) {
-      const key = `${c.providerCityId || c.CityId}-${(c.name || c.City || '').toLowerCase().trim()}`;
-      if (!seenCityKeys.has(key)) {
-        seenCityKeys.add(key);
-        deduplicatedCities.push(c);
-      }
+  public async getCities(query?: string, limit?: number, popular?: boolean) {
+    if (!this.cityCache || this.cityCache.expiresAt <= Date.now()) {
+      this.loadingCities ??= this.loadCities().then((rows) => {
+        this.cityCache = { rows, expiresAt: Date.now() + 60_000 };
+        return rows;
+      }).finally(() => { this.loadingCities = undefined; });
+      await this.loadingCities;
     }
-    cities = deduplicatedCities;
+    const cities = this.cityCache!.rows;
 
     // Curated high-priority popular cities (matching UI reference ref-1 and ref-3)
     const POPULAR_KEYS = [
@@ -186,35 +156,6 @@ export class CitiesService {
     return cities;
   }
 
-  private async syncCitiesSafe(gdsCities: Array<{ CityId: number; CityName: string }>): Promise<void> {
-    try {
-      const prisma = getPrismaClient();
-      for (const item of gdsCities) {
-        if (!item.CityId || !item.CityName) continue;
-        await prisma.city.upsert({
-          where: {
-            providerName_providerCityId: {
-              providerName: 'GDS',
-              providerCityId: item.CityId,
-            },
-          },
-          update: {
-            name: item.CityName,
-            active: true,
-          },
-          create: {
-            name: item.CityName,
-            providerCityId: item.CityId,
-            providerName: 'GDS',
-            active: true,
-          },
-        });
-      }
-    } catch (err: any) {
-      this.citiesLogger.warn({ err: err.message }, 'Prisma DB sync failed');
-    }
-  }
-
   public async syncCities(): Promise<number> {
     this.citiesLogger.info('Syncing cities from GDS provider...');
     const gdsCities = await this.gdsAdapter.getCities();
@@ -225,8 +166,10 @@ export class CitiesService {
     let count = 0;
     try {
       const prisma = getPrismaClient();
+      const synced = new Set<number>();
       for (const item of gdsCities) {
-        if (!item.CityId || !item.CityName) continue;
+        if (!item.CityId || !item.CityName || synced.has(item.CityId)) continue;
+        synced.add(item.CityId);
         await prisma.city.upsert({
           where: {
             providerName_providerCityId: {
@@ -251,10 +194,12 @@ export class CitiesService {
       this.citiesLogger.warn({ err: err.message }, 'syncCities database upsert failed');
     }
 
+    this.cityCache = undefined;
+
     // Invalidate cache
     try {
       const redis = getRedisClient();
-      await redis.del(`${RedisPrefix.CACHE_CITIES}gds`);
+      await redis.del(`${RedisPrefix.CACHE_CITIES}gds:v2`);
     } catch {
       // Ignore
     }

@@ -92,7 +92,7 @@ export type UpdateStaffRoleInput = z.infer<typeof updateStaffRoleSchema>;
 // ---------------------------------------------------------------------------
 export const initiateTopupSchema = z.object({
   amount: z.number().min(100).max(500000), // INR: min 100, max 5 lakh
-  gateway: z.enum(['RAZORPAY', 'PHONEPE', 'AUTO']).default('AUTO').optional(),
+  gateway: z.enum(['RAZORPAY', 'AUTO']).default('AUTO').optional(),
   redirectUrl: z.string().url().optional(),
   idempotencyKey: z.string().uuid().optional(),
 });

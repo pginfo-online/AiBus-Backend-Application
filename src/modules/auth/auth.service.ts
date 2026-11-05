@@ -431,7 +431,7 @@ export class AuthService {
       otpLength: env.OTP_LENGTH,
       expiresInSeconds: env.OTP_EXPIRY_SECONDS,
       resendCooldownSeconds: env.OTP_RESEND_COOLDOWN_SECONDS,
-      ...(isTest || env.SMS_SIMULATE ? { debugOtp: otp } : {}),
+      ...(isTest ? { debugOtp: otp } : {}),
     };
   }
 

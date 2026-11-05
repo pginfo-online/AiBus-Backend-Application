@@ -21,7 +21,7 @@ class HoldsController {
     getHold = async (req, res, next) => {
         try {
             const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
-            const hold = await this.holdsService.getHold(id);
+            const hold = await this.holdsService.getHold(id, req.user?.sub);
             if (!hold) {
                 response_1.ApiResponse.error(res, 'Hold not found', 'NOT_FOUND', 404);
                 return;
@@ -39,7 +39,7 @@ class HoldsController {
                 response_1.ApiResponse.error(res, 'HoldId is required', 'VALIDATION_ERROR', 400);
                 return;
             }
-            const status = await this.holdsService.checkHoldStatus(holdId);
+            const status = await this.holdsService.checkHoldStatus(String(holdId), req.user?.sub);
             response_1.ApiResponse.success(res, status, status.Message || 'Hold status retrieved');
         }
         catch (error) {

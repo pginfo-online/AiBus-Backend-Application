@@ -1,3 +1,4 @@
+import { randomUUID } from 'crypto';
 import { CircuitBreaker } from '../circuitBreaker';
 import { GdsPartnerClient } from './gdsPartnerClient';
 import { GdsTransactionClient } from './gdsTransactionClient';
@@ -80,7 +81,7 @@ export class GdsAdapter implements IGdsAdapter {
       errorMsg = err.message;
       throw err;
     } finally {
-      this.recordTransaction('HoldSeats', params, res, Date.now() - start, errorMsg);
+      this.recordTransaction('HoldSeats', { busId: params.BusId, passengerCount: params.Passengers?.length ?? 0 }, res, Date.now() - start, errorMsg);
     }
   }
 
@@ -177,12 +178,12 @@ export class GdsAdapter implements IGdsAdapter {
           data: {
             providerName: 'GDS',
             operation,
-            requestPayload: requestPayload ?? {},
-            responsePayload: responsePayload ?? {},
+            requestPayload: operation === 'HoldSeats' ? requestPayload : {},
+            responsePayload: responsePayload ? { status: responsePayload.Status ?? null } : {},
             responseStatus: responsePayload?.Status ?? (errorMessage ? 500 : 200),
             durationMs,
-            errorMessage,
-            requestId: `gds-tx-${Date.now()}`,
+            errorMessage: errorMessage ? 'GDS operation failed' : undefined,
+            requestId: randomUUID(),
           },
         });
       }

@@ -28,15 +28,13 @@ export declare class PaymentOrchestrator {
     refreshConfigCache(): Promise<void>;
     private getGatewayConfigs;
     /**
-     * Smart Router: Resolves the optimal gateway for a transaction
-     * Evaluates admin config, health metrics, circuit breaker, and payment method affinity
+     * Resolve the enabled Razorpay adapter
      */
-    resolveGateway(requestedGateway?: string, paymentMethod?: string): Promise<IPaymentGateway>;
+    resolveGateway(requestedGateway?: string): Promise<IPaymentGateway>;
     /**
-     * Create Payment Intent with Automatic Cascading Fallback
-     * If primary gateway fails during intent creation, automatically fails over to secondary
+     * Create a Razorpay payment intent and track provider availability
      */
-    createPaymentIntentWithFallback(params: PaymentIntentParams, requestedGateway?: string): Promise<PaymentIntentResult>;
+    createPaymentIntent(params: PaymentIntentParams, requestedGateway?: string): Promise<PaymentIntentResult>;
     /**
      * Unified Payment Verification
      */

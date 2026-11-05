@@ -4,7 +4,7 @@ export declare class CancellationsService {
     private cancelLogger;
     private constructor();
     static getInstance(): CancellationsService;
-    checkCancellability(bookingIdentifier: string, seatNos?: string[]): Promise<{
+    checkCancellability(bookingIdentifier: string, seatNos?: string[], userId?: string): Promise<{
         IsCancellable: boolean;
         ChargePct?: number;
         ChargeAmt?: number;
@@ -20,16 +20,6 @@ export declare class CancellationsService {
         pnrNo: string | null;
         seatNos: string;
     }>;
-    checkCancellabilityDirect(params: {
-        ticketNo: string;
-        seatNos: string;
-        pnrNo?: string;
-    }): Promise<import("../../providers/types").GdsIsCancellableResponse>;
-    cancelSeatsDirect(params: {
-        TicketNo: string;
-        SeatNos: string;
-        PNR?: string;
-    }): Promise<import("../../providers/types").GdsCancelResponse>;
     cancelSeats(bookingIdentifier: string, seatNos: string[], reason?: string, userId?: string, refundToWallet?: boolean): Promise<{
         cancellation: {
             userId: string | null;

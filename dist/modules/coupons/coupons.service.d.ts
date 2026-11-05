@@ -1,3 +1,4 @@
+import { Prisma } from '@prisma/client';
 import { CouponType } from '@prisma/client';
 import { ListCouponsQuery, ValidateCouponInput } from './coupons.validation';
 export interface FormattedCoupon {
@@ -52,6 +53,6 @@ export declare class CouponsService {
     /**
      * Record coupon usage upon successful booking confirmation / payment
      */
-    recordCouponUsage(couponId: string, userId: string, bookingId: string, discount: number, txClient?: any): Promise<void>;
+    recordCouponUsage(couponId: string, userId: string, bookingId: string, discount: number, txClient?: Prisma.TransactionClient): Promise<void>;
 }
 //# sourceMappingURL=coupons.service.d.ts.map

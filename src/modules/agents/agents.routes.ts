@@ -14,14 +14,15 @@ const controller = AgentsController.getInstance();
 // Public Endpoints
 // ---------------------------------------------------------------------------
 router.post('/register', controller.register);
-router.post('/wallet/topup/confirm', controller.confirmTopup);
-router.post('/wallet/topup/:merchantTxnId/confirm', controller.confirmTopup);
+
 
 // ---------------------------------------------------------------------------
 // Protected Endpoints — Context Resolved via JWT
 // ---------------------------------------------------------------------------
 router.use(authenticate);
 router.use(requireAgentContext);
+router.post('/wallet/topup/confirm', controller.confirmTopup);
+router.post('/wallet/topup/:merchantTxnId/confirm', controller.confirmTopup);
 
 // Profile
 router.get('/profile', controller.getProfile);
