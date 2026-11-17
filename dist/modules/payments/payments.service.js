@@ -1,6 +1,10 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.PaymentsService = void 0;
+const paymentRedirect_1 = require("./paymentRedirect");
+const bookingOutcome_1 = require("../bookings/bookingOutcome");
+const queues_1 = require("../../infrastructure/queues");
+const constants_1 = require("../../shared/constants");
 const redis_1 = require("../../infrastructure/redis");
 const agents_service_1 = require("../agents/agents.service");
 const uuid_1 = require("uuid");
@@ -13,8 +17,7 @@ const logger_1 = require("../../infrastructure/logger");
 const client_1 = require("@prisma/client");
 const ledger_1 = require("../../infrastructure/ledger");
 const payments_1 = require("../../infrastructure/payments");
-const coupons_service_1 = require("../coupons/coupons.service");
-const paymentLogger = logger_1.logger.child({ module: 'payments-service' });
+const paymentLogger = logger_1.logger.child({ module: "payments-service" });
 class PaymentsService {
     static instance;
     bookingsService;
@@ -32,13 +35,13 @@ class PaymentsService {
     async createPaymentIntent(input, userId) {
         const key = `lock:payment-intent:${input.bookingId}`;
         const owner = (0, uuid_1.v4)();
-        if (!await (0, redis_1.acquireLock)(key, owner, 30))
-            throw new errors_1.ConflictError('Payment initiation is in progress');
+        if (!(await (0, redis_1.acquireLock)(key, owner, 30)))
+            throw new errors_1.ConflictError("Payment initiation is in progress");
         try {
             return await this.createRazorpayIntent(input, userId);
         }
         finally {
-            await (0, redis_1.releaseLock)(key, owner).catch(() => paymentLogger.warn('Could not release payment intent lock'));
+            await (0, redis_1.releaseLock)(key, owner).catch(() => paymentLogger.warn("Could not release payment intent lock"));
         }
     }
     async createRazorpayIntent(input, userId) {
@@ -48,15 +51,15 @@ class PaymentsService {
             include: { holds: true },
         });
         if (!booking || (booking.userId && booking.userId !== userId)) {
-            throw new errors_1.NotFoundError('Booking not found');
+            throw new errors_1.NotFoundError("Booking not found");
         }
         if (booking.agentId)
-            throw new errors_1.ValidationError('Agent bookings must be paid from the agent wallet');
+            throw new errors_1.ValidationError("Agent bookings must be paid from the agent wallet");
         if (booking.status === client_1.BookingStatus.CONFIRMED) {
-            throw new errors_1.ValidationError('Booking is already confirmed and completed');
+            throw new errors_1.ValidationError("Booking is already confirmed and completed");
         }
         if (booking.status === client_1.BookingStatus.CANCELLED) {
-            throw new errors_1.ValidationError('Cannot initiate payment for a cancelled booking');
+            throw new errors_1.ValidationError("Cannot initiate payment for a cancelled booking");
         }
         const eligibleStatuses = [
             client_1.BookingStatus.HELD,
@@ -70,39 +73,40 @@ class PaymentsService {
         // Verify seat hold validity and enforce cutoff threshold (redBus / AbhiBus practice)
         const latestHold = await prisma.seatHold.findFirst({
             where: { bookingId: booking.id },
-            orderBy: { createdAt: 'desc' },
+            orderBy: { createdAt: "desc" },
         });
         if (!latestHold || latestHold.status !== client_1.HoldStatus.ACTIVE) {
-            throw new errors_1.ValidationError('An active seat hold is required');
+            throw new errors_1.ValidationError("An active seat hold is required");
         }
         {
             const now = Date.now();
             const expiresAt = new Date(latestHold.expiresAt).getTime();
             if (expiresAt < now) {
-                throw new errors_1.ValidationError('Seat hold has expired. Please reselect your seats.');
+                throw new errors_1.ValidationError("Seat hold has expired. Please reselect your seats.");
             }
             const cutoffMs = (env_1.env.PAYMENT_HOLD_CUTOFF_SECONDS || 90) * 1000;
             if (expiresAt - now < cutoffMs) {
                 throw new errors_1.ValidationError(`Seat hold is expiring in less than ${env_1.env.PAYMENT_HOLD_CUTOFF_SECONDS || 90} seconds. Please reselect your seats to ensure successful confirmation.`);
             }
         }
-        const amount = Number(booking.totalFare);
+        const amount = Math.round((Number(booking.totalFare) - Number(booking.walletAmount)) * 100) / 100;
         // Idempotency: return existing PENDING payment if matching gateway and not expired (< 14 mins)
         const existingPayment = await prisma.payment.findFirst({
             where: { bookingId: booking.id, status: client_1.PaymentStatus.PENDING },
-            orderBy: { createdAt: 'desc' },
+            orderBy: { createdAt: "desc" },
         });
         const isExistingExpired = existingPayment &&
-            Date.now() - new Date(existingPayment.createdAt).getTime() > 14 * 60 * 1000;
+            Date.now() - new Date(existingPayment.createdAt).getTime() >
+                14 * 60 * 1000;
         if (existingPayment &&
             !isExistingExpired &&
-            existingPayment.gateway === 'RAZORPAY') {
+            existingPayment.gateway === "RAZORPAY") {
             const meta = existingPayment.metadata || {};
             return {
                 paymentId: existingPayment.id,
                 merchantTxnId: existingPayment.merchantTxnId,
                 amount,
-                currency: 'INR',
+                currency: "INR",
                 gateway: existingPayment.gateway,
                 paymentUrl: meta.paymentUrl ||
                     `/api/v1/payments/checkout/${existingPayment.merchantTxnId}`,
@@ -124,7 +128,7 @@ class PaymentsService {
             bookingId: booking.id,
             bookingNumber: booking.bookingNumber,
             amount,
-            currency: 'INR',
+            currency: "INR",
             customerName: booking.contactName,
             customerEmail: booking.contactEmail,
             customerPhone: booking.contactPhone,
@@ -137,13 +141,13 @@ class PaymentsService {
                 data: { status: client_1.BookingStatus.PAYMENT_PENDING },
             });
             if (!changed.count)
-                throw new errors_1.ConflictError('Booking state changed during payment initiation');
+                throw new errors_1.ConflictError("Booking state changed during payment initiation");
             return tx.payment.create({
                 data: {
                     bookingId: booking.id,
                     userId: userId ?? booking.userId ?? null,
                     amount,
-                    currency: 'INR',
+                    currency: "INR",
                     status: client_1.PaymentStatus.PENDING,
                     gateway: intentResult.gateway,
                     paymentMethod: input.paymentMode,
@@ -163,12 +167,12 @@ class PaymentsService {
             gateway: intentResult.gateway,
             merchantTxnId: intentResult.merchantTxnId,
             amount,
-        }, 'Payment intent created successfully via orchestrator');
+        }, "Payment intent created successfully via orchestrator");
         return {
             paymentId: payment.id,
             merchantTxnId: intentResult.merchantTxnId,
             amount,
-            currency: 'INR',
+            currency: "INR",
             gateway: intentResult.gateway,
             paymentUrl: intentResult.paymentUrl,
             upiIntentUrl: intentResult.upiIntentUrl,
@@ -182,216 +186,174 @@ class PaymentsService {
             where: { merchantTxnId: input.merchantTxnId },
             include: { booking: true },
         });
-        if (!payment || payment.bookingId !== input.bookingId || payment.gateway !== 'RAZORPAY') {
-            throw new errors_1.NotFoundError('Payment transaction not found');
+        if (!payment ||
+            payment.bookingId !== input.bookingId ||
+            (!fromWebhook &&
+                (payment.booking.userId
+                    ? payment.booking.userId !== userId
+                    : !input.gatewaySignature))) {
+            throw new errors_1.NotFoundError("Payment transaction not found");
         }
-        const orchestrator = payments_1.PaymentOrchestrator.getInstance();
-        const verifyCapture = () => orchestrator.verifyPayment('RAZORPAY', {
-            merchantTxnId: payment.merchantTxnId,
-            gatewayOrderId: payment.gatewayOrderId ?? undefined,
-            gatewayPaymentId: input.gatewayPaymentId,
-            gatewaySignature: input.gatewaySignature,
-        });
-        let gatewayVerification;
-        if (!fromWebhook && (!userId || payment.booking.userId !== userId)) {
-            if (payment.booking.userId || !input.gatewaySignature) {
-                throw new errors_1.NotFoundError('Payment transaction not found');
-            }
-            gatewayVerification = await verifyCapture();
-            if (!gatewayVerification.success || gatewayVerification.amount !== Number(payment.amount)) {
-                throw new errors_1.NotFoundError('Payment transaction not found');
-            }
-        }
-        // Idempotency: if already SUCCESS and booking CONFIRMED, return immediately
-        if (payment.status === client_1.PaymentStatus.SUCCESS) {
-            paymentLogger.info({ paymentId: payment.id, bookingId: payment.bookingId }, 'Payment already verified (idempotent return)');
-            let confirmedBooking = await prisma.booking.findUnique({
-                where: { id: payment.bookingId },
-                include: { seats: true, passengers: true, ticket: true },
-            });
-            // If webhook or another thread marked payment SUCCESS and is completing GDS booking, wait internally
-            const maxWaitMs = 3500;
-            const pollIntervalMs = 200;
-            let waitedMs = 0;
-            while (waitedMs < maxWaitMs &&
-                confirmedBooking &&
-                confirmedBooking.status !== client_1.BookingStatus.CONFIRMED &&
-                confirmedBooking.status !== client_1.BookingStatus.BOOKING_FAILED &&
-                confirmedBooking.status !== client_1.BookingStatus.BOOKING_UNKNOWN) {
-                await new Promise((r) => setTimeout(r, pollIntervalMs));
-                waitedMs += pollIntervalMs;
-                confirmedBooking = await prisma.booking.findUnique({
-                    where: { id: payment.bookingId },
-                    include: { seats: true, passengers: true, ticket: true },
-                });
-            }
-            const ticket = confirmedBooking?.status === client_1.BookingStatus.CONFIRMED
-                ? await this.ticketsService.getTicketByBookingId(payment.bookingId)
-                : null;
-            return {
-                status: confirmedBooking?.status === client_1.BookingStatus.CONFIRMED ? 'SUCCESS' : (confirmedBooking?.status || 'PENDING'),
-                payment,
-                booking: confirmedBooking || payment.booking,
-                ticket: ticket || undefined,
-            };
-        }
-        // Prevent double-processing: check current booking state
-        const currentBooking = await prisma.booking.findUnique({
-            where: { id: payment.bookingId },
-            include: { seats: true, passengers: true, ticket: true },
-        });
-        if (!currentBooking) {
-            throw new errors_1.NotFoundError('Booking not found');
-        }
-        if (currentBooking.status === client_1.BookingStatus.CONFIRMED ||
-            currentBooking.status === client_1.BookingStatus.BOOKING_UNKNOWN ||
-            currentBooking.status === client_1.BookingStatus.BOOKING_FAILED) {
-            paymentLogger.info({ bookingId: currentBooking.id, status: currentBooking.status }, 'Booking already in post-payment state, returning current status');
-            let returnStatus = 'PENDING';
-            let ticket = null;
-            if (currentBooking.status === client_1.BookingStatus.CONFIRMED) {
-                returnStatus = 'SUCCESS';
-                ticket = await this.ticketsService.getTicketByBookingId(payment.bookingId);
-            }
-            else if (currentBooking.status === client_1.BookingStatus.BOOKING_FAILED) {
-                returnStatus = 'BOOKING_FAILED';
-            }
-            else if (currentBooking.status === client_1.BookingStatus.BOOKING_UNKNOWN) {
-                returnStatus = 'BOOKING_UNKNOWN';
-            }
-            return {
-                status: returnStatus,
-                payment,
-                booking: currentBooking,
-                ticket: ticket || undefined,
-                message: currentBooking.status === client_1.BookingStatus.BOOKING_FAILED
-                    ? 'Seat confirmation failed with operator. A full refund has been initiated.'
-                    : currentBooking.status === client_1.BookingStatus.BOOKING_UNKNOWN
-                        ? 'Seat confirmation with operator is in progress.'
-                        : undefined,
-            };
-        }
-        // -----------------------------------------------------------------------
-        // CRITICAL: Server-side payment verification via PaymentOrchestrator
-        // -----------------------------------------------------------------------
-        try {
-            gatewayVerification ??= await verifyCapture();
-        }
-        catch {
-            return { status: 'PENDING', payment, booking: currentBooking };
-        }
-        if (!gatewayVerification.success || gatewayVerification.amount !== Number(payment.amount)
-            || !gatewayVerification.gatewayPaymentId) {
-            return { status: 'PENDING', payment, booking: currentBooking };
-        }
-        const updatedPayment = await prisma.$transaction(async (tx) => {
-            const claim = await tx.booking.updateMany({
-                where: { id: payment.bookingId, status: { in: [client_1.BookingStatus.PAYMENT_PENDING, client_1.BookingStatus.PAYMENT_FAILED] } },
-                data: { status: client_1.BookingStatus.PAYMENT_SUCCESS },
-            });
-            if (!claim.count)
-                return null;
-            return tx.payment.update({
-                where: { id: payment.id },
-                data: {
-                    status: client_1.PaymentStatus.SUCCESS,
-                    gatewayPaymentId: gatewayVerification.gatewayPaymentId,
+        let currentPayment = payment;
+        if ((!bookingOutcome_1.settledPaymentStatuses.includes(payment.status) ||
+            (!fromWebhook && !payment.booking.userId)) &&
+            payment.gateway === "RAZORPAY") {
+            let verified;
+            try {
+                verified = await payments_1.PaymentOrchestrator.getInstance().verifyPayment("RAZORPAY", {
+                    merchantTxnId: payment.merchantTxnId,
+                    gatewayOrderId: payment.gatewayOrderId ?? undefined,
+                    gatewayPaymentId: input.gatewayPaymentId || payment.gatewayPaymentId || undefined,
                     gatewaySignature: input.gatewaySignature,
-                },
-            });
-        });
-        if (!updatedPayment) {
-            let latestBooking = await prisma.booking.findUnique({
-                where: { id: payment.bookingId },
-                include: { seats: true, passengers: true, ticket: true },
-            });
-            // Internal wait: give concurrent request up to 3500ms to complete GDS BookSeats
-            const maxWaitMs = 3500;
-            const pollIntervalMs = 200;
-            let waitedMs = 0;
-            while (waitedMs < maxWaitMs &&
-                latestBooking &&
-                latestBooking.status !== client_1.BookingStatus.CONFIRMED &&
-                latestBooking.status !== client_1.BookingStatus.BOOKING_FAILED &&
-                latestBooking.status !== client_1.BookingStatus.BOOKING_UNKNOWN) {
-                await new Promise((r) => setTimeout(r, pollIntervalMs));
-                waitedMs += pollIntervalMs;
-                latestBooking = await prisma.booking.findUnique({
-                    where: { id: payment.bookingId },
-                    include: { seats: true, passengers: true, ticket: true },
                 });
             }
-            if (latestBooking && latestBooking.status === client_1.BookingStatus.CONFIRMED) {
-                const ticket = await this.ticketsService.getTicketByBookingId(payment.bookingId);
+            catch {
                 return {
-                    status: 'SUCCESS',
-                    payment,
-                    booking: latestBooking,
-                    ticket,
+                    status: "PENDING",
+                    payment: { id: payment.id, status: payment.status, gateway: payment.gateway, amount: Number(payment.amount), gatewayPaymentId: payment.gatewayPaymentId },
+                    booking: payment.booking,
                 };
             }
-            if (latestBooking && latestBooking.status === client_1.BookingStatus.BOOKING_FAILED) {
-                return {
-                    status: 'BOOKING_FAILED',
-                    payment,
-                    booking: latestBooking,
-                    message: 'Seat confirmation failed with operator. A full refund has been initiated.',
-                };
+            if (verified.success &&
+                Math.round(Number(verified.amount) * 100) ===
+                    Math.round(Number(payment.amount) * 100) &&
+                verified.gatewayPaymentId) {
+                await prisma.$transaction(async (tx) => {
+                    await tx.$queryRaw `SELECT id FROM bookings WHERE id = ${payment.bookingId}::uuid FOR UPDATE`;
+                    // Persist capture even if a hold has expired. A captured payment must never disappear.
+                    await tx.payment.updateMany({
+                        where: {
+                            id: payment.id,
+                            status: {
+                                notIn: [
+                                    client_1.PaymentStatus.SUCCESS,
+                                    client_1.PaymentStatus.REFUNDED,
+                                    client_1.PaymentStatus.PARTIALLY_REFUNDED,
+                                ],
+                            },
+                        },
+                        data: {
+                            status: client_1.PaymentStatus.SUCCESS,
+                            gatewayPaymentId: verified.gatewayPaymentId,
+                            gatewaySignature: input.gatewaySignature,
+                            webhookVerified: fromWebhook || payment.webhookVerified,
+                        },
+                    });
+                    const currentBooking = await tx.booking.findUniqueOrThrow({
+                        where: { id: payment.bookingId },
+                    });
+                    if (currentBooking.status === client_1.BookingStatus.HOLD_EXPIRED) {
+                        await tx.refund.createMany({
+                            data: [
+                                {
+                                    bookingId: payment.bookingId,
+                                    paymentId: payment.id,
+                                    userId: payment.userId,
+                                    amount: payment.amount,
+                                    status: "PENDING",
+                                    destination: "ORIGINAL_PAYMENT_METHOD",
+                                    idempotencyKey: `late-capture:${payment.id}`,
+                                    reason: "Payment captured after checkout expired",
+                                },
+                            ],
+                            skipDuplicates: true,
+                        });
+                        await tx.booking.update({
+                            where: { id: payment.bookingId },
+                            data: { status: client_1.BookingStatus.BOOKING_FAILED },
+                        });
+                    }
+                    const otherCapture = currentBooking.paidPaymentId ? currentBooking.paidPaymentId !== payment.id : await tx.payment.findFirst({
+                        where: {
+                            bookingId: payment.bookingId,
+                            id: { not: payment.id },
+                            gateway: "RAZORPAY",
+                            status: {
+                                in: [
+                                    client_1.PaymentStatus.SUCCESS,
+                                    client_1.PaymentStatus.REFUNDED,
+                                    client_1.PaymentStatus.PARTIALLY_REFUNDED,
+                                ],
+                            },
+                        },
+                    });
+                    if (otherCapture && currentBooking.status !== client_1.BookingStatus.HOLD_EXPIRED)
+                        await tx.refund.createMany({
+                            data: [
+                                {
+                                    bookingId: payment.bookingId,
+                                    paymentId: payment.id,
+                                    userId: payment.userId,
+                                    amount: payment.amount,
+                                    status: "PENDING",
+                                    destination: "ORIGINAL_PAYMENT_METHOD",
+                                    idempotencyKey: `duplicate-capture:${payment.id}`,
+                                    reason: "Duplicate captured payment",
+                                },
+                            ],
+                            skipDuplicates: true,
+                        });
+                    await tx.booking.updateMany({
+                        where: {
+                            id: payment.bookingId,
+                            status: {
+                                in: [
+                                    client_1.BookingStatus.HELD,
+                                    client_1.BookingStatus.PAYMENT_PENDING,
+                                    client_1.BookingStatus.PAYMENT_FAILED,
+                                ],
+                            },
+                        },
+                        data: {
+                            status: client_1.BookingStatus.PAYMENT_SUCCESS,
+                            paidPaymentId: payment.id,
+                            version: { increment: 1 },
+                        },
+                    });
+                });
             }
-            paymentLogger.warn({ bookingId: payment.bookingId }, 'Booking still being processed by another request after internal wait');
-            return {
-                status: 'PENDING',
-                payment,
-                booking: latestBooking || currentBooking,
-            };
-        }
-        paymentLogger.info({ bookingId: payment.bookingId, paymentId: payment.id }, 'Payment marked SUCCESS, calling GDS BookSeats');
-        // Call GDS BookSeats — this may throw for BOOKING_UNKNOWN/BOOKING_FAILED
-        try {
-            const confirmedBooking = await this.bookingsService.confirmBooking(payment.bookingId);
-            const ticket = await this.ticketsService.getTicketByBookingId(payment.bookingId);
-            // Record coupon usage if a coupon was applied to this booking
-            const couponMeta = confirmedBooking.dropoffSnapshot?.couponMetadata;
-            if (couponMeta && couponMeta.id) {
-                try {
-                    await coupons_service_1.CouponsService.getInstance().recordCouponUsage(couponMeta.id, confirmedBooking.userId || payment.userId || '00000000-0000-0000-0000-000000000000', confirmedBooking.id, Number(couponMeta.discount || 0));
-                }
-                catch (cErr) {
-                    paymentLogger.warn({ cErr: cErr.message }, 'Failed to record coupon usage asynchronously');
-                }
+            else if (verified.status === "FAILED") {
+                await prisma.payment.updateMany({
+                    where: { id: payment.id, status: client_1.PaymentStatus.PENDING },
+                    data: { status: client_1.PaymentStatus.FAILED },
+                });
+                await prisma.booking.updateMany({
+                    where: {
+                        id: payment.bookingId,
+                        status: client_1.BookingStatus.PAYMENT_PENDING,
+                    },
+                    data: { status: client_1.BookingStatus.PAYMENT_FAILED },
+                });
             }
-            return {
-                status: 'SUCCESS',
-                payment: updatedPayment,
-                booking: confirmedBooking,
-                ticket,
-            };
-        }
-        catch (err) {
-            const postBooking = await prisma.booking.findUnique({
-                where: { id: payment.bookingId },
-                include: { seats: true, passengers: true, ticket: true },
+            currentPayment = await prisma.payment.findUniqueOrThrow({
+                where: { id: payment.id },
+                include: { booking: true },
             });
-            if (postBooking?.status === client_1.BookingStatus.BOOKING_FAILED) {
-                paymentLogger.error({ bookingId: payment.bookingId, err: err.message }, 'Payment succeeded but booking failed with provider — auto-refund queued');
-                return {
-                    status: 'BOOKING_FAILED',
-                    payment: updatedPayment,
-                    booking: postBooking,
-                    message: 'Payment was debited, but seat confirmation failed with the bus operator. A 100% full refund has been automatically initiated.',
-                };
-            }
-            if (postBooking?.status === client_1.BookingStatus.BOOKING_UNKNOWN) {
-                paymentLogger.warn({ bookingId: payment.bookingId, err: err.message }, 'Payment succeeded but provider timed out — reconciliation in progress');
-                return {
-                    status: 'BOOKING_UNKNOWN',
-                    payment: updatedPayment,
-                    booking: postBooking,
-                    message: 'Payment confirmed. Ticket confirmation with the bus operator is in progress.',
-                };
-            }
-            throw err;
         }
+        const booking = await prisma.booking.findUniqueOrThrow({
+            where: { id: payment.bookingId },
+            include: { seats: true, passengers: true, ticket: true, refunds: true },
+        });
+        if (bookingOutcome_1.settledPaymentStatuses.includes(currentPayment.status) &&
+            ["PAYMENT_SUCCESS", "BOOKING_REQUESTED", "BOOKING_UNKNOWN"].includes(booking.status)) {
+            // Database state is the durable work source. The recovery scanner repairs a lost enqueue.
+            await (0, queues_1.addJob)(constants_1.QueueName.BOOKING_RECONCILIATION, "complete-paid-booking", { bookingId: booking.id, providerHoldId: booking.providerHoldId }, {
+                jobId: `booking-${booking.id}`,
+                attempts: 8,
+                backoff: { type: "exponential", delay: 5000 },
+            });
+        }
+        return {
+            status: (0, bookingOutcome_1.paymentOutcome)(booking.status, currentPayment.status),
+            payment: {
+                id: currentPayment.id,
+                status: currentPayment.status,
+                gateway: currentPayment.gateway,
+                amount: Number(currentPayment.amount),
+                gatewayPaymentId: currentPayment.gatewayPaymentId,
+            },
+            booking,
+        };
     }
     /**
      * Razorpay Webhook Ingestion & Processing
@@ -399,29 +361,41 @@ class PaymentsService {
      */
     async handleRazorpayWebhook(rawBody, headers) {
         const prisma = (0, database_1.getPrismaClient)();
-        const razorpayAdapter = payments_1.PaymentOrchestrator.getInstance().getAdapter('RAZORPAY');
-        if (typeof rawBody !== 'string' || !razorpayAdapter.verifyWebhookSignature(rawBody, headers)) {
-            throw new errors_1.AuthorizationError('Invalid Razorpay webhook signature');
+        const razorpayAdapter = payments_1.PaymentOrchestrator.getInstance().getAdapter("RAZORPAY");
+        if (typeof rawBody !== "string" ||
+            !razorpayAdapter.verifyWebhookSignature(rawBody, headers)) {
+            throw new errors_1.AuthorizationError("Invalid Razorpay webhook signature");
         }
         const event = razorpayAdapter.parseWebhookPayload(rawBody);
-        if (event.status !== 'SUCCESS' || !event.gatewayPaymentId || !event.gatewayOrderId) {
-            return { status: 'IGNORED' };
+        if (event.status !== "SUCCESS" || !event.gatewayOrderId) {
+            return { status: "IGNORED" };
         }
-        const header = headers['x-razorpay-event-id'];
-        const eventId = typeof header === 'string' && /^[a-zA-Z0-9_-]{1,128}$/.test(header)
-            ? header : event.eventId;
+        const header = headers["x-razorpay-event-id"];
+        const eventId = typeof header === "string" && /^[a-zA-Z0-9_-]{1,128}$/.test(header)
+            ? header
+            : event.eventId;
         await prisma.webhookEvent.createMany({
-            data: [{
-                    eventId, gateway: 'RAZORPAY', eventType: event.eventType, verified: true,
-                    payload: { orderId: event.gatewayOrderId, paymentId: event.gatewayPaymentId },
-                }],
+            data: [
+                {
+                    eventId,
+                    gateway: "RAZORPAY",
+                    eventType: event.eventType,
+                    verified: true,
+                    payload: {
+                        orderId: event.gatewayOrderId,
+                        paymentId: event.gatewayPaymentId,
+                    },
+                },
+            ],
             skipDuplicates: true,
         });
-        const receipt = await prisma.webhookEvent.findUniqueOrThrow({ where: { eventId } });
+        const receipt = await prisma.webhookEvent.findUniqueOrThrow({
+            where: { eventId },
+        });
         if (receipt.processed)
-            return { status: 'OK' };
+            return { status: "OK" };
         const payment = await prisma.payment.findFirst({
-            where: { gateway: 'RAZORPAY', gatewayOrderId: event.gatewayOrderId },
+            where: { gateway: "RAZORPAY", gatewayOrderId: event.gatewayOrderId },
         });
         if (payment) {
             const result = await this.verifyPayment({
@@ -429,22 +403,24 @@ class PaymentsService {
                 merchantTxnId: payment.merchantTxnId,
                 gatewayPaymentId: event.gatewayPaymentId,
             }, undefined, true);
-            if (result.status === 'PENDING')
-                throw new Error('Captured payment reconciliation is pending');
+            if (result.status === "PENDING")
+                throw new Error("Captured payment reconciliation is pending");
         }
         else {
             const topup = await prisma.walletTopup.findFirst({
-                where: { gateway: 'RAZORPAY', gatewayOrderId: event.gatewayOrderId },
+                where: { gateway: "RAZORPAY", gatewayOrderId: event.gatewayOrderId },
             });
             if (!topup)
-                throw new Error('Razorpay order is not recorded locally');
+                throw new Error("Razorpay order is not recorded locally");
+            if (!event.gatewayPaymentId)
+                throw new Error("Topup payment identification pending");
             await agents_service_1.AgentsService.getInstance().confirmTopup(topup.merchantTxnId, event.gatewayPaymentId, topup.agentId);
         }
         await prisma.webhookEvent.update({
             where: { id: receipt.id },
             data: { processed: true, processedAt: new Date() },
         });
-        return { status: 'OK' };
+        return { status: "OK" };
     }
     /**
      * B2B Agent Wallet Debit Payment
@@ -460,13 +436,17 @@ class PaymentsService {
             },
         });
         if (!booking) {
-            throw new errors_1.NotFoundError('Booking not found');
+            throw new errors_1.NotFoundError("Booking not found");
         }
         if (booking.agentId !== agentId) {
-            throw new errors_1.AuthorizationError('Booking does not belong to this agent organization');
+            throw new errors_1.AuthorizationError("Booking does not belong to this agent organization");
         }
         if (booking.status === client_1.BookingStatus.CONFIRMED) {
-            return { success: true, booking, message: 'Booking is already confirmed' };
+            return {
+                success: true,
+                booking,
+                message: "Booking is already confirmed",
+            };
         }
         if (booking.status !== client_1.BookingStatus.HELD) {
             throw new errors_1.ValidationError(`Cannot pay for booking in status ${booking.status}`);
@@ -474,23 +454,27 @@ class PaymentsService {
         // Verify hold validity if hold exists
         const latestHold = await prisma.seatHold.findFirst({
             where: { bookingId: booking.id },
-            orderBy: { createdAt: 'desc' },
+            orderBy: { createdAt: "desc" },
         });
-        if (!latestHold || latestHold.status !== client_1.HoldStatus.ACTIVE || latestHold.expiresAt.getTime() <= Date.now()) {
-            throw new errors_1.ValidationError('Seat hold has expired. Please reselect your seats.');
+        if (!latestHold ||
+            latestHold.status !== client_1.HoldStatus.ACTIVE ||
+            latestHold.expiresAt.getTime() <= Date.now()) {
+            throw new errors_1.ValidationError("Seat hold has expired. Please reselect your seats.");
         }
         // Fetch and validate agent wallet
         const wallet = await prisma.agentWallet.findUnique({
             where: { agentId },
         });
         if (!wallet) {
-            throw new errors_1.NotFoundError('Agent wallet not found');
+            throw new errors_1.NotFoundError("Agent wallet not found");
         }
         if (wallet.isFrozen) {
-            throw new errors_1.AuthorizationError(`Agent wallet is frozen: ${wallet.frozenReason || 'Contact platform administration'}`);
+            throw new errors_1.AuthorizationError(`Agent wallet is frozen: ${wallet.frozenReason || "Contact platform administration"}`);
         }
         const grossFare = Number(booking.totalFare);
-        const commissionAmt = booking.commissionSnapshot ? Number(booking.commissionSnapshot.commissionAmt) : 0;
+        const commissionAmt = booking.commissionSnapshot
+            ? Number(booking.commissionSnapshot.commissionAmt)
+            : 0;
         const netFare = Math.max(0, grossFare - commissionAmt);
         const cashBal = Number(wallet.cashBalance);
         const creditLimit = Number(wallet.creditLimit);
@@ -504,10 +488,13 @@ class PaymentsService {
         const txResult = await prisma.$transaction(async (tx) => {
             const claim = await tx.booking.updateMany({
                 where: { id: booking.id, status: client_1.BookingStatus.HELD },
-                data: { status: client_1.BookingStatus.PAYMENT_SUCCESS, version: { increment: 1 } },
+                data: {
+                    status: client_1.BookingStatus.PAYMENT_SUCCESS,
+                    version: { increment: 1 },
+                },
             });
             if (!claim.count)
-                throw new errors_1.ConflictError('Booking has already been claimed for payment');
+                throw new errors_1.ConflictError("Booking has already been claimed for payment");
             let newCash = cashBal;
             let newCreditUsed = creditUsed;
             if (cashBal >= netFare) {
@@ -530,7 +517,7 @@ class PaymentsService {
                 },
             });
             if (updateResult.count === 0) {
-                throw new errors_1.ConflictError('Concurrent wallet modification detected. Please try again.');
+                throw new errors_1.ConflictError("Concurrent wallet modification detected. Please try again.");
             }
             // Post double-entry balanced ledger batch
             const idempotencyPrefix = `BOOKING-${booking.id}`;
@@ -546,10 +533,13 @@ class PaymentsService {
                 agentId,
                 bookingId: booking.id,
                 referenceId: booking.bookingNumber,
-                createdBy: userId || 'AGENT',
+                createdBy: userId || "AGENT",
                 lines: ledgerLines,
             });
-            await tx.ledgerEntry.createMany({ data: ledgerData, skipDuplicates: true });
+            await tx.ledgerEntry.createMany({
+                data: ledgerData,
+                skipDuplicates: true,
+            });
             // Create Payment record
             const merchantTxnId = `WALLET-${booking.bookingNumber}-${Date.now()}`;
             const payment = await tx.payment.create({
@@ -559,14 +549,18 @@ class PaymentsService {
                     merchantTxnId,
                     amount: netFare,
                     status: client_1.PaymentStatus.SUCCESS,
-                    gateway: 'WALLET',
-                    paymentMethod: 'WALLET',
-                    metadata: { cashDebited: cashBal - newCash, creditDebited: newCreditUsed - creditUsed },
+                    gateway: "WALLET",
+                    paymentMethod: "WALLET",
+                    metadata: {
+                        cashDebited: cashBal - newCash,
+                        creditDebited: newCreditUsed - creditUsed,
+                    },
                 },
             });
+            await tx.booking.update({ where: { id: booking.id }, data: { paidPaymentId: payment.id } });
             return { payment, netFare, commissionAmt };
         });
-        paymentLogger.info({ bookingId: booking.id, agentId, netFare: txResult.netFare }, 'Agent wallet debited and ledger posted — confirming booking');
+        paymentLogger.info({ bookingId: booking.id, agentId, netFare: txResult.netFare }, "Agent wallet debited and ledger posted — confirming booking");
         // Confirm booking with upstream provider
         const confirmedBooking = await this.bookingsService.confirmBooking(booking.id);
         return {
@@ -587,11 +581,10 @@ class PaymentsService {
             where: { merchantTxnId },
             include: { booking: true },
         });
-        const redirectBase = customRedirectUrl && /^(?:aibus|exp):\/\/[a-zA-Z0-9./:_?=%+&-]+$/.test(customRedirectUrl)
-            ? customRedirectUrl : 'aibus://payment-result';
-        const sep = redirectBase.includes('?') ? '&' : '?';
-        if (!payment || payment.gateway !== 'RAZORPAY') {
-            throw new errors_1.NotFoundError('Razorpay payment not found');
+        const redirectBase = (0, paymentRedirect_1.paymentRedirect)(customRedirectUrl);
+        const sep = redirectBase.includes("?") ? "&" : "?";
+        if (!payment || payment.gateway !== "RAZORPAY") {
+            throw new errors_1.NotFoundError("Razorpay payment not found");
         }
         if (payment.status === client_1.PaymentStatus.SUCCESS) {
             return `<!DOCTYPE html>
@@ -600,10 +593,10 @@ class PaymentsService {
 <style>body{background:#051634;color:#fff;font-family:-apple-system,sans-serif;text-align:center;padding:40px;}</style>
 </head>
 <body>
-  <h2 style="color:#10B981;">Payment Already Confirmed</h2>
-  <p>Booking #${payment.booking.bookingNumber} is confirmed.</p>
+  <h2 style="color:#10B981;">Payment recorded</h2>
+  <p>Checking operator confirmation for booking #${payment.booking.bookingNumber}.</p>
   <script>setTimeout(function(){ window.location.href = "${redirectBase}${sep}status=SUCCESS&merchantTxnId=${merchantTxnId}&bookingId=${payment.bookingId}"; }, 1000);</script>
-  <a href="${redirectBase}${sep}status=SUCCESS&merchantTxnId=${merchantTxnId}&bookingId=${payment.bookingId}" style="display:inline-block;margin-top:20px;padding:12px 24px;background:#013C9A;color:#fff;text-decoration:none;border-radius:8px;">View Confirmed Ticket</a>
+  <a href="${redirectBase}${sep}status=SUCCESS&merchantTxnId=${merchantTxnId}&bookingId=${payment.bookingId}" style="display:inline-block;margin-top:20px;padding:12px 24px;background:#013C9A;color:#fff;text-decoration:none;border-radius:8px;">View booking status</a>
 </body>
 </html>`;
         }
@@ -611,16 +604,16 @@ class PaymentsService {
         const sdkPayload = meta.sdkPayload || {
             key: env_1.env.RAZORPAY_KEY_ID,
             amount: Math.round(Number(payment.amount) * 100),
-            currency: payment.currency || 'INR',
-            name: env_1.env.APP_NAME || 'AiBus',
+            currency: payment.currency || "INR",
+            name: env_1.env.APP_NAME || "AiBus",
             description: `Bus Booking #${payment.booking.bookingNumber}`,
             order_id: payment.gatewayOrderId,
             prefill: {
-                name: payment.booking.contactName || '',
-                email: payment.booking.contactEmail || '',
-                contact: payment.booking.contactPhone || '',
+                name: payment.booking.contactName || "",
+                email: payment.booking.contactEmail || "",
+                contact: payment.booking.contactPhone || "",
             },
-            theme: { color: '#013C9A' },
+            theme: { color: "#013C9A" },
         };
         const { prefill: _prefill, ...publicSdkPayload } = sdkPayload;
         return `<!DOCTYPE html>
@@ -712,7 +705,7 @@ class PaymentsService {
   </div>
 
   <script>
-    var options = ${JSON.stringify(publicSdkPayload).replace(/</g, '\\u003c')};
+    var options = ${JSON.stringify(publicSdkPayload).replace(/</g, "\\u003c")};
     var redirectBase = "${redirectBase}";
     var sep = redirectBase.indexOf('?') >= 0 ? '&' : '?';
     var bookingId = "${payment.bookingId}";

@@ -1,27 +1,44 @@
 export declare class CancellationsService {
     private static instance;
-    private gdsAdapter;
-    private cancelLogger;
-    private constructor();
     static getInstance(): CancellationsService;
-    checkCancellability(bookingIdentifier: string, seatNos?: string[], userId?: string): Promise<{
+    private provider;
+    private owned;
+    private selected;
+    checkCancellability(identifier: string, seats?: string[], userId?: string): Promise<{
+        RefundAmount: number;
+        CancellationCharge: number | undefined;
+        bookingId: string;
+        bookingNumber: string;
+        seatNos: string;
         IsCancellable: boolean;
         ChargePct?: number;
         ChargeAmt?: number;
         TotalFare?: number;
         CancSeatsTotalFare?: number;
         RefundPercentage?: number;
-        CancellationCharge?: number;
-        RefundAmount: number;
         Message?: string;
-        bookingId: string;
-        bookingNumber: string;
-        ticketNo: string;
-        pnrNo: string | null;
-        seatNos: string;
     }>;
-    cancelSeats(bookingIdentifier: string, seatNos: string[], reason?: string, userId?: string, refundToWallet?: boolean): Promise<{
+    cancelSeats(identifier: string, seats: string[], reason?: string, userId?: string, refundToWallet?: boolean): Promise<{
         cancellation: {
+            refunds: {
+                userId: string | null;
+                id: string;
+                status: import(".prisma/client").$Enums.RefundStatus;
+                createdAt: Date;
+                updatedAt: Date;
+                idempotencyKey: string | null;
+                bookingId: string;
+                amount: import("@prisma/client/runtime/library").Decimal;
+                reason: string;
+                paymentId: string | null;
+                cancellationId: string | null;
+                destination: import(".prisma/client").$Enums.RefundDestination;
+                gatewayRefundId: string | null;
+                providerRefundRef: string | null;
+                retryCount: number;
+                completedAt: Date | null;
+            }[];
+        } & {
             userId: string | null;
             id: string;
             status: import(".prisma/client").$Enums.CancellationStatus;
@@ -30,6 +47,10 @@ export declare class CancellationsService {
             totalFare: import("@prisma/client/runtime/library").Decimal;
             idempotencyKey: string | null;
             bookingId: string;
+            requestSnapshot: import("@prisma/client/runtime/library").JsonValue | null;
+            providerResponse: import("@prisma/client/runtime/library").JsonValue | null;
+            refundToWallet: boolean;
+            lastError: string | null;
             seatNos: string[];
             providerNewHoldId: string | null;
             providerNewTicketNo: string | null;
@@ -57,11 +78,106 @@ export declare class CancellationsService {
             retryCount: number;
             completedAt: Date | null;
         };
-        providerResponse: import("../../providers/types").GdsCancelResponse;
-        commissionReversal: number;
-        netRefundToAgent: number | undefined;
+        refunds: {
+            userId: string | null;
+            id: string;
+            status: import(".prisma/client").$Enums.RefundStatus;
+            createdAt: Date;
+            updatedAt: Date;
+            idempotencyKey: string | null;
+            bookingId: string;
+            amount: import("@prisma/client/runtime/library").Decimal;
+            reason: string;
+            paymentId: string | null;
+            cancellationId: string | null;
+            destination: import(".prisma/client").$Enums.RefundDestination;
+            gatewayRefundId: string | null;
+            providerRefundRef: string | null;
+            retryCount: number;
+            completedAt: Date | null;
+        }[];
         walletCredited: boolean;
-        newWalletBalance: number | null;
     }>;
+    result(id: string): Promise<{
+        cancellation: {
+            refunds: {
+                userId: string | null;
+                id: string;
+                status: import(".prisma/client").$Enums.RefundStatus;
+                createdAt: Date;
+                updatedAt: Date;
+                idempotencyKey: string | null;
+                bookingId: string;
+                amount: import("@prisma/client/runtime/library").Decimal;
+                reason: string;
+                paymentId: string | null;
+                cancellationId: string | null;
+                destination: import(".prisma/client").$Enums.RefundDestination;
+                gatewayRefundId: string | null;
+                providerRefundRef: string | null;
+                retryCount: number;
+                completedAt: Date | null;
+            }[];
+        } & {
+            userId: string | null;
+            id: string;
+            status: import(".prisma/client").$Enums.CancellationStatus;
+            createdAt: Date;
+            updatedAt: Date;
+            totalFare: import("@prisma/client/runtime/library").Decimal;
+            idempotencyKey: string | null;
+            bookingId: string;
+            requestSnapshot: import("@prisma/client/runtime/library").JsonValue | null;
+            providerResponse: import("@prisma/client/runtime/library").JsonValue | null;
+            refundToWallet: boolean;
+            lastError: string | null;
+            seatNos: string[];
+            providerNewHoldId: string | null;
+            providerNewTicketNo: string | null;
+            providerNewPnrNo: string | null;
+            chargePct: import("@prisma/client/runtime/library").Decimal;
+            chargeAmt: import("@prisma/client/runtime/library").Decimal;
+            refundAmount: import("@prisma/client/runtime/library").Decimal;
+            reason: string | null;
+        };
+        refund: {
+            userId: string | null;
+            id: string;
+            status: import(".prisma/client").$Enums.RefundStatus;
+            createdAt: Date;
+            updatedAt: Date;
+            idempotencyKey: string | null;
+            bookingId: string;
+            amount: import("@prisma/client/runtime/library").Decimal;
+            reason: string;
+            paymentId: string | null;
+            cancellationId: string | null;
+            destination: import(".prisma/client").$Enums.RefundDestination;
+            gatewayRefundId: string | null;
+            providerRefundRef: string | null;
+            retryCount: number;
+            completedAt: Date | null;
+        };
+        refunds: {
+            userId: string | null;
+            id: string;
+            status: import(".prisma/client").$Enums.RefundStatus;
+            createdAt: Date;
+            updatedAt: Date;
+            idempotencyKey: string | null;
+            bookingId: string;
+            amount: import("@prisma/client/runtime/library").Decimal;
+            reason: string;
+            paymentId: string | null;
+            cancellationId: string | null;
+            destination: import(".prisma/client").$Enums.RefundDestination;
+            gatewayRefundId: string | null;
+            providerRefundRef: string | null;
+            retryCount: number;
+            completedAt: Date | null;
+        }[];
+        walletCredited: boolean;
+    }>;
+    settle(id: string): Promise<void>;
 }
 //# sourceMappingURL=cancellations.service.d.ts.map

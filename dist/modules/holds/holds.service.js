@@ -1,6 +1,7 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.HoldsService = void 0;
+const node_crypto_1 = require("node:crypto");
 const uuid_1 = require("uuid");
 const env_1 = require("../../config/env");
 const gdsAdapter_1 = require("../../providers/gds/gdsAdapter");
@@ -25,8 +26,11 @@ class HoldsService {
         return HoldsService.instance;
     }
     async holdSeats(input, userId) {
+        if (env_1.env.NODE_ENV === 'production' && !(0, redis_1.isRedisAvailable)())
+            throw new errors_1.ProviderError('GDS', 'Seat reservations are temporarily unavailable');
         const prisma = (0, database_1.getPrismaClient)();
         const requestId = `hold-${(0, uuid_1.v4)()}`;
+        const requestHash = (0, node_crypto_1.createHash)('sha256').update(JSON.stringify({ passengers: input.passengers.map(({ seatNo, name, gender, age }) => ({ seatNo, name, gender, age })).sort((a, b) => a.seatNo.localeCompare(b.seatNo)), pickupId: input.pickupId, dropoffId: input.dropoffId, contact: input.contactInfo, gst: input.gstDetails })).digest('hex');
         const acquiredLocks = [];
         if (new Set(input.passengers.map((p) => p.seatNo)).size !== input.passengers.length) {
             throw new errors_1.SeatUnavailableError('Select each seat only once');
@@ -67,9 +71,6 @@ class HoldsService {
             for (const existingDbHold of existingDbHolds) {
                 if (!existingDbHold)
                     continue;
-                if (userId && existingDbHold.userId === userId) {
-                    continue;
-                }
                 const heldSeats = existingDbHold.seats;
                 if (Array.isArray(heldSeats)) {
                     const conflict = input.passengers.some((p) => heldSeats.some((hs) => {
@@ -77,6 +78,12 @@ class HoldsService {
                         return String(seat) === String(p.seatNo);
                     }));
                     if (conflict) {
+                        const context = existingDbHold.passengerContext;
+                        const same = userId && existingDbHold.userId === userId && heldSeats.length === input.passengers.length
+                            && existingDbHold.passengerContext?.requestHash === requestHash && context?.pickupId === input.pickupId && context?.dropoffId === input.dropoffId
+                            && input.passengers.every((p) => heldSeats.some((s) => s.seatNo === p.seatNo && s.name === p.name && s.gender === p.gender && s.age === p.age));
+                        if (same)
+                            return { id: existingDbHold.id, holdId: existingDbHold.providerHoldId, providerHoldId: existingDbHold.providerHoldId, expiresAt: existingDbHold.expiresAt, ttlSeconds: Math.max(0, Math.floor((existingDbHold.expiresAt.getTime() - Date.now()) / 1000)), totalFare: heldSeats.reduce((sum, s) => sum + Number(s.fare), 0) };
                         throw new errors_1.SeatUnavailableError('One or more of the selected seats are already on hold.');
                     }
                 }
@@ -87,10 +94,20 @@ class HoldsService {
             const chart = await this.gdsAdapter.getSeatChart(input.busId, {
                 fromCityId: input.fromCityId, toCityId: input.toCityId, journeyDate: input.journeyDate,
             });
+            const pickup = chart.BoardingPoints.find((point) => String(point.PickupCode) === input.pickupId);
+            const dropoff = chart.DroppingPoints.find((point) => String(point.DropoffCode) === input.dropoffId);
+            if ((chart.BoardingPoints.length && !pickup) || (chart.DroppingPoints.length && !dropoff))
+                throw new errors_1.SeatUnavailableError('Boarding or dropping point is no longer available');
+            const journey = {
+                operatorName: chart.CompanyName ?? null, busType: chart.BusTypeName ?? null,
+                cancellationPolicy: chart.CancellationPolicy,
+                pickupSnapshot: pickup ? { code: pickup.PickupCode, name: pickup.PickupName, time: pickup.PickupTime, address: pickup.Address ?? null, landmark: pickup.Landmark ?? null, contact: pickup.Contact ?? null } : null,
+                dropoffSnapshot: dropoff ? { code: dropoff.DropoffCode, name: dropoff.DropoffName, time: dropoff.DropoffTime, address: dropoff.Address ?? null, landmark: dropoff.Landmark ?? null, contact: dropoff.Contact ?? null } : null,
+            };
             const layout = new Map(chart.Layout.map((seat) => [seat.seat_no, seat]));
             const passengers = input.passengers.map((passenger) => {
                 const seat = layout.get(passenger.seatNo);
-                if (!seat || ![1, passenger.gender === 'M' ? 2 : 3].includes(seat.seat_status)) {
+                if (!seat || !(seat.seat_status === 1 || (passenger.gender === 'M' && seat.seat_status === 2) || (passenger.gender === 'F' && seat.seat_status === 3))) {
                     throw new errors_1.SeatUnavailableError(`Seat ${passenger.seatNo} is no longer available`);
                 }
                 return {
@@ -149,6 +166,7 @@ class HoldsService {
                     journeyDate: input.journeyDate,
                     busId: input.busId,
                     seats: passengers,
+                    passengerContext: { journey, requestHash, pickupId: input.pickupId, dropoffId: input.dropoffId, state: input.contactInfo.state ?? null, gstDetails: input.gstDetails ?? null },
                     expiresAt,
                 },
                 update: {
@@ -159,6 +177,7 @@ class HoldsService {
                     journeyDate: input.journeyDate,
                     busId: input.busId,
                     seats: passengers,
+                    passengerContext: { journey, requestHash, pickupId: input.pickupId, dropoffId: input.dropoffId, state: input.contactInfo.state ?? null, gstDetails: input.gstDetails ?? null },
                     expiresAt,
                 },
             });

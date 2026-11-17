@@ -1,6 +1,7 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.bookingsRouter = void 0;
+const zod_1 = require("zod");
 const express_1 = require("express");
 const bookings_controller_1 = require("./bookings.controller");
 const middleware_1 = require("../../app/middleware");
@@ -13,7 +14,7 @@ bookingsRouter.post('/', middleware_1.optionalAuth, (0, middleware_1.validate)({
 // Consolidated checkout session (booking + payment intent in one atomic call)
 bookingsRouter.post('/checkout-session', middleware_1.optionalAuth, (0, middleware_1.validate)({ body: bookings_validation_1.createCheckoutSessionSchema }), controller.createCheckoutSession);
 // Get current user's bookings (authenticated)
-bookingsRouter.get('/my-bookings', middleware_1.authenticate, controller.getUserBookings);
+bookingsRouter.get('/my-bookings', middleware_1.authenticate, (0, middleware_1.validate)({ query: zod_1.z.object({ limit: zod_1.z.coerce.number().int().min(1).max(100).optional(), cursor: zod_1.z.string().uuid().optional(), filter: zod_1.z.enum(['UPCOMING', 'PAST_TRIPS', 'CANCELLED']).optional() }) }), controller.getUserBookings);
 // Check booking status against Hold ID or Booking ID (Mantis GDS /ota/bookingstatusv2)
 bookingsRouter.post('/status', middleware_1.optionalAuth, controller.checkBookingStatus);
 bookingsRouter.get('/status/:holdId', middleware_1.optionalAuth, controller.checkBookingStatus);

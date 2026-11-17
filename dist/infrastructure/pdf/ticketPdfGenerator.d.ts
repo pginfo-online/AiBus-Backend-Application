@@ -14,16 +14,16 @@ export interface TicketPdfData {
     totalFare: number | string;
     contactName: string;
     contactPhone: string;
-    passengers: Array<{
+    status?: string;
+    pickupSnapshot?: unknown;
+    dropoffSnapshot?: unknown;
+    passengers: {
         name: string;
         age: number;
         gender: string;
         seatNo: string;
-    }>;
+        cancelled?: boolean;
+    }[];
 }
-/**
- * Generates an enterprise-styled, print-ready PDF e-ticket using PDFKit.
- * Returns a Buffer containing the complete binary PDF data.
- */
 export declare function generateTicketPdf(data: TicketPdfData): Promise<Buffer>;
 //# sourceMappingURL=ticketPdfGenerator.d.ts.map

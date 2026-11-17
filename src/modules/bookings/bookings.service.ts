@@ -59,7 +59,15 @@ export class BookingsService {
     }
 
     if (!input.holdId) throw new ValidationError('An active seat hold is required');
-    if (input.useWallet) throw new ValidationError('Customer wallet spending is currently unavailable');
+    if (input.useWallet && (!userId || agentId)) throw new ValidationError('Customer wallet requires a retail account');
+    const checkCheckoutPreferences = (existing: { dropoffSnapshot: unknown; walletAmount: unknown }) => {
+      const snapshot = existing.dropoffSnapshot as { couponMetadata?: { code?: string }; checkoutMetadata?: { useWallet?: boolean } } | null;
+      const requestedWallet = snapshot?.checkoutMetadata?.useWallet ?? (Number(existing.walletAmount) > 0);
+      if ((snapshot?.couponMetadata?.code || '').toUpperCase() !== (input.couponCode || '').toUpperCase()
+        || requestedWallet !== Boolean(input.useWallet)) {
+        throw new ConflictError('Checkout already exists with different wallet or offer preferences. Resume the existing payment.');
+      }
+    };
     const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(input.holdId);
     const hold = isUuid
       ? await prisma.seatHold.findUnique({ where: { id: input.holdId } })
@@ -80,7 +88,8 @@ export class BookingsService {
       const existing = await prisma.booking.findUnique({
         where: { id: hold.bookingId }, include: { seats: true, passengers: true },
       });
-      if (existing && (existing.status === BookingStatus.HELD || existing.status === BookingStatus.PAYMENT_PENDING)) {
+      if (existing && (existing.status === BookingStatus.HELD || existing.status === BookingStatus.PAYMENT_PENDING || existing.status === BookingStatus.PAYMENT_SUCCESS || existing.status === BookingStatus.CONFIRMED)) {
+        checkCheckoutPreferences(existing);
         return existing;
       }
       throw new ConflictError('Seat hold is already linked to a booking');
@@ -97,14 +106,19 @@ export class BookingsService {
     const serviceTax = Math.round((totalFare - baseFare) * 100) / 100;
     const providerHoldId = hold.providerHoldId;
 
-    let operatorName = input.operatorName;
-    if (agentId || input.couponCode) {
+    const context = hold.passengerContext as { pickupId?: string; dropoffId?: string; journey?: { operatorName?: string; busType?: string; cancellationPolicy?: unknown; pickupSnapshot?: Record<string, string>; dropoffSnapshot?: Record<string, string> } } | null;
+    if ((context?.pickupId && context.pickupId !== input.pickupCode) || (context?.dropoffId && context.dropoffId !== input.dropoffCode)) throw new ValidationError('Pickup and dropping points must match the held journey');
+    const verified = context?.journey;
+    let operatorName = verified?.operatorName || input.operatorName;
+    let busType = verified?.busType || input.busType;
+    if (!verified?.operatorName || !verified?.busType) {
       const buses = await this.gdsAdapter.searchBus({
         busId: hold.busId, fromCityId: hold.fromCityId, toCityId: hold.toCityId, journeyDate: hold.journeyDate,
       });
       const bus = buses.find((bus) => bus.RouteBusId === hold.busId);
       if (!bus) throw new ValidationError('Operator could not be verified for the selected trip');
       operatorName = bus.CompanyName;
+      busType = bus.BusTypeName;
     }
 
     // Resolve B2B commission if agent booking
@@ -153,7 +167,8 @@ export class BookingsService {
     // 5. Persist Booking, Seats, Passengers, and CommissionSnapshot in atomic transaction
     const booking = await prisma.$transaction(async (tx) => {
       const dropoffSnapshotWithCoupon = {
-        ...(input.dropoffSnapshot || {}),
+        ...(verified?.dropoffSnapshot || input.dropoffSnapshot || {}),
+        checkoutMetadata: { useWallet: Boolean(input.useWallet) },
         couponMetadata: appliedCoupon
           ? {
               id: appliedCoupon.id,
@@ -163,6 +178,23 @@ export class BookingsService {
           : null,
       };
 
+      // Serializing the hold prevents duplicate bookings and duplicate wallet debits.
+      await tx.$queryRaw`SELECT id FROM seat_holds WHERE id = ${hold.id}::uuid FOR UPDATE`;
+      const currentHold = await tx.seatHold.findUniqueOrThrow({ where: { id: hold.id } });
+      if (currentHold.bookingId) {
+        const existing = await tx.booking.findUniqueOrThrow({ where: { id: currentHold.bookingId }, include: { seats: true, passengers: true } });
+        checkCheckoutPreferences(existing);
+        return existing;
+      }
+      let walletAmount = 0;
+      if (input.useWallet && userId) {
+        await tx.$queryRaw`SELECT id FROM users WHERE id = ${userId}::uuid FOR UPDATE`;
+        const customer = await tx.user.findUniqueOrThrow({ where: { id: userId }, select: { walletBalance: true } });
+        walletAmount = Math.min(Number(customer.walletBalance), effectivePayableFare);
+        // Razorpay's minimum order is INR 1; keep any fractional remainder in the wallet.
+        if (effectivePayableFare - walletAmount > 0 && effectivePayableFare - walletAmount < 1) walletAmount = Math.max(0, effectivePayableFare - 1);
+        walletAmount = Math.round(walletAmount * 100) / 100;
+      }
       const createdBooking = await tx.booking.create({
         data: {
           userId: userId ?? null,
@@ -180,22 +212,24 @@ export class BookingsService {
           busId: input.busId,
           tripId: input.tripId,
           pickupCode: input.pickupCode,
-          pickupLocation: input.pickupLocation,
-          pickupTime: input.pickupTime,
+          pickupLocation: verified?.pickupSnapshot?.name || input.pickupLocation,
+          pickupTime: verified?.pickupSnapshot?.time || input.pickupTime,
           dropoffCode: input.dropoffCode,
-          dropoffLocation: input.dropoffLocation,
-          dropoffTime: input.dropoffTime,
+          dropoffLocation: verified?.dropoffSnapshot?.name || input.dropoffLocation,
+          dropoffTime: verified?.dropoffSnapshot?.time || input.dropoffTime,
           operatorName,
-          busType: input.busType,
+          busType,
           totalFare: effectivePayableFare,
+          walletAmount,
           baseFare: baseFare,
           serviceTax: serviceTax,
           discountAmount: couponDiscount,
+          passengerContext: hold.passengerContext ?? undefined,
           contactName: input.contactName,
           contactEmail: input.contactEmail,
           contactPhone: input.contactPhone,
-          cancellationPolicy: input.cancellationPolicy ?? null,
-          pickupSnapshot: input.pickupSnapshot ?? null,
+          cancellationPolicy: (verified?.cancellationPolicy ?? input.cancellationPolicy ?? null) as any,
+          pickupSnapshot: verified?.pickupSnapshot || input.pickupSnapshot || null,
           dropoffSnapshot: dropoffSnapshotWithCoupon,
           seats: {
             create: passengers.map((p) => ({
@@ -224,6 +258,17 @@ export class BookingsService {
         },
       });
 
+      if (walletAmount > 0 && userId) {
+        const customer = await tx.user.update({ where: { id: userId }, data: { walletBalance: { decrement: walletAmount } } });
+        await tx.walletTransaction.create({ data: { userId, type: 'DEBIT', amount: walletAmount, balanceAfter: customer.walletBalance, referenceType: 'BOOKING', referenceId: createdBooking.id, description: `Wallet payment for ${createdBooking.bookingNumber}` } });
+        if (walletAmount === effectivePayableFare) {
+          const walletPayment = await tx.payment.create({ data: { bookingId: createdBooking.id, userId, merchantTxnId: `WALLET-${createdBooking.id}`, amount: walletAmount, gateway: 'WALLET', status: 'SUCCESS', paymentMethod: 'WALLET' } });
+          await tx.booking.update({ where: { id: createdBooking.id }, data: { status: BookingStatus.PAYMENT_SUCCESS, paidPaymentId: walletPayment.id } });
+          createdBooking.status = BookingStatus.PAYMENT_SUCCESS;
+        }
+      }
+      // Reserve coupon usage atomically with checkout so concurrent checkouts cannot reuse a limited offer.
+      if (appliedCoupon && userId) await CouponsService.getInstance().recordCouponUsage(appliedCoupon.id, userId, createdBooking.id, couponDiscount, tx);
       // Save immutable CommissionSnapshot for B2B booking
       if (agentId && commissionResult) {
         await tx.commissionSnapshot.create({
@@ -257,7 +302,7 @@ export class BookingsService {
 
     // NOTE: GDS BookSeats (confirmBooking) must ONLY be called after payment verification.
     // The payment lifecycle is: HELD → PAYMENT_PENDING → PAYMENT_SUCCESS → CONFIRMED.
-    // Never call confirmBooking() here — it is called by PaymentsService.verifyPayment() only.
+    // Confirmation runs in a background worker after durable payment persistence.
     return booking;
   }
 
@@ -276,6 +321,10 @@ export class BookingsService {
 
     if (booking.agentId) return { booking, paymentIntent: null };
 
+    if (Number(booking.totalFare) === Number(booking.walletAmount)) {
+      await addJob(QueueName.BOOKING_RECONCILIATION, 'complete-paid-booking', { bookingId: booking.id, providerHoldId: booking.providerHoldId });
+      return { booking, paymentIntent: null };
+    }
     // 2. Generate payment intent via PaymentsService
     const { PaymentsService } = await import('../payments/payments.service');
     const paymentsService = PaymentsService.getInstance();
@@ -318,8 +367,8 @@ export class BookingsService {
       throw new ValidationError('Booking is missing provider hold ID');
     }
 
-    // Transition to BOOKING_REQUESTED
-    await prisma.booking.update({
+    // Claim once; a concurrent worker must not submit BookSeats again.
+    const claim = await prisma.booking.updateMany({
       where: { id: bookingId, version: booking.version, status: BookingStatus.PAYMENT_SUCCESS },
       data: {
         status: BookingStatus.BOOKING_REQUESTED,
@@ -327,14 +376,16 @@ export class BookingsService {
       },
     });
 
+    if (!claim.count) return prisma.booking.findUniqueOrThrow({ where: { id: bookingId }, include: { seats: true, passengers: true } });
+
     try {
       // Call GDS BookSeats
       const bookRes = await this.gdsAdapter.bookSeats(
         booking.providerHoldId,
-        Number(booking.totalFare)
+        booking.seats.reduce((sum, seat) => sum + Number(seat.fareTotal), 0)
       );
 
-      if (bookRes.Status !== 1 || !bookRes.TicketNo) {
+      if (bookRes.Status !== 1 || !bookRes.TicketNo || !bookRes.PNRNo) {
         throw new ProviderError('GDS', bookRes.Message || 'Booking failed at provider');
       }
 
@@ -355,18 +406,19 @@ export class BookingsService {
         // Mark Hold as CONVERTED
         if (booking.providerHoldId) {
           await tx.seatHold.updateMany({
-            where: { providerHoldId: booking.providerHoldId },
+            where: { bookingId: booking.id, providerHoldId: booking.providerHoldId },
             data: { status: HoldStatus.CONVERTED },
           });
         }
 
         // Generate Ticket record using actual 3rd party provider TicketNo (per Transactionapi.md)
-        const ticketNumber = String(bookRes.TicketNo || booking.providerTicketNo || `TKT-${booking.bookingNumber}`);
-        const createdTicket = await tx.ticket.create({
-          data: {
+        const ticketNumber = String(bookRes.TicketNo);
+        const createdTicket = await tx.ticket.upsert({
+          where: { bookingId: updated.id }, update: { ticketNumber, pnrNumber: bookRes.PNRNo, status: TicketStatus.ISSUED },
+          create: {
             bookingId: updated.id,
             ticketNumber,
-            pnrNumber: bookRes.PNRNo || 'N/A',
+            pnrNumber: bookRes.PNRNo,
             status: TicketStatus.ISSUED,
             bookingSnapshot: updated as any,
           },
@@ -375,6 +427,7 @@ export class BookingsService {
         return { ...updated, ticket: createdTicket };
       });
 
+      await addJob(QueueName.TICKET_GENERATION, 'enrich-ticket', { bookingId: confirmedBooking.id }, { jobId: `ticket-${confirmedBooking.id}` });
       // Queue confirmation notifications
       try {
         await addJob(QueueName.NOTIFICATION_EMAIL, 'booking-confirmation-email', {
@@ -456,33 +509,22 @@ export class BookingsService {
     return booking;
   }
 
-  public async getUserBookings(userId: string) {
+  public async getUserBookings(userId: string, options?: { limit: number; cursor?: string; filter?: string }) {
     const prisma = getPrismaClient();
-
-    const staff = prisma.agentStaff
-      ? await prisma.agentStaff.findFirst({
-          where: { userId, isActive: true },
-          select: { agentId: true },
-        })
-      : null;
-
-    const where = staff?.agentId
-      ? { agentId: staff.agentId }
-      : { userId };
-
-    return prisma.booking.findMany({
-      where,
-      include: {
-        seats: true,
-        passengers: true,
-        ticket: true,
-        payments: true,
-        cancellations: true,
-        refunds: true,
-        commissionSnapshot: true,
-      },
-      orderBy: { createdAt: 'desc' },
+    const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
+    const active: BookingStatus[] = [BookingStatus.HELD, BookingStatus.PAYMENT_PENDING, BookingStatus.PAYMENT_SUCCESS, BookingStatus.BOOKING_REQUESTED, BookingStatus.BOOKING_UNKNOWN, BookingStatus.CONFIRMED, BookingStatus.CANCELLATION_REQUESTED];
+    const filters = options?.filter === 'CANCELLED' ? { cancelledAt: { not: null } }
+      : options?.filter === 'UPCOMING' ? { cancelledAt: null, journeyDate: { gte: today }, status: { in: active } }
+      : options?.filter === 'PAST_TRIPS' ? { cancelledAt: null, OR: [{ journeyDate: { lt: today } }, { status: { notIn: active } }] } : {};
+    const limit = options?.limit ?? 100;
+    const rows = await prisma.booking.findMany({
+      where: { userId, ...filters },
+      include: { seats: true, passengers: true, ticket: { select: { ticketNumber: true, pnrNumber: true, status: true } }, refunds: { select: { id: true, amount: true, status: true, destination: true, completedAt: true } } },
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }], take: limit + (options ? 1 : 0),
+      ...(options?.cursor ? { cursor: { id: options.cursor }, skip: 1 } : {}),
     });
+    if (!options) return rows;
+    return { items: rows.slice(0, limit), nextCursor: rows.length > limit ? rows[limit - 1].id : null };
   }
 
   public async checkBookingStatus(

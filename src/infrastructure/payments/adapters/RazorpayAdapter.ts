@@ -136,10 +136,19 @@ export class RazorpayAdapter implements IPaymentGateway {
    * Supports both cryptographic HMAC SHA256 signature verification and API fetch
    */
   public async verifyPayment(params: VerifyPaymentParams): Promise<PaymentVerificationResult> {
-    const { gatewayOrderId, gatewayPaymentId, gatewaySignature, merchantTxnId } = params;
+    const { gatewayOrderId, gatewaySignature, merchantTxnId } = params;
+    let gatewayPaymentId = params.gatewayPaymentId;
     const result = { gateway: this.gatewayName, merchantTxnId, success: false, status: 'PENDING' as const };
     const secret = env.RAZORPAY_KEY_SECRET;
-    if (!this.client || !secret || !gatewayOrderId || !gatewayPaymentId) return result;
+    if (!this.client || !secret || !gatewayOrderId) return result;
+    if (!gatewayPaymentId && gatewaySignature === undefined) {
+      const { data } = await this.client.get<{ items: { id: string; status: string }[] }>(`/orders/${encodeURIComponent(gatewayOrderId)}/payments`);
+      gatewayPaymentId = data.items?.find((item) => item.status === 'captured')?.id;
+      if (!gatewayPaymentId) {
+        return { ...result, status: data.items?.length && data.items.every((item) => item.status === 'failed') ? 'FAILED' as const : 'PENDING' as const };
+      }
+    }
+    if (!gatewayPaymentId) return result;
 
     if (gatewaySignature !== undefined) {
       const expected = crypto.createHmac('sha256', secret)
@@ -154,7 +163,8 @@ export class RazorpayAdapter implements IPaymentGateway {
       acquirer_data?: { bank_transaction_id?: string; rrn?: string };
     }>(`/payments/${gatewayPaymentId}`);
     if (payment.id !== gatewayPaymentId || payment.order_id !== gatewayOrderId || payment.currency !== 'INR'
-      || !Number.isSafeInteger(Number(payment.amount)) || payment.status !== 'captured') return result;
+      || !Number.isSafeInteger(Number(payment.amount))) return result;
+    if (payment.status !== 'captured') return { ...result, status: payment.status === 'failed' ? 'FAILED' as const : 'PENDING' as const };
 
     return {
       ...result, success: true, status: 'SUCCESS',
@@ -183,13 +193,16 @@ export class RazorpayAdapter implements IPaymentGateway {
       try {
         const path = `/payments/${encodeURIComponent(params.gatewayPaymentId)}/refund`;
         const { data: refund } = params.gatewayRefundId
-          ? await this.client.get<{ id: string; status: string }>(`${path}s/${encodeURIComponent(params.gatewayRefundId)}`)
-          : await this.client.post<{ id: string; status: string }>(path, {
+          ? await this.client.get<{ id: string; status: string; amount: number; payment_id: string; currency: string }>(`/refunds/${encodeURIComponent(params.gatewayRefundId)}`)
+          : await this.client.post<{ id: string; status: string; amount: number; payment_id: string; currency: string }>(path, {
               amount: amountInPaise,
               receipt: params.merchantRefundId,
               notes: { reason: params.reason || 'Ticket cancellation refund' },
             }, { headers: { 'X-Refund-Idempotency': params.merchantRefundId } });
 
+        if (!/^rfnd_[a-zA-Z0-9]+$/.test(refund.id) || refund.payment_id !== params.gatewayPaymentId || refund.currency !== 'INR' || Number(refund.amount) !== amountInPaise) {
+          return { gateway: 'RAZORPAY', success: false, code: 'INVALID_REFUND_RESPONSE', gatewayRefundId: refund.id };
+        }
         razorpayLogger.info(
           { refundId: refund.id, amount: params.amount, paymentId: params.gatewayPaymentId },
           'Razorpay refund executed successfully'

@@ -3,6 +3,10 @@
  * Resolves BOOKING_UNKNOWN states caused by network timeouts during BookSeats call
  */
 export declare function startBookingReconciliationWorker(): import("bullmq").Worker<unknown, any, string, import("bullmq").RedisQueueBackend, import("bullmq").JobProgress, import("bullmq").ConnectionOptions>;
+export declare function reconcileBooking(data: {
+    bookingId: string;
+    providerHoldId: string;
+}): Promise<void>;
 /**
  * 2. Hold Expiry Cleanup Worker
  * Releases seats and marks SeatHold expired after 10-minute TTL
@@ -13,6 +17,11 @@ export declare function startHoldExpiryWorker(): import("bullmq").Worker<unknown
  * Dispatches refunds to payment gateway (Razorpay) and updates database records
  */
 export declare function startRefundWorker(): import("bullmq").Worker<unknown, any, string, import("bullmq").RedisQueueBackend, import("bullmq").JobProgress, import("bullmq").ConnectionOptions>;
+export declare function processRefund(data: {
+    refundId: string;
+    gatewayPaymentId?: string;
+    merchantTxnId?: string;
+}): Promise<void>;
 /**
  * 4. Notification Workers (Email & SMS)
  */

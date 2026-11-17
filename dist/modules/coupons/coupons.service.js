@@ -230,6 +230,15 @@ class CouponsService {
             finalPayableAmount,
         };
     }
+    async releaseCheckoutCoupon(bookingId, tx) {
+        const usages = await tx.couponUsage.findMany({ where: { bookingId } });
+        for (const usage of usages) {
+            await tx.$queryRaw `SELECT id FROM coupons WHERE id = ${usage.couponId}::uuid FOR UPDATE`;
+            const removed = await tx.couponUsage.deleteMany({ where: { id: usage.id } });
+            if (removed.count)
+                await tx.coupon.update({ where: { id: usage.couponId }, data: { usedCount: { decrement: 1 } } });
+        }
+    }
     /**
      * Record coupon usage upon successful booking confirmation / payment
      */
@@ -240,6 +249,11 @@ class CouponsService {
             const existing = await tx.couponUsage.findFirst({ where: { couponId, bookingId }, select: { id: true } });
             if (existing)
                 return;
+            const coupon = await tx.coupon.findUniqueOrThrow({ where: { id: couponId } });
+            if (coupon.usageLimit !== null && coupon.usedCount >= coupon.usageLimit)
+                throw new errors_1.ValidationError('Coupon usage limit reached');
+            if (coupon.usageLimitPerUser && await tx.couponUsage.count({ where: { couponId, userId } }) >= coupon.usageLimitPerUser)
+                throw new errors_1.ValidationError('Coupon usage limit reached for this account');
             await tx.couponUsage.create({ data: { couponId, userId, bookingId, discount } });
             await tx.coupon.update({ where: { id: couponId }, data: { usedCount: { increment: 1 } } });
         };
@@ -252,6 +266,8 @@ class CouponsService {
         }
         catch (err) {
             this.couponLogger.error({ err: err.message, couponId, bookingId }, 'Failed to record coupon usage');
+            if (txClient)
+                throw err;
         }
     }
 }

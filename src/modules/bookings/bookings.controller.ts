@@ -44,7 +44,9 @@ export class BookingsController {
   public getUserBookings = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     try {
       const userId = (req as any).user.sub;
-      const bookings = await this.bookingsService.getUserBookings(userId);
+      const bookings = await this.bookingsService.getUserBookings(userId, req.query.limit || req.query.cursor || req.query.filter ? {
+        limit: Number(req.query.limit || 20), cursor: req.query.cursor as string | undefined, filter: req.query.filter as string | undefined,
+      } : undefined);
       ApiResponse.success(res, bookings);
     } catch (error) {
       next(error);

@@ -202,6 +202,13 @@ model User {
   createdAt          DateTime           @default(now()) @map("created_at")
   updatedAt          DateTime           @updatedAt @map("updated_at")
 
+  dateOfBirth        DateTime? @map("date_of_birth") @db.Date
+  gender             String?
+  state              String?
+  personalPhone      String? @map("personal_phone")
+  contactEmail       String? @map("contact_email")
+  savedPassengers    SavedPassenger[]
+
   refreshTokens      RefreshToken[]
   bookings           Booking[]
   seatHolds          SeatHold[]
@@ -281,9 +288,14 @@ model Booking {
   operatorGst        Decimal               @default(0.00) @map("operator_gst") @db.Decimal(10, 2)
   convenienceFee     Decimal               @default(0.00) @map("convenience_fee") @db.Decimal(10, 2)
   discountAmount     Decimal               @default(0.00) @map("discount_amount") @db.Decimal(10, 2)
+  paidPaymentId String? @unique @map("paid_payment_id") @db.Uuid
+  paidPayment Payment? @relation("FundedBooking", fields: [paidPaymentId], references: [id], onDelete: SetNull)
+  ticketEnrichedAt   DateTime? @map("ticket_enriched_at")
+  walletAmount       Decimal @default(0) @map("wallet_amount") @db.Decimal(10, 2)
   contactName        String                @map("contact_name")
   contactEmail       String                @map("contact_email")
   contactPhone       String                @map("contact_phone")
+  passengerContext   Json?                 @map("passenger_context")
   cancellationPolicy Json?                 @map("cancellation_policy")
   pickupSnapshot     Json?                 @map("pickup_snapshot")
   dropoffSnapshot    Json?                 @map("dropoff_snapshot")
@@ -314,10 +326,14 @@ model Booking {
   @@index([providerHoldId])
   @@index([providerTicketNo])
   @@index([journeyDate])
+  @@index([status, ticketEnrichedAt])
+  @@index([userId, createdAt, id])
+  @@index([status, updatedAt])
   @@map("bookings")
 }
 
 model BookingSeat {
+  cancelledAt DateTime? @map("cancelled_at")
   id          String   @id @default(uuid()) @db.Uuid
   bookingId   String   @map("booking_id") @db.Uuid
   seatNo      String   @map("seat_no")
@@ -366,6 +382,7 @@ model SeatHold {
   journeyDate    String     @map("journey_date")
   busId          Int        @map("bus_id")
   seats          Json
+  passengerContext Json? @map("passenger_context")
   expiresAt      DateTime   @map("expires_at")
   releasedAt     DateTime?  @map("released_at")
   createdAt      DateTime   @default(now()) @map("created_at")
@@ -381,6 +398,8 @@ model SeatHold {
 }
 
 model Payment {
+  fundedBooking Booking? @relation("FundedBooking")
+  nextCheckAt DateTime @default(now()) @map("next_check_at")
   id                String        @id @default(uuid()) @db.Uuid
   bookingId         String        @map("booking_id") @db.Uuid
   userId            String?       @map("user_id") @db.Uuid
@@ -406,11 +425,17 @@ model Payment {
 
   @@index([bookingId])
   @@index([status])
+  @@index([status, nextCheckAt])
   @@index([gatewayOrderId])
+  @@index([status, updatedAt])
   @@map("payments")
 }
 
 model Cancellation {
+  requestSnapshot Json? @map("request_snapshot")
+  providerResponse Json? @map("provider_response")
+  refundToWallet Boolean @default(false) @map("refund_to_wallet")
+  lastError String? @map("last_error")
   id                 String             @id @default(uuid()) @db.Uuid
   bookingId          String             @map("booking_id") @db.Uuid
   userId             String?            @map("user_id") @db.Uuid
@@ -433,6 +458,7 @@ model Cancellation {
   refunds            Refund[]
 
   @@index([bookingId])
+  @@index([status, updatedAt])
   @@map("cancellations")
 }
 
@@ -462,6 +488,7 @@ model Refund {
   @@index([bookingId])
   @@index([paymentId])
   @@index([status])
+  @@index([status, updatedAt])
   @@map("refunds")
 }
 
@@ -1071,3 +1098,19 @@ model PaymentGatewayConfig {
   @@map("payment_gateway_configs")
 }
 
+
+model SavedPassenger {
+  id String @id @default(uuid()) @db.Uuid
+  userId String @map("user_id") @db.Uuid
+  name String @db.VarChar(100)
+  dateOfBirth DateTime? @map("date_of_birth") @db.Date
+  age Int?
+  ageRecordedOn DateTime? @map("age_recorded_on") @db.Date
+  gender String @db.VarChar(1)
+  mobile String? @db.VarChar(10)
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  @@index([userId, createdAt, id])
+  @@map("saved_passengers")
+}

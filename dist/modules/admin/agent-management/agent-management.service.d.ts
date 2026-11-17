@@ -23,8 +23,8 @@ export declare class AgentManagementService {
             status: import(".prisma/client").$Enums.AgentStatus;
             createdAt: Date;
             updatedAt: Date;
-            city: string;
             state: string;
+            city: string;
             businessName: string;
             contactPersonName: string;
             businessAddress: string;
@@ -120,8 +120,8 @@ export declare class AgentManagementService {
         status: import(".prisma/client").$Enums.AgentStatus;
         createdAt: Date;
         updatedAt: Date;
-        city: string;
         state: string;
+        city: string;
         businessName: string;
         contactPersonName: string;
         businessAddress: string;
@@ -142,8 +142,8 @@ export declare class AgentManagementService {
         status: import(".prisma/client").$Enums.AgentStatus;
         createdAt: Date;
         updatedAt: Date;
-        city: string;
         state: string;
+        city: string;
         businessName: string;
         contactPersonName: string;
         businessAddress: string;
@@ -164,8 +164,8 @@ export declare class AgentManagementService {
         status: import(".prisma/client").$Enums.AgentStatus;
         createdAt: Date;
         updatedAt: Date;
-        city: string;
         state: string;
+        city: string;
         businessName: string;
         contactPersonName: string;
         businessAddress: string;
@@ -186,8 +186,8 @@ export declare class AgentManagementService {
         status: import(".prisma/client").$Enums.AgentStatus;
         createdAt: Date;
         updatedAt: Date;
-        city: string;
         state: string;
+        city: string;
         businessName: string;
         contactPersonName: string;
         businessAddress: string;

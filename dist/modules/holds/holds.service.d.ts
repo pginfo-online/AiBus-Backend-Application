@@ -11,6 +11,14 @@ export declare class HoldsService {
         providerHoldId: string;
         expiresAt: Date;
         ttlSeconds: number;
+        totalFare: any;
+        seats?: undefined;
+    } | {
+        id: string;
+        holdId: string;
+        providerHoldId: string;
+        expiresAt: Date;
+        ttlSeconds: number;
         totalFare: number;
         seats: {
             seatTypeId: number;
@@ -18,7 +26,7 @@ export declare class HoldsService {
             baseFare: number;
             serviceTax: number;
             seatNo: string;
-            gender: "M" | "F";
+            gender: "O" | "M" | "F";
             age: number;
             name: string;
             isAcSeat: boolean;
@@ -37,6 +45,7 @@ export declare class HoldsService {
         toCityId: number;
         journeyDate: string;
         busId: number;
+        passengerContext: import("@prisma/client/runtime/library").JsonValue | null;
         bookingId: string | null;
         seats: import("@prisma/client/runtime/library").JsonValue;
         releasedAt: Date | null;

@@ -1,6 +1,7 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.swaggerDocument = void 0;
+const passengers_openapi_1 = require("./passengers.openapi");
 exports.swaggerDocument = {
     openapi: '3.0.3',
     info: {
@@ -60,6 +61,7 @@ exports.swaggerDocument = {
         },
     },
     paths: {
+        ...passengers_openapi_1.passengerPaths,
         '/health/live': {
             get: {
                 summary: 'Liveness Probe',
@@ -204,10 +206,30 @@ exports.swaggerDocument = {
         '/api/v1/bookings': {
             post: {
                 summary: 'Create Booking',
-                description: 'Creates a booking record linked to an active hold.',
+                description: 'Creates one booking per owned active hold using held seat prices and verified operator metadata. Optional couponCode and useWallet are settled atomically; retrying a hold with changed financial preferences returns 409. Passenger, contact and journey fields are required; no dummy defaults are supplied.',
                 responses: {
                     '201': { description: 'Booking created with status HELD' },
                 },
+            },
+        },
+        '/api/v1/bookings/checkout-session': {
+            post: {
+                summary: 'Create or resume checkout',
+                description: 'Creates the booking and server-owned Razorpay order. Returns data.booking and data.paymentIntent. paymentIntent is null for a fully wallet-funded booking; the client must still fetch the authoritative booking outcome. Never infer operator confirmation from a gateway callback.',
+                responses: { '201': { description: 'Checkout created or resumed' }, '409': { description: 'Hold is already used or financial preferences differ' } },
+            },
+        },
+        '/api/v1/bookings/my-bookings': {
+            get: {
+                summary: 'List current user bookings',
+                security: [{ BearerAuth: [] }],
+                description: 'User-scoped cursor pagination ordered by createdAt and id descending. With limit, data is {items, nextCursor}; otherwise returns a legacy array capped at 100. UPCOMING and PAST_TRIPS use the India calendar date. Cancellation and refund summaries preserve separate statuses.',
+                parameters: [
+                    { name: 'limit', in: 'query', schema: { type: 'integer', minimum: 1, maximum: 100 } },
+                    { name: 'cursor', in: 'query', schema: { type: 'string', format: 'uuid' } },
+                    { name: 'filter', in: 'query', schema: { type: 'string', enum: ['UPCOMING', 'PAST_TRIPS', 'CANCELLED'] } },
+                ],
+                responses: { '200': { description: 'Owned booking summaries and optional next cursor' } },
             },
         },
         '/api/v1/payments/intent': {
@@ -221,10 +243,10 @@ exports.swaggerDocument = {
         },
         '/api/v1/payments/verify': {
             post: {
-                summary: 'Verify Payment & Confirm Booking',
-                description: 'Verifies payment status and calls GDS BookSeats. If GDS times out, transitions booking to BOOKING_UNKNOWN and queues automatic background reconciliation.',
+                summary: 'Verify payment and return current booking outcome',
+                description: 'Checks the server-owned order, signature when supplied, captured currency and amount. Can discover capture from the order after a lost client callback. Persists capture before asynchronous operator confirmation; duplicate calls return current state. data.status describes the booking outcome, data.payment.status describes payment only. PENDING and BOOKING_UNKNOWN are unresolved, not ticket confirmation. Late and duplicate captures are refunded idempotently.',
                 responses: {
-                    '200': { description: 'Booking confirmed and ticket issued' },
+                    '200': { description: 'Current payment and booking state; confirmation may remain pending' },
                     '400': { description: 'Payment verification failed' },
                 },
             },
@@ -232,7 +254,7 @@ exports.swaggerDocument = {
         '/api/v1/tickets/booking/{bookingId}': {
             get: {
                 summary: 'Get Digital Ticket',
-                description: 'Fetches digital travel itinerary, PNR number, ticket number, passenger list, and boarding snapshot.',
+                description: 'Reads owned persisted itinerary, actual operator ticket/PNR identifiers, active and cancelled seats, refund summaries and boarding snapshot. Identifiers remain null until issued; GET does not issue a ticket or call the operator.',
                 parameters: [{ name: 'bookingId', in: 'path', required: true, schema: { type: 'string', format: 'uuid' } }],
                 responses: {
                     '200': { description: 'Ticket found' },
@@ -243,8 +265,8 @@ exports.swaggerDocument = {
         '/api/v1/cancellations/{bookingId}/check': {
             get: {
                 summary: 'Check Cancellability',
-                description: 'Calculates refund percentage, cancellation fee, and projected refund amount according to operator cancellation policy.',
-                parameters: [{ name: 'bookingId', in: 'path', required: true, schema: { type: 'string', format: 'uuid' } }],
+                description: 'Queries actual operator eligibility for the selected active seats. Refund projection subtracts the proportional offer benefit and respects the amount actually paid.',
+                parameters: [{ name: 'bookingId', in: 'path', required: true, schema: { type: 'string', format: 'uuid' } }, { name: 'seatNos', in: 'query', description: 'Comma-separated seat numbers; omit for all active seats', schema: { type: 'string' } }],
                 responses: {
                     '200': { description: 'Cancellability status and refund projection' },
                 },
@@ -253,10 +275,12 @@ exports.swaggerDocument = {
         '/api/v1/cancellations/{bookingId}': {
             post: {
                 summary: 'Cancel Seats',
-                description: 'Cancels seats with upstream GDS provider, transitions booking to CANCELLED, and enqueues refund on BullMQ refund queue.',
+                description: 'Durably records one cancellation before calling the operator. seatNos selects a subset or all active seats. Partial cancellation preserves CONFIRMED with replacement operator identifiers. Full cancellation becomes CANCELLED. Wallet and gateway refunds have independent records and statuses. An ambiguous operator timeout returns 202 and requires reconciliation; retrying does not repeat the external write.',
+                requestBody: { content: { 'application/json': { schema: { type: 'object', properties: { seatNos: { type: 'array', items: { type: 'string' }, minItems: 1, maxItems: 6 }, reason: { type: 'string', maxLength: 500 }, refundToWallet: { type: 'boolean', default: false } } } } } },
                 parameters: [{ name: 'bookingId', in: 'path', required: true, schema: { type: 'string', format: 'uuid' } }],
                 responses: {
                     '200': { description: 'Cancellation completed and refund queued' },
+                    '202': { description: 'Operator cancellation confirmation or settlement remains pending' },
                 },
             },
         },

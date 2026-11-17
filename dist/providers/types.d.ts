@@ -86,7 +86,7 @@ export interface GdsPassengerHold {
     SeatNo: string;
     SeatTypeId: number;
     Fare: number;
-    Gender: 'M' | 'F';
+    Gender: 'M' | 'F' | 'O';
     Age: number;
     Name: string;
     IsAcSeat: boolean;

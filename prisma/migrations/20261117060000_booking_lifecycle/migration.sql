@@ -1,0 +1,16 @@
+ALTER TABLE "bookings" ADD COLUMN "wallet_amount" DECIMAL(10,2) NOT NULL DEFAULT 0;
+ALTER TABLE "booking_seats" ADD COLUMN "cancelled_at" TIMESTAMP(3);
+ALTER TABLE "cancellations" ADD COLUMN "request_snapshot" JSONB, ADD COLUMN "provider_response" JSONB, ADD COLUMN "refund_to_wallet" BOOLEAN NOT NULL DEFAULT false, ADD COLUMN "last_error" TEXT;
+CREATE INDEX "bookings_user_id_created_at_id_idx" ON "bookings"("user_id", "created_at", "id");
+CREATE INDEX "bookings_status_updated_at_idx" ON "bookings"("status", "updated_at");
+CREATE INDEX "payments_status_updated_at_idx" ON "payments"("status", "updated_at");
+CREATE INDEX "refunds_status_updated_at_idx" ON "refunds"("status", "updated_at");
+CREATE INDEX "cancellations_status_updated_at_idx" ON "cancellations"("status", "updated_at");
+ALTER TABLE "bookings" ADD COLUMN "ticket_enriched_at" TIMESTAMP(3);
+CREATE INDEX "bookings_status_ticket_enriched_at_idx" ON "bookings"("status", "ticket_enriched_at");
+ALTER TABLE "payments" ADD COLUMN "next_check_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP;
+CREATE INDEX "payments_status_next_check_at_idx" ON "payments"("status", "next_check_at");
+ALTER TABLE "bookings" ADD COLUMN "paid_payment_id" UUID;
+CREATE UNIQUE INDEX "bookings_paid_payment_id_key" ON "bookings"("paid_payment_id");
+ALTER TABLE "bookings" ADD CONSTRAINT "bookings_paid_payment_id_fkey" FOREIGN KEY ("paid_payment_id") REFERENCES "payments"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+UPDATE "bookings" b SET "paid_payment_id" = (SELECT p.id FROM "payments" p WHERE p.booking_id = b.id AND p.status IN ('SUCCESS','PARTIALLY_REFUNDED','REFUNDED') ORDER BY p.created_at ASC, p.id ASC LIMIT 1) WHERE b.status IN ('CONFIRMED','BOOKING_REQUESTED','BOOKING_UNKNOWN','PAYMENT_SUCCESS','CANCELLATION_REQUESTED','CANCELLED');

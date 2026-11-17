@@ -4,6 +4,7 @@ import { logger } from './infrastructure/logger';
 import { connectDatabase, disconnectDatabase } from './infrastructure/database';
 import { connectRedis, disconnectRedis, isRedisAvailable } from './infrastructure/redis';
 import { shutdownQueues } from './infrastructure/queues';
+import { startRecoveryLoop } from './jobs/recoveryLoop';
 import { initializeWorkers } from './jobs';
 import { PaymentOrchestrator } from './infrastructure/payments';
 
@@ -69,6 +70,8 @@ async function bootstrap() {
       );
     }
 
+    const stopRecovery = startRecoveryLoop();
+
     // 4. Initialize Express application
     const app = createApp();
 
@@ -86,6 +89,7 @@ async function bootstrap() {
     const gracefulShutdown = async (signal: string) => {
       if (isShuttingDown) return;
       isShuttingDown = true;
+      stopRecovery();
 
       serverLogger.info({ signal }, 'Graceful shutdown initiated...');
 

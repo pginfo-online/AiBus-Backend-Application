@@ -10,8 +10,12 @@ class CancellationsController {
     }
     checkCancellability = async (req, res, next) => {
         try {
-            const bookingId = Array.isArray(req.params.bookingId) ? req.params.bookingId[0] : req.params.bookingId;
-            const seatNos = req.query.seatNos ? req.query.seatNos.split(',') : undefined;
+            const bookingId = Array.isArray(req.params.bookingId)
+                ? req.params.bookingId[0]
+                : req.params.bookingId;
+            const seatNos = req.query.seatNos
+                ? req.query.seatNos.split(",")
+                : undefined;
             const result = await this.cancellationsService.checkCancellability(bookingId, seatNos, req.user?.sub);
             response_1.ApiResponse.success(res, result);
         }
@@ -21,18 +25,20 @@ class CancellationsController {
     };
     cancelSeats = async (req, res, next) => {
         try {
-            const bookingId = Array.isArray(req.params.bookingId) ? req.params.bookingId[0] : req.params.bookingId;
+            const bookingId = Array.isArray(req.params.bookingId)
+                ? req.params.bookingId[0]
+                : req.params.bookingId;
             const rawSeatNos = req.body?.seatNos || req.body?.SeatNos || req.body?.seats;
             const seatNos = Array.isArray(rawSeatNos)
                 ? rawSeatNos
-                : typeof rawSeatNos === 'string'
-                    ? rawSeatNos.split(',')
+                : typeof rawSeatNos === "string"
+                    ? rawSeatNos.split(",")
                     : [];
             const reason = req.body?.reason;
             const refundToWallet = req.body?.refundToWallet === true;
             const userId = req.user?.sub;
             const result = await this.cancellationsService.cancelSeats(bookingId, seatNos, reason, userId, refundToWallet);
-            response_1.ApiResponse.success(res, result, 'Booking cancelled and refund processed');
+            (0, response_1.sendSuccess)(res, { data: result, statusCode: result.cancellation.status === 'COMPLETED' ? 200 : 202 });
         }
         catch (error) {
             next(error);

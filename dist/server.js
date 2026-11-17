@@ -7,6 +7,7 @@ const logger_1 = require("./infrastructure/logger");
 const database_1 = require("./infrastructure/database");
 const redis_1 = require("./infrastructure/redis");
 const queues_1 = require("./infrastructure/queues");
+const recoveryLoop_1 = require("./jobs/recoveryLoop");
 const jobs_1 = require("./jobs");
 const payments_1 = require("./infrastructure/payments");
 // ---------------------------------------------------------------------------
@@ -59,6 +60,7 @@ async function bootstrap() {
         catch (payErr) {
             serverLogger.warn({ err: payErr.message }, 'Payment Orchestrator initialization error (will retry dynamically on demand)');
         }
+        const stopRecovery = (0, recoveryLoop_1.startRecoveryLoop)();
         // 4. Initialize Express application
         const app = (0, app_1.createApp)();
         // 4. Start HTTP server
@@ -71,6 +73,7 @@ async function bootstrap() {
             if (isShuttingDown)
                 return;
             isShuttingDown = true;
+            stopRecovery();
             serverLogger.info({ signal }, 'Graceful shutdown initiated...');
             // Force exit timeout to avoid hanging processes
             const forceExitTimer = setTimeout(() => {

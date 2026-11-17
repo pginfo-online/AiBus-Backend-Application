@@ -104,6 +104,7 @@ export declare class UserManagementService {
         bookings: ({
             seats: {
                 id: string;
+                cancelledAt: Date | null;
                 bookingId: string;
                 seatNo: string;
                 seatTypeId: number;
@@ -136,6 +137,7 @@ export declare class UserManagementService {
                 updatedAt: Date;
                 idempotencyKey: string | null;
                 bookingId: string;
+                nextCheckAt: Date;
                 amount: Prisma.Decimal;
                 currency: string;
                 gateway: string;
@@ -150,11 +152,11 @@ export declare class UserManagementService {
             passengers: {
                 name: string;
                 id: string;
+                gender: string;
+                age: number;
                 bookingId: string;
                 seatNo: string;
                 seatTypeId: number;
-                age: number;
-                gender: string;
                 fare: Prisma.Decimal;
                 isAcSeat: boolean;
             }[];
@@ -165,6 +167,7 @@ export declare class UserManagementService {
             status: import(".prisma/client").$Enums.BookingStatus;
             createdAt: Date;
             updatedAt: Date;
+            contactEmail: string;
             agentId: string | null;
             userType: string;
             bookingNumber: string;
@@ -193,9 +196,12 @@ export declare class UserManagementService {
             operatorGst: Prisma.Decimal;
             convenienceFee: Prisma.Decimal;
             discountAmount: Prisma.Decimal;
+            paidPaymentId: string | null;
+            ticketEnrichedAt: Date | null;
+            walletAmount: Prisma.Decimal;
             contactName: string;
-            contactEmail: string;
             contactPhone: string;
+            passengerContext: Prisma.JsonValue | null;
             cancellationPolicy: Prisma.JsonValue | null;
             pickupSnapshot: Prisma.JsonValue | null;
             dropoffSnapshot: Prisma.JsonValue | null;
@@ -218,6 +224,7 @@ export declare class UserManagementService {
             updatedAt: Date;
             idempotencyKey: string | null;
             bookingId: string;
+            nextCheckAt: Date;
             amount: Prisma.Decimal;
             currency: string;
             gateway: string;

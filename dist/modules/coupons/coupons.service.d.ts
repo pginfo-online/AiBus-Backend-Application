@@ -50,6 +50,7 @@ export declare class CouponsService {
         originalFare: number;
         finalPayableAmount: number;
     }>;
+    releaseCheckoutCoupon(bookingId: string, tx: Prisma.TransactionClient): Promise<void>;
     /**
      * Record coupon usage upon successful booking confirmation / payment
      */

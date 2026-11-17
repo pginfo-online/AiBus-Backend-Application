@@ -12,9 +12,9 @@ export declare class PaymentManagementService {
             booking: {
                 id: string;
                 status: import(".prisma/client").$Enums.BookingStatus;
+                contactEmail: string;
                 bookingNumber: string;
                 contactName: string;
-                contactEmail: string;
             };
         } & {
             metadata: Prisma.JsonValue | null;
@@ -25,6 +25,7 @@ export declare class PaymentManagementService {
             updatedAt: Date;
             idempotencyKey: string | null;
             bookingId: string;
+            nextCheckAt: Date;
             amount: Prisma.Decimal;
             currency: string;
             gateway: string;
@@ -45,6 +46,7 @@ export declare class PaymentManagementService {
         booking: {
             seats: {
                 id: string;
+                cancelledAt: Date | null;
                 bookingId: string;
                 seatNo: string;
                 seatTypeId: number;
@@ -64,6 +66,10 @@ export declare class PaymentManagementService {
                 totalFare: Prisma.Decimal;
                 idempotencyKey: string | null;
                 bookingId: string;
+                requestSnapshot: Prisma.JsonValue | null;
+                providerResponse: Prisma.JsonValue | null;
+                refundToWallet: boolean;
+                lastError: string | null;
                 seatNos: string[];
                 providerNewHoldId: string | null;
                 providerNewTicketNo: string | null;
@@ -94,11 +100,11 @@ export declare class PaymentManagementService {
             passengers: {
                 name: string;
                 id: string;
+                gender: string;
+                age: number;
                 bookingId: string;
                 seatNo: string;
                 seatTypeId: number;
-                age: number;
-                gender: string;
                 fare: Prisma.Decimal;
                 isAcSeat: boolean;
             }[];
@@ -109,6 +115,7 @@ export declare class PaymentManagementService {
             status: import(".prisma/client").$Enums.BookingStatus;
             createdAt: Date;
             updatedAt: Date;
+            contactEmail: string;
             agentId: string | null;
             userType: string;
             bookingNumber: string;
@@ -137,9 +144,12 @@ export declare class PaymentManagementService {
             operatorGst: Prisma.Decimal;
             convenienceFee: Prisma.Decimal;
             discountAmount: Prisma.Decimal;
+            paidPaymentId: string | null;
+            ticketEnrichedAt: Date | null;
+            walletAmount: Prisma.Decimal;
             contactName: string;
-            contactEmail: string;
             contactPhone: string;
+            passengerContext: Prisma.JsonValue | null;
             cancellationPolicy: Prisma.JsonValue | null;
             pickupSnapshot: Prisma.JsonValue | null;
             dropoffSnapshot: Prisma.JsonValue | null;
@@ -156,6 +166,7 @@ export declare class PaymentManagementService {
         updatedAt: Date;
         idempotencyKey: string | null;
         bookingId: string;
+        nextCheckAt: Date;
         amount: Prisma.Decimal;
         currency: string;
         gateway: string;

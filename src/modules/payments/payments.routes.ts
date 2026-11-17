@@ -33,7 +33,6 @@ paymentsRouter.post(
 paymentsRouter.post(
   '/verify',
   optionalAuth,
-  idempotencyMiddleware(),
   validate({ body: verifyPaymentSchema }),
   controller.verifyPayment
 );

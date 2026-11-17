@@ -17,6 +17,11 @@ class UsersService {
         const user = await prisma.user.findUnique({
             where: { id: userId },
             select: {
+                dateOfBirth: true,
+                gender: true,
+                state: true,
+                personalPhone: true,
+                contactEmail: true,
                 id: true,
                 email: true,
                 firstName: true,
@@ -32,32 +37,24 @@ class UsersService {
             },
         });
         if (!user) {
-            throw new errors_1.NotFoundError('User not found');
+            throw new errors_1.NotFoundError("User not found");
         }
         return user;
     }
     async updateProfile(userId, data) {
-        const prisma = (0, database_1.getPrismaClient)();
-        const updated = await prisma.user.update({
+        // Contact fields are separate from verified login identities. Editing them cannot claim another account.
+        await (0, database_1.getPrismaClient)().user.update({
             where: { id: userId },
             data: {
-                ...(data.firstName && { firstName: data.firstName }),
-                ...(data.lastName && { lastName: data.lastName }),
-                ...(data.phone && { phone: data.phone }),
-            },
-            select: {
-                id: true,
-                email: true,
-                firstName: true,
-                lastName: true,
-                phone: true,
-                role: true,
-                status: true,
-                walletBalance: true,
-                updatedAt: true,
+                ...data,
+                dateOfBirth: data.dateOfBirth === undefined
+                    ? undefined
+                    : data.dateOfBirth
+                        ? new Date(`${data.dateOfBirth}T00:00:00Z`)
+                        : null,
             },
         });
-        return updated;
+        return this.getProfile(userId);
     }
     async getWallet(userId) {
         const prisma = (0, database_1.getPrismaClient)();
@@ -67,13 +64,13 @@ class UsersService {
                 id: true,
                 walletBalance: true,
                 walletTransactions: {
-                    orderBy: { createdAt: 'desc' },
+                    orderBy: { createdAt: "desc" },
                     take: 50,
                 },
             },
         });
         if (!user) {
-            throw new errors_1.NotFoundError('User not found');
+            throw new errors_1.NotFoundError("User not found");
         }
         return {
             walletBalance: Number(user.walletBalance),

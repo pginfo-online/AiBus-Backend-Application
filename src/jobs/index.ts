@@ -1,162 +1,329 @@
-import { createWorker } from '../infrastructure/queues';
-import { QueueName } from '../shared/constants';
-import { getPrismaClient } from '../infrastructure/database';
-import { GdsAdapter } from '../providers/gds/gdsAdapter';
-import { logger } from '../infrastructure/logger';
-import { BookingStatus, HoldStatus, PaymentStatus, RefundStatus, TicketStatus } from '@prisma/client';
-import { env } from '../config/env';
-import { LedgerManagementService } from '../modules/admin/ledger-management/ledger-management.service';
-import { buildLedgerPostingData, buildRefundLines } from '../infrastructure/ledger';
-import { PaymentOrchestrator } from '../infrastructure/payments';
+import { CouponsService } from '../modules/coupons/coupons.service';
+import { createWorker } from "../infrastructure/queues";
+import { QueueName } from "../shared/constants";
+import { getPrismaClient } from "../infrastructure/database";
+import { GdsAdapter } from "../providers/gds/gdsAdapter";
+import { logger } from "../infrastructure/logger";
+import {
+  BookingStatus,
+  HoldStatus,
+  PaymentStatus,
+  RefundStatus,
+  TicketStatus,
+} from "@prisma/client";
+import { env } from "../config/env";
+import { LedgerManagementService } from "../modules/admin/ledger-management/ledger-management.service";
+import {
+  buildLedgerPostingData,
+  buildRefundLines,
+} from "../infrastructure/ledger";
+import { BookingsService } from "../modules/bookings/bookings.service";
+import { remainingPaymentStatus } from "../modules/bookings/bookingOutcome";
+import { PaymentOrchestrator } from "../infrastructure/payments";
 
-const workerLogger = logger.child({ module: 'background-workers' });
+const workerLogger = logger.child({ module: "background-workers" });
 
 /**
  * 1. Booking Reconciliation Worker
  * Resolves BOOKING_UNKNOWN states caused by network timeouts during BookSeats call
  */
 export function startBookingReconciliationWorker() {
+  return createWorker(QueueName.BOOKING_RECONCILIATION, async (job) =>
+    reconcileBooking(job.data as { bookingId: string; providerHoldId: string }),
+  );
+}
+export async function reconcileBooking(data: {
+  bookingId: string;
+  providerHoldId: string;
+}) {
   const gdsAdapter = GdsAdapter.getInstance();
+  const { bookingId, providerHoldId } = data;
+  const prisma = getPrismaClient();
 
-  return createWorker(QueueName.BOOKING_RECONCILIATION, async (job) => {
-    const { bookingId, providerHoldId } = job.data as { bookingId: string; providerHoldId: string };
-    const prisma = getPrismaClient();
+  workerLogger.info(
+    { bookingId, providerHoldId },
+    "Reconciling unknown booking with GDS...",
+  );
 
-    workerLogger.info({ bookingId, providerHoldId }, 'Reconciling unknown booking with GDS...');
+  const booking = await prisma.booking.findUnique({
+    where: { id: bookingId },
+  });
 
-    const booking = await prisma.booking.findUnique({
-      where: { id: bookingId },
-    });
+  if (
+    !booking ||
+    (booking.status !== BookingStatus.PAYMENT_SUCCESS &&
+      booking.status !== BookingStatus.BOOKING_UNKNOWN &&
+      booking.status !== BookingStatus.BOOKING_REQUESTED &&
+      booking.status !== BookingStatus.BOOKING_FAILED)
+  ) {
+    workerLogger.info(
+      { bookingId },
+      "Booking is not in UNKNOWN status, skipping reconciliation",
+    );
+    return;
+  }
 
-    if (!booking || (booking.status !== BookingStatus.BOOKING_UNKNOWN
-      && booking.status !== BookingStatus.BOOKING_REQUESTED
-      && booking.status !== BookingStatus.BOOKING_FAILED)) {
-      workerLogger.info({ bookingId }, 'Booking is not in UNKNOWN status, skipping reconciliation');
-      return;
-    }
-
-    const statusResponse = booking.status === BookingStatus.BOOKING_FAILED
+  if (booking.status === BookingStatus.PAYMENT_SUCCESS) {
+    await BookingsService.getInstance().confirmBooking(bookingId);
+    return;
+  }
+  if (
+    booking.status === BookingStatus.BOOKING_REQUESTED &&
+    Date.now() - booking.updatedAt.getTime() < 90000
+  )
+    throw new Error("Provider request is still in flight");
+  const statusResponse =
+    booking.status === BookingStatus.BOOKING_FAILED
       ? { Status: -1, TicketNo: undefined, PNRNo: undefined }
       : await gdsAdapter.checkBookingStatus(providerHoldId);
 
-    if (statusResponse.Status === 1 && statusResponse.TicketNo && statusResponse.PNRNo) {
-      // Booking was confirmed at provider! Atomically update booking + create ticket
-      await prisma.$transaction(async (tx) => {
-        await tx.booking.update({
-          where: { id: bookingId },
+  if (
+    statusResponse.Status === 1 &&
+    statusResponse.TicketNo &&
+    statusResponse.PNRNo
+  ) {
+    // Booking was confirmed at provider! Atomically update booking + create ticket
+    await prisma.$transaction(async (tx) => {
+      const claim = await tx.booking.updateMany({
+        where: {
+          id: bookingId,
+          status: {
+            in: [
+              BookingStatus.BOOKING_UNKNOWN,
+              BookingStatus.BOOKING_REQUESTED,
+            ],
+          },
+        },
+        data: {
+          status: BookingStatus.CONFIRMED,
+          providerTicketNo: statusResponse.TicketNo,
+          providerPnrNo: statusResponse.PNRNo,
+          confirmedAt: new Date(),
+        },
+      });
+
+      if (!claim.count) return;
+      await tx.seatHold.updateMany({
+        where: { bookingId },
+        data: { status: HoldStatus.CONVERTED },
+      });
+      // Create Ticket record idempotently using actual 3rd party provider TicketNo
+      const existingTicket = await tx.ticket.findUnique({
+        where: { bookingId },
+      });
+      const ticketNumber = String(statusResponse.TicketNo);
+      if (!existingTicket) {
+        await tx.ticket.create({
           data: {
-            status: BookingStatus.CONFIRMED,
-            providerTicketNo: statusResponse.TicketNo,
-            providerPnrNo: statusResponse.PNRNo,
-            confirmedAt: new Date(),
+            bookingId,
+            ticketNumber,
+            pnrNumber: String(statusResponse.PNRNo),
+            status: TicketStatus.ISSUED,
+            bookingSnapshot: booking as any,
           },
         });
+      } else {
+        await tx.ticket.update({
+          where: { id: existingTicket.id },
+          data: { ticketNumber, pnrNumber: String(statusResponse.PNRNo), status: TicketStatus.ISSUED },
+        });
+      }
+    });
 
-        // Create Ticket record idempotently using actual 3rd party provider TicketNo
-        const existingTicket = await tx.ticket.findUnique({ where: { bookingId } });
-        const ticketNumber = String(statusResponse.TicketNo || booking.providerTicketNo || booking.bookingNumber);
-        if (!existingTicket) {
-          await tx.ticket.create({
+    await (
+      await import("../infrastructure/queues")
+    ).addJob(
+      QueueName.TICKET_GENERATION,
+      "enrich-ticket",
+      { bookingId },
+      { jobId: `ticket-${bookingId}` },
+    );
+    // Queue confirmation notifications
+    try {
+      const { addJob } = await import("../infrastructure/queues");
+      await addJob(QueueName.NOTIFICATION_EMAIL, "booking-confirmation-email", {
+        bookingId,
+        recipient: booking.contactEmail,
+        bookingNumber: booking.bookingNumber,
+      });
+      await addJob(QueueName.NOTIFICATION_SMS, "booking-confirmation-sms", {
+        bookingId,
+        recipient: booking.contactPhone,
+        bookingNumber: booking.bookingNumber,
+      });
+    } catch (queueErr) {
+      workerLogger.warn(
+        { queueErr },
+        "Failed to queue notifications after reconciliation confirm",
+      );
+    }
+
+    workerLogger.info(
+      { bookingId },
+      "Reconciliation SUCCESS: Booking marked CONFIRMED and ticket issued",
+    );
+  } else if (statusResponse.Status === -1 || statusResponse.Status === -2) {
+    if (
+      statusResponse.Status === -2 &&
+      Date.now() - booking.createdAt.getTime() < 15 * 60 * 1000
+    )
+      throw new Error(
+        "Provider hold not found yet; waiting for a definitive outcome",
+      );
+    const refund = await prisma.$transaction(async (tx) => {
+      const key = `booking-failure:${bookingId}`;
+      const transitioned = await tx.booking.updateMany({
+        where: {
+          id: bookingId,
+          status: {
+            in: [
+              BookingStatus.BOOKING_UNKNOWN,
+              BookingStatus.BOOKING_REQUESTED,
+            ],
+          },
+        },
+        data: {
+          status: BookingStatus.BOOKING_FAILED,
+          version: { increment: 1 },
+        },
+      });
+      if (!transitioned.count) {
+        return tx.refund.findUnique({ where: { idempotencyKey: key } });
+      }
+      await CouponsService.getInstance().releaseCheckoutCoupon(bookingId, tx);
+      const payment = await tx.payment.findFirst({
+        where: { bookingId, ...(booking.paidPaymentId ? { id: booking.paidPaymentId } : { status: PaymentStatus.SUCCESS }) },
+        orderBy: { createdAt: 'asc' },
+      });
+      if (!payment) return null;
+      const walletRefund = payment.gateway === "WALLET";
+      const refund = await tx.refund.create({
+        data: {
+          bookingId,
+          paymentId: payment.id,
+          userId: booking.userId,
+          amount: payment.amount,
+          idempotencyKey: key,
+          status: walletRefund ? RefundStatus.COMPLETED : RefundStatus.PENDING,
+          destination: walletRefund ? "WALLET" : "ORIGINAL_PAYMENT_METHOD",
+          completedAt: walletRefund ? new Date() : null,
+          reason: "Booking failed at provider after reconciliation",
+        },
+      });
+      if (
+        booking.userId &&
+        !booking.agentId &&
+        Number(booking.walletAmount) > 0
+      ) {
+        const amount = Number(booking.walletAmount);
+        const user = await tx.user.update({
+          where: { id: booking.userId },
+          data: { walletBalance: { increment: amount } },
+        });
+        await tx.walletTransaction.create({
+          data: {
+            userId: booking.userId,
+            type: "REFUND",
+            amount,
+            balanceAfter: user.walletBalance,
+            referenceType: "BOOKING_FAILURE",
+            referenceId: booking.id,
+            description: "Wallet funds returned after booking failure",
+          },
+        });
+        if (payment.gateway !== "WALLET")
+          await tx.refund.create({
             data: {
               bookingId,
-              ticketNumber,
-              pnrNumber: statusResponse.PNRNo || booking.providerPnrNo || 'N/A',
-              status: TicketStatus.ISSUED,
-              bookingSnapshot: booking as any,
+              userId: booking.userId,
+              amount,
+              status: RefundStatus.COMPLETED,
+              destination: "WALLET",
+              completedAt: new Date(),
+              reason: "Wallet portion of failed booking",
+              idempotencyKey: `booking-wallet-failure:${bookingId}`,
             },
           });
-        } else if (statusResponse.TicketNo && existingTicket.ticketNumber.startsWith('TKT-')) {
-          await tx.ticket.update({
-            where: { id: existingTicket.id },
-            data: { ticketNumber: String(statusResponse.TicketNo) },
+        else
+          await tx.payment.update({
+            where: { id: payment.id },
+            data: { status: PaymentStatus.REFUNDED },
           });
-        }
-      });
-
-      // Queue confirmation notifications
-      try {
-        const { addJob } = await import('../infrastructure/queues');
-        await addJob(QueueName.NOTIFICATION_EMAIL, 'booking-confirmation-email', {
-          bookingId,
-          recipient: booking.contactEmail,
-          bookingNumber: booking.bookingNumber,
-        });
-        await addJob(QueueName.NOTIFICATION_SMS, 'booking-confirmation-sms', {
-          bookingId,
-          recipient: booking.contactPhone,
-          bookingNumber: booking.bookingNumber,
-        });
-      } catch (queueErr) {
-        workerLogger.warn({ queueErr }, 'Failed to queue notifications after reconciliation confirm');
       }
-
-      workerLogger.info({ bookingId }, 'Reconciliation SUCCESS: Booking marked CONFIRMED and ticket issued');
-    } else if (statusResponse.Status === -1 || statusResponse.Status === -2) {
-      const refund = await prisma.$transaction(async (tx) => {
-        const key = `booking-failure:${bookingId}`;
-        const transitioned = await tx.booking.updateMany({
-          where: { id: bookingId, status: { in: [BookingStatus.BOOKING_UNKNOWN, BookingStatus.BOOKING_REQUESTED] } },
-          data: { status: BookingStatus.BOOKING_FAILED, version: { increment: 1 } },
+      if (walletRefund && booking.agentId) {
+        const agentId = booking.agentId;
+        const snapshot = await tx.commissionSnapshot.findUnique({
+          where: { bookingId },
         });
-        if (!transitioned.count) {
-          return tx.refund.findUnique({ where: { idempotencyKey: key } });
-        }
-        const payment = await tx.payment.findFirst({ where: { bookingId, status: PaymentStatus.SUCCESS } });
-        if (!payment) return null;
-        const walletRefund = payment.gateway === 'WALLET' && Boolean(booking.agentId);
-        const refund = await tx.refund.create({
+        const wallet = await tx.agentWallet.findUniqueOrThrow({
+          where: { agentId },
+        });
+        const amount = Number(payment.amount);
+        const commissionReversal = Number(snapshot?.commissionAmt ?? 0);
+        const metadata = payment.metadata as { creditDebited?: number } | null;
+        const creditRepayment = Math.min(
+          Number(wallet.creditUsed),
+          metadata?.creditDebited ?? 0,
+          amount,
+        );
+        await tx.agentWallet.update({
+          where: { agentId, version: wallet.version },
           data: {
-            bookingId, paymentId: payment.id, userId: booking.userId,
-            amount: payment.amount, idempotencyKey: key,
-            status: walletRefund ? RefundStatus.COMPLETED : RefundStatus.PENDING,
-            destination: walletRefund ? 'WALLET' : 'ORIGINAL_PAYMENT_METHOD',
-            completedAt: walletRefund ? new Date() : null,
-            reason: 'Booking failed at provider after reconciliation',
+            cashBalance: { increment: amount - creditRepayment },
+            creditUsed: { decrement: creditRepayment },
+            totalRefunds: { increment: amount },
+            version: { increment: 1 },
           },
         });
-        if (walletRefund && booking.agentId) {
-          const agentId = booking.agentId;
-          const snapshot = await tx.commissionSnapshot.findUnique({ where: { bookingId } });
-          const wallet = await tx.agentWallet.findUniqueOrThrow({ where: { agentId } });
-          const amount = Number(payment.amount);
-          const commissionReversal = Number(snapshot?.commissionAmt ?? 0);
-          const metadata = payment.metadata as { creditDebited?: number } | null;
-          const creditRepayment = Math.min(Number(wallet.creditUsed), metadata?.creditDebited ?? 0, amount);
-          await tx.agentWallet.update({
-            where: { agentId, version: wallet.version },
-            data: {
-              cashBalance: { increment: amount - creditRepayment },
-              creditUsed: { decrement: creditRepayment },
-              totalRefunds: { increment: amount },
-              version: { increment: 1 },
-            },
-          });
-          const lines = buildRefundLines({
-            bookingId, cancellationId: refund.id, agentId,
-            refundAmount: amount + commissionReversal, commissionReversal, idempotencyPrefix: key,
-          });
-          await tx.ledgerEntry.createMany({ data: buildLedgerPostingData({ agentId, bookingId, createdBy: 'SYSTEM', lines }) });
-          if (snapshot) {
-            await tx.commissionSnapshot.update({
-              where: { bookingId }, data: { reversalAmt: commissionReversal, reversedAt: new Date() },
-            });
-          }
-          await tx.payment.update({ where: { id: payment.id }, data: { status: PaymentStatus.REFUNDED } });
-        }
-        return refund;
-      });
-      if (refund && refund.status !== RefundStatus.COMPLETED) {
-        const { addJob } = await import('../infrastructure/queues');
-        const job = await addJob(QueueName.REFUND_PROCESSING, 'process-refund', { refundId: refund.id }, {
-          jobId: `refund-${refund.id}`, attempts: 8, backoff: { type: 'exponential', delay: 30_000 },
+        const lines = buildRefundLines({
+          bookingId,
+          cancellationId: refund.id,
+          agentId,
+          refundAmount: amount + commissionReversal,
+          commissionReversal,
+          idempotencyPrefix: key,
         });
-        if (!job) throw new Error('Could not enqueue refund');
+        await tx.ledgerEntry.createMany({
+          data: buildLedgerPostingData({
+            agentId,
+            bookingId,
+            createdBy: "SYSTEM",
+            lines,
+          }),
+        });
+        if (snapshot) {
+          await tx.commissionSnapshot.update({
+            where: { bookingId },
+            data: { reversalAmt: commissionReversal, reversedAt: new Date() },
+          });
+        }
+        await tx.payment.update({
+          where: { id: payment.id },
+          data: { status: PaymentStatus.REFUNDED },
+        });
       }
-    } else {
-      // Status 0 or unknown = still in progress at provider; retry via BullMQ exponential backoff
-      throw new Error(`Booking ${bookingId} is still in progress at provider (Status: ${statusResponse.Status})`);
+      return refund;
+    });
+    if (refund && refund.status !== RefundStatus.COMPLETED) {
+      const { addJob } = await import("../infrastructure/queues");
+      const job = await addJob(
+        QueueName.REFUND_PROCESSING,
+        "process-refund",
+        { refundId: refund.id },
+        {
+          jobId: `refund-${refund.id}`,
+          attempts: 8,
+          backoff: { type: "exponential", delay: 30_000 },
+        },
+      );
+      if (!job) throw new Error("Could not enqueue refund");
     }
-  });
+  } else {
+    // Status 0 or unknown = still in progress at provider; retry via BullMQ exponential backoff
+    throw new Error(
+      `Booking ${bookingId} is still in progress at provider (Status: ${statusResponse.Status})`,
+    );
+  }
 }
 
 /**
@@ -170,12 +337,16 @@ export function startHoldExpiryWorker() {
 
     const hold = await prisma.seatHold.findUnique({ where: { id: holdId } });
 
-    if (hold && hold.status === HoldStatus.ACTIVE && new Date() >= hold.expiresAt) {
+    if (
+      hold &&
+      hold.status === HoldStatus.ACTIVE &&
+      new Date() >= hold.expiresAt
+    ) {
       await prisma.seatHold.update({
         where: { id: holdId },
         data: { status: HoldStatus.EXPIRED, releasedAt: new Date() },
       });
-      workerLogger.info({ holdId }, 'Expired seat hold released');
+      workerLogger.info({ holdId }, "Expired seat hold released");
     }
   });
 }
@@ -185,131 +356,203 @@ export function startHoldExpiryWorker() {
  * Dispatches refunds to payment gateway (Razorpay) and updates database records
  */
 export function startRefundWorker() {
-  return createWorker(QueueName.REFUND_PROCESSING, async (job) => {
-    const { refundId, gatewayPaymentId, merchantTxnId } = job.data as {
-      refundId: string;
-      gatewayPaymentId?: string;
-      merchantTxnId?: string;
-    };
-    const prisma = getPrismaClient();
+  return createWorker(QueueName.REFUND_PROCESSING, async (job) =>
+    processRefund(job.data as { refundId: string }),
+  );
+}
+export async function processRefund(data: {
+  refundId: string;
+  gatewayPaymentId?: string;
+  merchantTxnId?: string;
+}) {
+  const { refundId, gatewayPaymentId, merchantTxnId } = data as {
+    refundId: string;
+    gatewayPaymentId?: string;
+    merchantTxnId?: string;
+  };
+  const prisma = getPrismaClient();
 
-    workerLogger.info({ refundId }, 'Processing refund');
+  workerLogger.info({ refundId }, "Processing refund");
 
-    const refund = await prisma.refund.findUnique({
-      where: { id: refundId },
-      include: { payment: true, booking: true },
+  const refund = await prisma.refund.findUnique({
+    where: { id: refundId },
+    include: { payment: true, booking: true },
+  });
+
+  if (!refund) {
+    workerLogger.warn({ refundId }, "Refund not found, skipping");
+    return;
+  }
+
+  if (refund.status === RefundStatus.COMPLETED) {
+    workerLogger.info({ refundId }, "Refund already completed (idempotent)");
+    return;
+  }
+
+  if (
+    refund.status === RefundStatus.PROCESSING &&
+    Date.now() - refund.updatedAt.getTime() < 120000
+  )
+    return;
+  const claim = await prisma.refund.updateMany({
+    where: {
+      id: refundId,
+      updatedAt: refund.updatedAt,
+      status: { not: RefundStatus.COMPLETED },
+    },
+    data: { status: RefundStatus.PROCESSING, retryCount: { increment: 1 } },
+  });
+
+  if (!claim.count) return;
+  const originalTxnId = merchantTxnId || refund.payment?.merchantTxnId;
+  const originalPaymentId =
+    gatewayPaymentId || refund.payment?.gatewayPaymentId;
+  const targetGateway = refund.payment?.gateway;
+
+  if (targetGateway === "RAZORPAY" && originalPaymentId) {
+    const merchantRefundId = refundId;
+    const orchestrator = PaymentOrchestrator.getInstance();
+    const refundResult = await orchestrator.processRefund(targetGateway, {
+      merchantRefundId,
+      originalMerchantTxnId: originalTxnId || merchantRefundId,
+      gatewayPaymentId: originalPaymentId,
+      gatewayRefundId: refund.gatewayRefundId ?? undefined,
+      amount: Number(refund.amount),
+      reason: "AiBus booking cancellation/refund",
     });
 
-    if (!refund) {
-      workerLogger.warn({ refundId }, 'Refund not found, skipping');
-      return;
-    }
-
-    if (refund.status === RefundStatus.COMPLETED) {
-      workerLogger.info({ refundId }, 'Refund already completed (idempotent)');
-      return;
-    }
-
-    // Mark as PROCESSING
-    await prisma.refund.update({
-      where: { id: refundId },
-      data: { status: RefundStatus.PROCESSING, retryCount: { increment: 1 } },
-    });
-
-    const originalTxnId = merchantTxnId || refund.payment?.merchantTxnId;
-    const originalPaymentId = gatewayPaymentId || refund.payment?.gatewayPaymentId;
-    const targetGateway = refund.payment?.gateway;
-
-    if (targetGateway === 'RAZORPAY' && originalPaymentId) {
-      const merchantRefundId = refundId;
-      const orchestrator = PaymentOrchestrator.getInstance();
-      const refundResult = await orchestrator.processRefund(targetGateway, {
-        merchantRefundId,
-        originalMerchantTxnId: originalTxnId || merchantRefundId,
-        gatewayPaymentId: originalPaymentId,
-        gatewayRefundId: refund.gatewayRefundId ?? undefined,
-        amount: Number(refund.amount),
-        reason: 'AiBus booking cancellation/refund',
-      });
-
-      if (refundResult.success) {
-        await prisma.$transaction(async (tx) => {
-          await tx.refund.update({
-            where: { id: refundId },
-            data: {
-              status: RefundStatus.COMPLETED,
-              gatewayRefundId: refundResult.gatewayRefundId || merchantRefundId,
-              completedAt: new Date(),
-            },
-          });
-
-          // Update payment status to REFUNDED if full refund
-          if (refund.payment) {
-            const totalRefunded = Number(refund.amount);
-            const totalPaid = Number(refund.payment.amount);
-            const newPaymentStatus =
-              totalRefunded >= totalPaid ? PaymentStatus.REFUNDED : PaymentStatus.PARTIALLY_REFUNDED;
-            await tx.payment.update({
-              where: { id: refund.payment.id },
-              data: { status: newPaymentStatus },
-            });
-          }
-
-          // Update booking status to REFUNDED if applicable
-          if (refund.booking) {
-            await tx.booking.update({
-              where: { id: refund.bookingId },
-              data: { status: BookingStatus.REFUNDED },
-            });
-          }
-        });
-
-        workerLogger.info(
-          { refundId, amount: Number(refund.amount), gateway: refundResult.gateway, gatewayRefundId: refundResult.gatewayRefundId },
-          'Refund successfully processed via gateway'
-        );
-      } else {
-        const pending = refundResult.code === 'REFUND_PENDING';
-        await prisma.refund.updateMany({
-          where: { id: refundId, status: { not: RefundStatus.COMPLETED } },
+    if (refundResult.success) {
+      await prisma.$transaction(async (tx) => {
+        await tx.$queryRaw`SELECT id FROM bookings WHERE id = ${refund.bookingId}::uuid FOR UPDATE`;
+        if (refund.paymentId)
+          await tx.$queryRaw`SELECT id FROM payments WHERE id = ${refund.paymentId}::uuid FOR UPDATE`;
+        await tx.refund.update({
+          where: { id: refundId },
           data: {
-            status: pending ? RefundStatus.PROCESSING : RefundStatus.FAILED,
-            gatewayRefundId: refundResult.gatewayRefundId,
+            status: RefundStatus.COMPLETED,
+            gatewayRefundId: refundResult.gatewayRefundId || merchantRefundId,
+            completedAt: new Date(),
           },
         });
-        workerLogger.error(
-          { refundId, gateway: targetGateway, code: refundResult.code, message: refundResult.message },
-          'Gateway refund API returned failure — will retry'
-        );
-        throw new Error(`${targetGateway} refund failed with code: ${refundResult.code}`);
-      }
+
+        // Update payment status to REFUNDED if full refund
+        if (refund.payment) {
+          const completed = await tx.refund.aggregate({
+            where: {
+              paymentId: refund.payment.id,
+              status: RefundStatus.COMPLETED,
+            },
+            _sum: { amount: true },
+          });
+          const totalRefunded = Number(completed._sum.amount ?? 0);
+          const totalPaid = Number(refund.payment.amount);
+          const newPaymentStatus = remainingPaymentStatus(
+            totalPaid,
+            totalRefunded,
+          );
+          await tx.payment.update({
+            where: { id: refund.payment.id },
+            data: { status: newPaymentStatus },
+          });
+        }
+
+        // Update booking status to REFUNDED if applicable
+        if (
+          refund.booking &&
+          (await tx.refund.count({
+            where: {
+              bookingId: refund.bookingId,
+              status: { not: RefundStatus.COMPLETED },
+            },
+          })) === 0
+        ) {
+          await tx.booking.updateMany({
+            where: {
+              id: refund.bookingId,
+              status: {
+                in: [
+                  BookingStatus.BOOKING_FAILED,
+                  BookingStatus.REFUND_PENDING,
+                ],
+              },
+            },
+            data: { status: BookingStatus.REFUNDED },
+          });
+        }
+      });
+
+      workerLogger.info(
+        {
+          refundId,
+          amount: Number(refund.amount),
+          gateway: refundResult.gateway,
+          gatewayRefundId: refundResult.gatewayRefundId,
+        },
+        "Refund successfully processed via gateway",
+      );
     } else {
-      // No payment transaction ID to refund against — mark as FAILED for manual review
-      await prisma.refund.update({
-        where: { id: refundId },
-        data: { status: RefundStatus.FAILED },
+      const pending = refundResult.code === "REFUND_PENDING";
+      await prisma.refund.updateMany({
+        where: { id: refundId, status: { not: RefundStatus.COMPLETED } },
+        data: {
+          status: pending ? RefundStatus.PROCESSING : RefundStatus.FAILED,
+          gatewayRefundId: refundResult.gatewayRefundId,
+        },
       });
       workerLogger.error(
-        { refundId },
-        'Cannot process refund automatically: original Razorpay payment required'
+        {
+          refundId,
+          gateway: targetGateway,
+          code: refundResult.code,
+          message: refundResult.message,
+        },
+        "Gateway refund API returned failure — will retry",
+      );
+      throw new Error(
+        `${targetGateway} refund failed with code: ${refundResult.code}`,
       );
     }
-  });
+  } else {
+    // No payment transaction ID to refund against — mark as FAILED for manual review
+    await prisma.refund.update({
+      where: { id: refundId },
+      data: { status: RefundStatus.FAILED },
+    });
+    workerLogger.error(
+      { refundId },
+      "Cannot process refund automatically: original Razorpay payment required",
+    );
+  }
 }
 
 /**
  * 4. Notification Workers (Email & SMS)
  */
 export function startNotificationWorkers() {
-  const emailWorker = createWorker(QueueName.NOTIFICATION_EMAIL, async (job) => {
-    const { recipient, bookingNumber } = job.data as { recipient: string; bookingNumber: string };
-    workerLogger.info({ recipient, bookingNumber }, 'Sending booking confirmation email');
-    // TODO: Integrate with email service (SendGrid, Postmark, etc.)
-  });
+  const emailWorker = createWorker(
+    QueueName.NOTIFICATION_EMAIL,
+    async (job) => {
+      const { recipient, bookingNumber } = job.data as {
+        recipient: string;
+        bookingNumber: string;
+      };
+      workerLogger.info(
+        { recipient, bookingNumber },
+        "Sending booking confirmation email",
+      );
+      // TODO: Integrate with email service (SendGrid, Postmark, etc.)
+    },
+  );
 
   const smsWorker = createWorker(QueueName.NOTIFICATION_SMS, async (job) => {
-    const { recipient, bookingNumber } = job.data as { recipient: string; bookingNumber: string };
-    workerLogger.info({ recipient, bookingNumber }, 'Sending booking confirmation SMS');
+    const { recipient, bookingNumber } = job.data as {
+      recipient: string;
+      bookingNumber: string;
+    };
+    workerLogger.info(
+      { recipient, bookingNumber },
+      "Sending booking confirmation SMS",
+    );
     // TODO: Integrate with SMS service (Twilio, MSG91, etc.)
   });
 
@@ -325,7 +568,13 @@ export function startTicketGenerationWorker() {
     const { bookingId } = job.data as { bookingId: string };
     const prisma = getPrismaClient();
 
-    workerLogger.info({ bookingId }, 'Generating ticket PDF in background worker...');
+    await (
+      await import("../modules/tickets/tickets.service")
+    ).TicketsService.getInstance().refreshProviderDetails(bookingId);
+    workerLogger.info(
+      { bookingId },
+      "Generating ticket PDF in background worker...",
+    );
 
     const booking = await prisma.booking.findUnique({
       where: { id: bookingId },
@@ -337,27 +586,38 @@ export function startTicketGenerationWorker() {
     });
 
     if (!booking || !booking.ticket) {
-      workerLogger.warn({ bookingId }, 'Booking or ticket record not found for PDF generation');
+      workerLogger.warn(
+        { bookingId },
+        "Booking or ticket record not found for PDF generation",
+      );
       return;
     }
 
-    if (booking.ticket.pdfUrl && booking.ticket.status === TicketStatus.ISSUED) {
-      workerLogger.info({ bookingId }, 'Ticket PDF already issued (idempotent)');
+    if (
+      booking.ticket.pdfUrl &&
+      booking.ticket.status === TicketStatus.ISSUED
+    ) {
+      workerLogger.info(
+        { bookingId },
+        "Ticket PDF already issued (idempotent)",
+      );
       return;
     }
 
     const ticketPdfUrl = `/api/${env.API_VERSION}/tickets/booking/${booking.id}/pdf`;
 
-    await prisma.ticket.update({
-      where: { id: booking.ticket.id },
+    await prisma.ticket.updateMany({
+      where: { id: booking.ticket.id, status: TicketStatus.ISSUED, booking: { status: BookingStatus.CONFIRMED } },
       data: {
         pdfUrl: ticketPdfUrl,
-        status: TicketStatus.ISSUED,
         generatedAt: new Date(),
       },
     });
 
-    workerLogger.info({ bookingId, ticketPdfUrl }, 'Ticket PDF generation complete');
+    workerLogger.info(
+      { bookingId, ticketPdfUrl },
+      "Ticket PDF generation complete",
+    );
   });
 }
 
@@ -368,13 +628,16 @@ export function startTicketGenerationWorker() {
  */
 export function startLedgerReconciliationWorker() {
   return createWorker(QueueName.LEDGER_RECONCILIATION, async (job) => {
-    workerLogger.info({ jobId: job.id }, 'Starting scheduled agent ledger reconciliation audit...');
+    workerLogger.info(
+      { jobId: job.id },
+      "Starting scheduled agent ledger reconciliation audit...",
+    );
     const ledgerManagementService = LedgerManagementService.getInstance();
     const report = await ledgerManagementService.getReconciliationReport();
 
     if (report.discrepantAgents > 0) {
       const discrepancies = report.agents
-        .filter((a) => a.reconciliationStatus === 'DISCREPANCY_DETECTED')
+        .filter((a) => a.reconciliationStatus === "DISCREPANCY_DETECTED")
         .map((a) => ({
           agentId: a.agentId,
           businessName: a.businessName,
@@ -389,7 +652,7 @@ export function startLedgerReconciliationWorker() {
           discrepantCount: report.discrepantAgents,
           discrepancies,
         },
-        'CRITICAL FINANCIAL AUDIT ALERT: Discrepancy detected between AgentWallet balance and double-entry LedgerEntries!'
+        "CRITICAL FINANCIAL AUDIT ALERT: Discrepancy detected between AgentWallet balance and double-entry LedgerEntries!",
       );
     } else {
       workerLogger.info(
@@ -397,7 +660,7 @@ export function startLedgerReconciliationWorker() {
           totalAudited: report.totalAgentsAudited,
           matchedAgents: report.matchedAgents,
         },
-        'Agent ledger reconciliation audit SUCCESS: 100% of agent wallets match double-entry ledger journal.'
+        "Agent ledger reconciliation audit SUCCESS: 100% of agent wallets match double-entry ledger journal.",
       );
     }
   });
@@ -405,16 +668,19 @@ export function startLedgerReconciliationWorker() {
 
 export async function scheduleDailyReconciliationJob() {
   try {
-    const { scheduleRecurringJob } = await import('../infrastructure/queues');
+    const { scheduleRecurringJob } = await import("../infrastructure/queues");
     await scheduleRecurringJob(
       QueueName.LEDGER_RECONCILIATION,
-      'daily-ledger-reconciliation',
-      { pattern: '0 2 * * *' }, // Daily at 02:00 AM UTC
-      { name: 'daily-ledger-reconciliation', data: {} }
+      "daily-ledger-reconciliation",
+      { pattern: "0 2 * * *" }, // Daily at 02:00 AM UTC
+      { name: "daily-ledger-reconciliation", data: {} },
     );
-    workerLogger.info('Daily ledger reconciliation job scheduled (02:00 UTC)');
+    workerLogger.info("Daily ledger reconciliation job scheduled (02:00 UTC)");
   } catch (err: any) {
-    workerLogger.warn({ err: err.message }, 'Failed to schedule daily ledger reconciliation cron job');
+    workerLogger.warn(
+      { err: err.message },
+      "Failed to schedule daily ledger reconciliation cron job",
+    );
   }
 }
 
@@ -430,8 +696,11 @@ export function initializeWorkers() {
     startTicketGenerationWorker();
     startLedgerReconciliationWorker();
     scheduleDailyReconciliationJob();
-    workerLogger.info('All BullMQ background workers initialized');
+    workerLogger.info("All BullMQ background workers initialized");
   } catch (err) {
-    workerLogger.warn({ err }, 'Could not initialize workers (Redis may be in disconnected mode)');
+    workerLogger.warn(
+      { err },
+      "Could not initialize workers (Redis may be in disconnected mode)",
+    );
   }
 }

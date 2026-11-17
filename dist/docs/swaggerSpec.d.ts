@@ -328,6 +328,65 @@ export declare const swaggerDocument: {
                 };
             };
         };
+        '/api/v1/bookings/checkout-session': {
+            post: {
+                summary: string;
+                description: string;
+                responses: {
+                    '201': {
+                        description: string;
+                    };
+                    '409': {
+                        description: string;
+                    };
+                };
+            };
+        };
+        '/api/v1/bookings/my-bookings': {
+            get: {
+                summary: string;
+                security: {
+                    BearerAuth: never[];
+                }[];
+                description: string;
+                parameters: ({
+                    name: string;
+                    in: string;
+                    schema: {
+                        type: string;
+                        minimum: number;
+                        maximum: number;
+                        format?: undefined;
+                        enum?: undefined;
+                    };
+                } | {
+                    name: string;
+                    in: string;
+                    schema: {
+                        type: string;
+                        format: string;
+                        minimum?: undefined;
+                        maximum?: undefined;
+                        enum?: undefined;
+                    };
+                } | {
+                    name: string;
+                    in: string;
+                    schema: {
+                        type: string;
+                        enum: string[];
+                        minimum?: undefined;
+                        maximum?: undefined;
+                        format?: undefined;
+                    };
+                })[];
+                responses: {
+                    '200': {
+                        description: string;
+                    };
+                };
+            };
+        };
         '/api/v1/payments/intent': {
             post: {
                 summary: string;
@@ -380,6 +439,63 @@ export declare const swaggerDocument: {
             get: {
                 summary: string;
                 description: string;
+                parameters: ({
+                    name: string;
+                    in: string;
+                    required: boolean;
+                    schema: {
+                        type: string;
+                        format: string;
+                    };
+                    description?: undefined;
+                } | {
+                    name: string;
+                    in: string;
+                    description: string;
+                    schema: {
+                        type: string;
+                        format?: undefined;
+                    };
+                    required?: undefined;
+                })[];
+                responses: {
+                    '200': {
+                        description: string;
+                    };
+                };
+            };
+        };
+        '/api/v1/cancellations/{bookingId}': {
+            post: {
+                summary: string;
+                description: string;
+                requestBody: {
+                    content: {
+                        'application/json': {
+                            schema: {
+                                type: string;
+                                properties: {
+                                    seatNos: {
+                                        type: string;
+                                        items: {
+                                            type: string;
+                                        };
+                                        minItems: number;
+                                        maxItems: number;
+                                    };
+                                    reason: {
+                                        type: string;
+                                        maxLength: number;
+                                    };
+                                    refundToWallet: {
+                                        type: string;
+                                        default: boolean;
+                                    };
+                                };
+                            };
+                        };
+                    };
+                };
                 parameters: {
                     name: string;
                     in: string;
@@ -393,24 +509,255 @@ export declare const swaggerDocument: {
                     '200': {
                         description: string;
                     };
+                    '202': {
+                        description: string;
+                    };
                 };
             };
         };
-        '/api/v1/cancellations/{bookingId}': {
-            post: {
+        "/api/v1/users/passengers": {
+            get: {
+                tags: string[];
                 summary: string;
-                description: string;
+                security: {
+                    BearerAuth: never[];
+                }[];
+                responses: {
+                    "200": {
+                        description: string;
+                    };
+                    "400": {
+                        description: string;
+                    };
+                    "401": {
+                        description: string;
+                    };
+                };
+            };
+            post: {
+                tags: string[];
+                summary: string;
+                security: {
+                    BearerAuth: never[];
+                }[];
                 parameters: {
-                    name: string;
                     in: string;
+                    name: string;
+                    required: boolean;
+                    schema: {
+                        type: string;
+                        format: string;
+                    };
+                    description: string;
+                }[];
+                requestBody: {
+                    required: boolean;
+                    content: {
+                        "application/json": {
+                            schema: {
+                                type: string;
+                                additionalProperties: boolean;
+                                required: string[];
+                                description: string;
+                                properties: {
+                                    name: {
+                                        type: string;
+                                        minLength: number;
+                                        maxLength: number;
+                                    };
+                                    dateOfBirth: {
+                                        type: string;
+                                        format: string;
+                                        nullable: boolean;
+                                    };
+                                    age: {
+                                        type: string;
+                                        minimum: number;
+                                        maximum: number;
+                                        nullable: boolean;
+                                    };
+                                    gender: {
+                                        type: string;
+                                        enum: string[];
+                                    };
+                                    mobile: {
+                                        type: string;
+                                        pattern: string;
+                                        nullable: boolean;
+                                    };
+                                };
+                            };
+                        };
+                    };
+                };
+                responses: {
+                    "409": {
+                        description: string;
+                    };
+                    "200": {
+                        description: string;
+                    };
+                    "400": {
+                        description: string;
+                    };
+                    "401": {
+                        description: string;
+                    };
+                };
+            };
+        };
+        "/api/v1/users/passengers/{id}": {
+            patch: {
+                tags: string[];
+                summary: string;
+                security: {
+                    BearerAuth: never[];
+                }[];
+                parameters: {
+                    in: string;
+                    name: string;
                     required: boolean;
                     schema: {
                         type: string;
                         format: string;
                     };
                 }[];
+                requestBody: {
+                    required: boolean;
+                    content: {
+                        "application/json": {
+                            schema: {
+                                type: string;
+                                additionalProperties: boolean;
+                                required: string[];
+                                description: string;
+                                properties: {
+                                    name: {
+                                        type: string;
+                                        minLength: number;
+                                        maxLength: number;
+                                    };
+                                    dateOfBirth: {
+                                        type: string;
+                                        format: string;
+                                        nullable: boolean;
+                                    };
+                                    age: {
+                                        type: string;
+                                        minimum: number;
+                                        maximum: number;
+                                        nullable: boolean;
+                                    };
+                                    gender: {
+                                        type: string;
+                                        enum: string[];
+                                    };
+                                    mobile: {
+                                        type: string;
+                                        pattern: string;
+                                        nullable: boolean;
+                                    };
+                                };
+                            };
+                        };
+                    };
+                };
                 responses: {
-                    '200': {
+                    "404": {
+                        description: string;
+                    };
+                    "200": {
+                        description: string;
+                    };
+                    "400": {
+                        description: string;
+                    };
+                    "401": {
+                        description: string;
+                    };
+                };
+            };
+        };
+        "/api/v1/users/profile": {
+            get: {
+                tags: string[];
+                summary: string;
+                security: {
+                    BearerAuth: never[];
+                }[];
+                responses: {
+                    "200": {
+                        description: string;
+                    };
+                    "400": {
+                        description: string;
+                    };
+                    "401": {
+                        description: string;
+                    };
+                };
+            };
+            patch: {
+                tags: string[];
+                summary: string;
+                security: {
+                    BearerAuth: never[];
+                }[];
+                requestBody: {
+                    required: boolean;
+                    content: {
+                        "application/json": {
+                            schema: {
+                                type: string;
+                                additionalProperties: boolean;
+                                properties: {
+                                    firstName: {
+                                        type: string;
+                                        minLength: number;
+                                        maxLength: number;
+                                    };
+                                    lastName: {
+                                        type: string;
+                                        maxLength: number;
+                                    };
+                                    dateOfBirth: {
+                                        type: string;
+                                        format: string;
+                                        nullable: boolean;
+                                    };
+                                    gender: {
+                                        type: string;
+                                        enum: string[];
+                                        nullable: boolean;
+                                    };
+                                    state: {
+                                        type: string;
+                                        nullable: boolean;
+                                        description: string;
+                                    };
+                                    personalPhone: {
+                                        type: string;
+                                        nullable: boolean;
+                                        pattern: string;
+                                    };
+                                    contactEmail: {
+                                        type: string;
+                                        format: string;
+                                        nullable: boolean;
+                                    };
+                                };
+                            };
+                        };
+                    };
+                };
+                responses: {
+                    "200": {
+                        description: string;
+                    };
+                    "400": {
+                        description: string;
+                    };
+                    "401": {
                         description: string;
                     };
                 };

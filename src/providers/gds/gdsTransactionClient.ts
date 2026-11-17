@@ -97,10 +97,10 @@ export class GdsTransactionClient {
 
         const holdId = data?.HoldId ?? data?.holdId;
         if (holdId) {
-          this.txLogger.info({ holdId, status: data?.Status ?? 1 }, 'Mantis GDS HoldSeats succeeded');
+          this.txLogger.info({ holdId, status: data?.Status === undefined ? 1 : Number(data.Status) }, 'Mantis GDS HoldSeats succeeded');
           return {
             HoldId: holdId,
-            Status: data?.Status ?? 1,
+            Status: data?.Status === undefined ? 1 : Number(data.Status),
             Message: data?.Message || 'Seats held successfully',
             TotalFare: Number(
               data?.TotalFare || payload.Passengers.reduce((sum, passenger) => sum + passenger.Fare, 0)
@@ -152,12 +152,12 @@ export class GdsTransactionClient {
         const raw = response.data;
         const data = raw?.data || raw;
 
-        if (data?.TicketNo && data?.PNRNo && (data.Status === undefined || data.Status === 1)) {
+        if (data?.TicketNo && data?.PNRNo && (data.Status === undefined || Number(data.Status) === 1)) {
           return {
             HoldId: String(data.HoldId || holdId),
             TicketNo: String(data.TicketNo || data.ticketNo || ''),
             PNRNo: String(data.PNRNo || data.pnrNo || ''),
-            Status: data.Status ?? (data.TicketNo ? 1 : 0),
+            Status: data.Status === undefined ? (data.TicketNo ? 1 : 0) : Number(data.Status),
             Message: data.Message || 'Booking confirmed successfully',
             TotalFare: Number(data.TotalFare || totalFare || 0),
           };
@@ -188,7 +188,7 @@ export class GdsTransactionClient {
 
         this.txLogger.info({ status: data?.Status }, 'Mantis GDS bookingstatusv2 response');
 
-        const status = data?.Status;
+        const status = data?.Status === undefined || data?.Status === null || data?.Status === '' ? NaN : Number(data.Status);
         if (![1, 0, -1, -2].includes(status) || (status === 1 && (!data.TicketNo || !data.PNRNo))) {
           throw new ProviderError('GDS', 'Invalid booking status response');
         }
@@ -227,6 +227,7 @@ export class GdsTransactionClient {
         const raw = response.data;
         const data = raw?.data || raw;
 
+        if (typeof data?.IsCancellable !== 'boolean' || (data.IsCancellable && (!Number.isFinite(Number(data.RefundAmount)) || Number(data.RefundAmount) < 0))) throw new ProviderError('GDS', 'Invalid cancellation quote');
         return {
           IsCancellable: data?.IsCancellable === true,
           ChargePct: Number(data?.ChargePct ?? data?.chargePct ?? data?.RefundPercentage ?? 0),
@@ -266,7 +267,7 @@ export class GdsTransactionClient {
         }
 
         return {
-          Status: data?.Status ?? 1,
+          Status: data?.Status === undefined ? 1 : Number(data.Status),
           NewHoldId: data?.NewHoldId ? String(data.NewHoldId) : undefined,
           NewTicketNo: data?.NewTicketNo ? String(data.NewTicketNo) : undefined,
           NewPNRNo: data?.NewPNRNo ? String(data.NewPNRNo) : undefined,

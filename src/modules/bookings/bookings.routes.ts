@@ -1,3 +1,4 @@
+import { z } from 'zod';
 import { Router } from 'express';
 import { BookingsController } from './bookings.controller';
 import { validate, optionalAuth, authenticate } from '../../app/middleware';
@@ -13,7 +14,7 @@ bookingsRouter.post('/', optionalAuth, validate({ body: createBookingSchema }), 
 bookingsRouter.post('/checkout-session', optionalAuth, validate({ body: createCheckoutSessionSchema }), controller.createCheckoutSession);
 
 // Get current user's bookings (authenticated)
-bookingsRouter.get('/my-bookings', authenticate, controller.getUserBookings);
+bookingsRouter.get('/my-bookings', authenticate, validate({ query: z.object({ limit: z.coerce.number().int().min(1).max(100).optional(), cursor: z.string().uuid().optional(), filter: z.enum(['UPCOMING', 'PAST_TRIPS', 'CANCELLED']).optional() }) }), controller.getUserBookings);
 
 // Check booking status against Hold ID or Booking ID (Mantis GDS /ota/bookingstatusv2)
 bookingsRouter.post('/status', optionalAuth, controller.checkBookingStatus);

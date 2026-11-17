@@ -56,7 +56,7 @@ class GdsAdapter {
             this.recordTransaction('HoldSeats', { busId: params.BusId, passengerCount: params.Passengers?.length ?? 0 }, res, Date.now() - start, errorMsg);
         }
     }
-    async bookSeats(holdId, totalFare = 1050) {
+    async bookSeats(holdId, totalFare) {
         const start = Date.now();
         let errorMsg;
         let res;

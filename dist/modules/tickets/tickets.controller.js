@@ -1,7 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.TicketsController = void 0;
-const bookings_service_1 = require("../bookings/bookings.service");
 const database_1 = require("../../infrastructure/database");
 const errors_1 = require("../../shared/errors");
 const tickets_service_1 = require("./tickets.service");
@@ -13,10 +12,11 @@ class TicketsController {
     }
     getTicketByBookingId = async (req, res, next) => {
         try {
-            const bookingId = Array.isArray(req.params.bookingId) ? req.params.bookingId[0] : req.params.bookingId;
-            await bookings_service_1.BookingsService.getInstance().getBooking(bookingId, req.user?.sub);
-            const forceRefresh = req.query.refresh === 'true' || req.query.forceRefresh === 'true';
-            const ticket = await this.ticketsService.getTicketByBookingId(bookingId, forceRefresh);
+            const bookingId = Array.isArray(req.params.bookingId)
+                ? req.params.bookingId[0]
+                : req.params.bookingId;
+            const forceRefresh = req.query.refresh === "true" || req.query.forceRefresh === "true";
+            const ticket = await this.ticketsService.getTicketByBookingId(bookingId, forceRefresh, req.user?.sub);
             response_1.ApiResponse.success(res, ticket);
         }
         catch (error) {
@@ -25,14 +25,22 @@ class TicketsController {
     };
     getTicketByTicketNumber = async (req, res, next) => {
         try {
-            const ticketNumber = Array.isArray(req.params.ticketNumber) ? req.params.ticketNumber[0] : req.params.ticketNumber;
+            const ticketNumber = Array.isArray(req.params.ticketNumber)
+                ? req.params.ticketNumber[0]
+                : req.params.ticketNumber;
             const owner = await (0, database_1.getPrismaClient)().booking.findFirst({
-                where: { userId: req.user.sub, OR: [{ providerTicketNo: ticketNumber }, { ticket: { ticketNumber } }] },
+                where: {
+                    userId: req.user.sub,
+                    OR: [
+                        { providerTicketNo: ticketNumber },
+                        { ticket: { ticketNumber } },
+                    ],
+                },
                 select: { id: true },
             });
             if (!owner)
-                throw new errors_1.NotFoundError('Ticket not found');
-            const ticket = await this.ticketsService.getTicketByTicketNumber(ticketNumber);
+                throw new errors_1.NotFoundError("Ticket not found");
+            const ticket = await this.ticketsService.getTicketByTicketNumber(ticketNumber, req.user?.sub);
             response_1.ApiResponse.success(res, ticket);
         }
         catch (error) {
@@ -41,14 +49,24 @@ class TicketsController {
     };
     getGdsBookingDetails = async (req, res, next) => {
         try {
-            const pnr = (req.query.PNR || req.query.pnr || req.query.PNRNo || req.query.pnrNo || req.body?.PNR || req.body?.pnr || req.body?.PNRNo || req.body?.pnrNo);
-            const ticketNo = (req.query.TicketNo || req.query.ticketNo || req.body?.TicketNo || req.body?.ticketNo);
+            const pnr = (req.query.PNR ||
+                req.query.pnr ||
+                req.query.PNRNo ||
+                req.query.pnrNo ||
+                req.body?.PNR ||
+                req.body?.pnr ||
+                req.body?.PNRNo ||
+                req.body?.pnrNo);
+            const ticketNo = (req.query.TicketNo ||
+                req.query.ticketNo ||
+                req.body?.TicketNo ||
+                req.body?.ticketNo);
             if (!pnr || !ticketNo) {
-                response_1.ApiResponse.error(res, 'PNR and TicketNo are required query parameters', 'VALIDATION_ERROR', 400);
+                response_1.ApiResponse.error(res, "PNR and TicketNo are required query parameters", "VALIDATION_ERROR", 400);
                 return;
             }
             const result = await this.ticketsService.getGdsBookingDetails(pnr, ticketNo, req.user.sub);
-            response_1.ApiResponse.success(res, result, 'Provider booking details retrieved successfully');
+            response_1.ApiResponse.success(res, result, "Provider booking details retrieved successfully");
         }
         catch (error) {
             next(error);
@@ -57,12 +75,11 @@ class TicketsController {
     downloadTicketPdf = async (req, res, next) => {
         try {
             const rawId = req.params.bookingId || req.params.id;
-            const identifier = Array.isArray(rawId) ? rawId[0] : String(rawId || '');
-            await bookings_service_1.BookingsService.getInstance().getBooking(identifier, req.user?.sub);
-            const { buffer, fileName } = await this.ticketsService.generateTicketPdfBuffer(identifier);
-            res.setHeader('Content-Type', 'application/pdf');
-            res.setHeader('Content-Disposition', `inline; filename="${fileName}"`);
-            res.setHeader('Content-Length', buffer.length);
+            const identifier = Array.isArray(rawId) ? rawId[0] : String(rawId || "");
+            const { buffer, fileName } = await this.ticketsService.generateTicketPdfBuffer(identifier, req.user?.sub);
+            res.setHeader("Content-Type", "application/pdf");
+            res.setHeader("Content-Disposition", `inline; filename="${fileName}"`);
+            res.setHeader("Content-Length", buffer.length);
             res.end(buffer);
         }
         catch (error) {

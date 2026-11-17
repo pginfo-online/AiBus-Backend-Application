@@ -1,6 +1,7 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.PaymentsController = void 0;
+const paymentRedirect_1 = require("./paymentRedirect");
 const payments_service_1 = require("./payments.service");
 const response_1 = require("../../shared/utils/response");
 class PaymentsController {
@@ -33,7 +34,7 @@ class PaymentsController {
     verifyPayment = async (req, res, next) => {
         try {
             const result = await this.paymentsService.verifyPayment(req.body, req.user?.sub);
-            response_1.ApiResponse.success(res, result, 'Payment verified and booking confirmed');
+            response_1.ApiResponse.success(res, result, 'Current payment and booking status');
         }
         catch (error) {
             next(error);
@@ -59,7 +60,15 @@ class PaymentsController {
                 res.redirect(`${redirectUrlParam}${sep}merchantTxnId=${encodeURIComponent(merchantTxnId)}&bookingId=${encodeURIComponent(bookingId)}`);
                 return;
             }
-            const frontendUrl = `http://localhost:5173/payment-result?merchantTxnId=${encodeURIComponent(merchantTxnId)}&bookingId=${encodeURIComponent(bookingId)}`;
+            const target = new URL((0, paymentRedirect_1.paymentRedirect)(redirectUrlParam));
+            target.searchParams.set('merchantTxnId', merchantTxnId);
+            target.searchParams.set('bookingId', bookingId);
+            for (const key of ['razorpay_order_id', 'razorpay_payment_id', 'razorpay_signature']) {
+                const value = req.body?.[key] || req.query?.[key];
+                if (typeof value === 'string')
+                    target.searchParams.set(key, value);
+            }
+            const frontendUrl = target.toString();
             res.redirect(frontendUrl);
         }
         catch (error) {

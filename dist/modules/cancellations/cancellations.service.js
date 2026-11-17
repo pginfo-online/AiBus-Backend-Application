@@ -1,265 +1,390 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.CancellationsService = void 0;
+const node_crypto_1 = require("node:crypto");
 const database_1 = require("../../infrastructure/database");
 const gdsAdapter_1 = require("../../providers/gds/gdsAdapter");
 const queues_1 = require("../../infrastructure/queues");
 const constants_1 = require("../../shared/constants");
 const errors_1 = require("../../shared/errors");
 const logger_1 = require("../../infrastructure/logger");
-const client_1 = require("@prisma/client");
+const refundMath_1 = require("./refundMath");
 const ledger_1 = require("../../infrastructure/ledger");
 class CancellationsService {
     static instance;
-    gdsAdapter;
-    cancelLogger = logger_1.logger.child({ module: 'cancellations-service' });
-    constructor() {
-        this.gdsAdapter = gdsAdapter_1.GdsAdapter.getInstance();
-    }
     static getInstance() {
-        if (!CancellationsService.instance) {
-            CancellationsService.instance = new CancellationsService();
-        }
-        return CancellationsService.instance;
+        return (this.instance ??= new CancellationsService());
     }
-    async checkCancellability(bookingIdentifier, seatNos, userId) {
-        const prisma = (0, database_1.getPrismaClient)();
-        const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(bookingIdentifier);
-        const booking = isUuid
-            ? await prisma.booking.findUnique({
-                where: { id: bookingIdentifier },
-                include: { seats: true },
-            })
-            : await prisma.booking.findUnique({
-                where: { bookingNumber: bookingIdentifier },
-                include: { seats: true },
-            });
-        if (!booking || !userId || booking.userId !== userId) {
-            throw new errors_1.NotFoundError('Booking not found');
-        }
-        if (booking.status !== client_1.BookingStatus.CONFIRMED) {
-            throw new errors_1.ValidationError(`Cannot check cancellation: Booking status is ${booking.status}`);
-        }
-        if (!booking.providerTicketNo) {
-            throw new errors_1.ValidationError('Booking does not have an active ticket number');
-        }
-        const seatsToCancel = seatNos && seatNos.length > 0 ? seatNos.join(',') : booking.seats.map((s) => s.seatNo).join(',');
-        const cancellableInfo = await this.gdsAdapter.isCancellable(booking.providerTicketNo, seatsToCancel, booking.providerPnrNo || undefined);
+    provider = gdsAdapter_1.GdsAdapter.getInstance();
+    async owned(identifier, userId) {
+        const booking = await (0, database_1.getPrismaClient)().booking.findFirst({
+            where: {
+                userId,
+                ...(/^[0-9a-f-]{36}$/i.test(identifier)
+                    ? { id: identifier }
+                    : { bookingNumber: identifier }),
+            },
+            include: {
+                seats: true,
+                payments: true,
+                ticket: true,
+                cancellations: true,
+                refunds: true,
+                commissionSnapshot: true,
+            },
+        });
+        if (!userId || !booking || booking.userId !== userId)
+            throw new errors_1.NotFoundError("Booking");
+        return booking;
+    }
+    selected(booking, requested) {
+        const active = booking.seats
+            .filter((s) => !s.cancelledAt)
+            .map((s) => s.seatNo);
+        const selected = requested?.length
+            ? requested.map((s) => s.trim()).sort()
+            : active.sort();
+        if (!selected.length ||
+            new Set(selected).size !== selected.length ||
+            selected.some((s) => !active.includes(s)))
+            throw new errors_1.ValidationError("Select active seats belonging to this booking");
+        return selected;
+    }
+    async checkCancellability(identifier, seats, userId) {
+        const booking = await this.owned(identifier, userId);
+        if (booking.status !== "CONFIRMED" ||
+            !booking.providerTicketNo ||
+            !booking.providerPnrNo)
+            throw new errors_1.ValidationError("This booking is not eligible for cancellation");
+        const selected = this.selected(booking, seats);
+        const quote = await this.provider.isCancellable(booking.providerTicketNo, selected.join(","), booking.providerPnrNo);
+        const grossTotal = booking.seats.reduce((sum, s) => sum + Number(s.fareTotal), 0);
+        const selectedGross = booking.seats
+            .filter((s) => selected.includes(s.seatNo))
+            .reduce((sum, s) => sum + Number(s.fareTotal), 0);
+        const refundAmount = (0, refundMath_1.cancellationRefund)({
+            grossTotal,
+            selectedGross,
+            paidTotal: Number(booking.totalFare),
+            operatorRefund: quote.RefundAmount,
+            refunded: booking.refunds.filter((r) => r.cancellationId).reduce((sum, r) => sum + Number(r.amount), 0),
+        });
         return {
+            ...quote,
+            RefundAmount: refundAmount,
+            CancellationCharge: quote.ChargeAmt ?? quote.CancellationCharge,
             bookingId: booking.id,
             bookingNumber: booking.bookingNumber,
-            ticketNo: booking.providerTicketNo,
-            pnrNo: booking.providerPnrNo,
-            seatNos: seatsToCancel,
-            ...cancellableInfo,
+            seatNos: selected.join(","),
         };
     }
-    async cancelSeats(bookingIdentifier, seatNos, reason, userId, refundToWallet) {
+    async cancelSeats(identifier, seats, reason, userId, refundToWallet = false) {
         const prisma = (0, database_1.getPrismaClient)();
-        const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(bookingIdentifier);
-        const booking = isUuid
-            ? await prisma.booking.findUnique({
-                where: { id: bookingIdentifier },
-                include: { seats: true, payments: true, commissionSnapshot: true, ticket: true },
-            })
-            : await prisma.booking.findUnique({
-                where: { bookingNumber: bookingIdentifier },
-                include: { seats: true, payments: true, commissionSnapshot: true, ticket: true },
-            });
-        if (!booking || !userId || booking.userId !== userId) {
-            throw new errors_1.NotFoundError('Booking not found');
-        }
-        if (booking.status !== client_1.BookingStatus.CONFIRMED) {
-            throw new errors_1.ValidationError(`Cannot cancel booking in status ${booking.status}`);
-        }
-        if (!booking.providerTicketNo) {
-            throw new errors_1.ValidationError('No active ticket number found for this booking');
-        }
-        const requestedSeats = new Set(seatNos);
-        const allSeats = booking.seats.map((seat) => seat.seatNo);
-        if (requestedSeats.size && (requestedSeats.size !== allSeats.length || allSeats.some((seat) => !requestedSeats.has(seat)))) {
-            throw new errors_1.ValidationError('Cancellation currently requires all seats on the booking');
-        }
-        const resolvedSeatNos = allSeats;
-        const seatString = resolvedSeatNos.join(',');
-        const payment = booking.payments.find((p) => p.status === 'SUCCESS');
-        if (!payment || !booking.providerPnrNo)
-            throw new errors_1.ValidationError('Booking has no settled payment or PNR');
-        const quote = await this.gdsAdapter.isCancellable(booking.providerTicketNo, seatString, booking.providerPnrNo);
+        const booking = await this.owned(identifier, userId);
+        // A retry during uncertain cancellation reads the saved operation; it never reissues CancelSeats.
+        const outstanding = booking.cancellations.find((c) => c.status === "REQUESTED");
+        if (outstanding)
+            return this.result(outstanding.id);
+        const previous = booking.cancellations.find((c) => c.status === "COMPLETED" &&
+            seats.length &&
+            c.seatNos.length === seats.length &&
+            seats.every((s) => c.seatNos.includes(s)));
+        if (previous)
+            return this.result(previous.id);
+        if (booking.status !== "CONFIRMED" ||
+            !booking.providerTicketNo ||
+            !booking.providerPnrNo)
+            throw new errors_1.ValidationError("This booking is not eligible for cancellation");
+        const selected = this.selected(booking, seats);
+        const quote = await this.provider.isCancellable(booking.providerTicketNo, selected.join(","), booking.providerPnrNo);
         if (!quote.IsCancellable)
-            throw new errors_1.ValidationError('The operator declined cancellation');
-        const claim = await prisma.booking.updateMany({
-            where: { id: booking.id, status: client_1.BookingStatus.CONFIRMED },
-            data: { status: client_1.BookingStatus.CANCELLATION_REQUESTED, version: { increment: 1 } },
-        });
-        if (!claim.count)
-            throw new errors_1.ValidationError('Cancellation is already in progress');
-        try {
-            const cancelRes = await this.gdsAdapter.cancelSeats({
-                TicketNo: booking.providerTicketNo,
-                PNR: booking.providerPnrNo || undefined,
-                SeatNos: seatString,
+            throw new errors_1.ValidationError("The operator declined cancellation");
+        const key = (0, node_crypto_1.createHash)("sha256")
+            .update(`${booking.id}:${booking.providerTicketNo}:${selected.join(",")}`)
+            .digest("hex");
+        const operation = await prisma.$transaction(async (tx) => {
+            const claimed = await tx.booking.updateMany({
+                where: {
+                    id: booking.id,
+                    status: "CONFIRMED",
+                    version: booking.version,
+                },
+                data: { status: "CANCELLATION_REQUESTED", version: { increment: 1 } },
             });
-            // Status 1 = success; any other value (0, -1, -2, etc.) = failure
-            if (cancelRes.Status !== 1) {
-                throw new errors_1.ProviderError('GDS', cancelRes.Message || 'Failed to cancel seats with provider');
-            }
-            const refundAmount = Math.min(cancelRes.RefundAmount, booking.agentId
-                ? Number(booking.commissionSnapshot?.grossFare ?? booking.totalFare) : Number(payment.amount));
-            let commissionReversal = 0;
-            let netRefundToAgent = refundAmount;
-            if (booking.agentId && booking.commissionSnapshot) {
-                const totalBookingFare = Number(booking.totalFare);
-                const origCommission = Number(booking.commissionSnapshot.commissionAmt);
-                if (totalBookingFare > 0) {
-                    commissionReversal = Math.round(((refundAmount / totalBookingFare) * origCommission) * 100) / 100;
-                }
-                netRefundToAgent = Math.max(0, refundAmount - commissionReversal);
-            }
-            const isAgentBooking = Boolean(booking.agentId);
-            const targetUserId = booking.userId;
-            // Customer wallet credit: when not an agent booking, user exists, and refundToWallet is requested (or true)
-            const creditToCustomerWallet = !isAgentBooking && Boolean(targetUserId) && refundToWallet === true;
-            // 3. Atomically update DB records & financials
-            const cancellationResult = await prisma.$transaction(async (tx) => {
-                // Record cancellation
-                const cancellation = await tx.cancellation.create({
+            if (!claimed.count)
+                throw new errors_1.ConflictError("Cancellation is already in progress. Refresh booking status.");
+            return tx.cancellation.create({
+                data: {
+                    bookingId: booking.id,
+                    userId,
+                    status: "REQUESTED",
+                    seatNos: selected,
+                    reason,
+                    refundToWallet,
+                    idempotencyKey: key,
+                    chargePct: quote.ChargePct ?? 0,
+                    chargeAmt: quote.ChargeAmt ?? 0,
+                    refundAmount: 0,
+                    totalFare: Number(booking.totalFare),
+                    requestSnapshot: {
+                        ticketNo: booking.providerTicketNo,
+                        pnrNo: booking.providerPnrNo,
+                        quote: JSON.parse(JSON.stringify(quote)),
+                    },
+                },
+            });
+        });
+        try {
+            const response = await this.provider.cancelSeats({
+                TicketNo: booking.providerTicketNo,
+                PNR: booking.providerPnrNo,
+                SeatNos: selected.join(","),
+            });
+            await prisma.cancellation.update({
+                where: { id: operation.id },
+                data: { providerResponse: response },
+            });
+            await this.settle(operation.id);
+        }
+        catch (error) {
+            logger_1.logger.error({
+                cancellationId: operation.id,
+                bookingId: booking.id,
+                err: error instanceof Error ? error.message : "unknown",
+            }, "Cancellation outcome requires reconciliation; no duplicate provider request will be made");
+            await prisma.cancellation.updateMany({
+                where: { id: operation.id, status: "REQUESTED" },
+                data: { lastError: "OPERATOR_CONFIRMATION_PENDING" },
+            });
+        }
+        return this.result(operation.id);
+    }
+    async result(id) {
+        const cancellation = await (0, database_1.getPrismaClient)().cancellation.findUniqueOrThrow({ where: { id }, include: { refunds: true } });
+        return {
+            cancellation,
+            refund: cancellation.refunds[0] ?? null,
+            refunds: cancellation.refunds,
+            walletCredited: cancellation.refunds.some((r) => r.destination === "WALLET" && r.status === "COMPLETED"),
+        };
+    }
+    async settle(id) {
+        const prisma = (0, database_1.getPrismaClient)();
+        const pending = await prisma.cancellation.findUniqueOrThrow({
+            where: { id },
+        });
+        if (pending.status !== "REQUESTED" || !pending.providerResponse)
+            return;
+        const response = pending.providerResponse;
+        if (response.Status !== 1 ||
+            !Number.isFinite(response.RefundAmount) ||
+            response.RefundAmount < 0)
+            throw new errors_1.ValidationError("Operator cancellation response is invalid");
+        const refunds = await prisma.$transaction(async (tx) => {
+            await tx.$queryRaw `SELECT id FROM bookings WHERE id = ${pending.bookingId}::uuid FOR UPDATE`;
+            const current = await tx.cancellation.findUniqueOrThrow({
+                where: { id },
+            });
+            if (current.status !== "REQUESTED")
+                return [];
+            const booking = await tx.booking.findUniqueOrThrow({
+                where: { id: pending.bookingId },
+                include: {
+                    seats: true,
+                    payments: true,
+                    refunds: true,
+                    ticket: true,
+                    commissionSnapshot: true,
+                },
+            });
+            const remaining = booking.seats.filter((s) => !s.cancelledAt && !pending.seatNos.includes(s.seatNo));
+            if (remaining.length && (!response.NewTicketNo || !response.NewPNRNo))
+                throw new errors_1.ValidationError("Replacement ticket identifiers are required for partial cancellation");
+            const grossTotal = booking.seats.reduce((sum, s) => sum + Number(s.fareTotal), 0);
+            const selectedGross = booking.seats
+                .filter((s) => pending.seatNos.includes(s.seatNo))
+                .reduce((sum, s) => sum + Number(s.fareTotal), 0);
+            const previousRefunds = booking.refunds.filter((r) => Boolean(r.cancellationId) && r.status !== "REVERSED");
+            const refundAmount = (0, refundMath_1.cancellationRefund)({
+                grossTotal,
+                selectedGross,
+                paidTotal: Number(booking.totalFare),
+                operatorRefund: response.RefundAmount,
+                refunded: previousRefunds.reduce((sum, r) => sum + Number(r.amount), 0),
+            });
+            await tx.cancellation.update({
+                where: { id },
+                data: {
+                    status: "COMPLETED",
+                    refundAmount,
+                    chargeAmt: response.ChargeAmt ?? response.CancellationCharge,
+                    chargePct: response.ChargePct ?? 0,
+                    providerNewHoldId: response.NewHoldId
+                        ? String(response.NewHoldId)
+                        : null,
+                    providerNewTicketNo: response.NewTicketNo,
+                    providerNewPnrNo: response.NewPNRNo,
+                    lastError: null,
+                },
+            });
+            await tx.bookingSeat.updateMany({
+                where: {
+                    bookingId: booking.id,
+                    seatNo: { in: pending.seatNos },
+                    cancelledAt: null,
+                },
+                data: { cancelledAt: new Date() },
+            });
+            await tx.booking.update({
+                where: { id: booking.id },
+                data: {
+                    status: remaining.length ? "CONFIRMED" : "CANCELLED",
+                    cancelledAt: remaining.length ? null : new Date(),
+                    version: { increment: 1 },
+                    ...(remaining.length
+                        ? {
+                            providerTicketNo: response.NewTicketNo,
+                            providerPnrNo: response.NewPNRNo,
+                            providerHoldId: response.NewHoldId
+                                ? String(response.NewHoldId)
+                                : booking.providerHoldId,
+                        }
+                        : {}),
+                },
+            });
+            if (booking.ticket)
+                await tx.ticket.update({
+                    where: { bookingId: booking.id },
+                    data: remaining.length
+                        ? {
+                            ticketNumber: response.NewTicketNo,
+                            pnrNumber: response.NewPNRNo,
+                            status: "ISSUED",
+                        }
+                        : { status: "CANCELLED" },
+                });
+            const payment = (booking.paidPaymentId ? booking.payments.find((p) => p.id === booking.paidPaymentId) : undefined)
+                || booking.payments.find((p) => ['SUCCESS', 'PARTIALLY_REFUNDED'].includes(p.status));
+            if (!payment)
+                throw new errors_1.ValidationError("Settled payment is missing");
+            const priorRefunded = previousRefunds.reduce((sum, r) => sum + Number(r.amount), 0);
+            const walletFunded = Number(booking.walletAmount);
+            let walletRemaining = Math.max(0, walletFunded - priorRefunded);
+            let gatewayRemaining = Math.max(0, Number(payment.amount) - Math.max(0, priorRefunded - walletFunded));
+            let amount = refundAmount;
+            if (booking.agentId) {
+                const commission = Number(booking.commissionSnapshot?.commissionAmt ?? 0);
+                const reversed = Math.max(0, Math.min(commission - Number(booking.commissionSnapshot?.reversalAmt ?? 0), Math.round(((commission * refundAmount) / grossTotal) * 100) / 100));
+                amount = Math.max(0, Math.min(refundAmount - reversed, Number(payment.amount) - priorRefunded));
+                await tx.$queryRaw `SELECT id FROM agent_wallets WHERE agent_id = ${booking.agentId}::uuid FOR UPDATE`;
+                const agentWallet = await tx.agentWallet.findUniqueOrThrow({ where: { agentId: booking.agentId } });
+                const metadata = payment.metadata;
+                const creditRepayment = Math.max(0, Math.min(amount, Number(agentWallet.creditUsed), (metadata?.creditDebited ?? 0) - priorRefunded));
+                await tx.agentWallet.update({
+                    where: { agentId: booking.agentId },
                     data: {
+                        cashBalance: { increment: amount - creditRepayment },
+                        creditUsed: { decrement: creditRepayment },
+                        totalRefunds: { increment: amount },
+                        version: { increment: 1 },
+                    },
+                });
+                const lines = (0, ledger_1.buildRefundLines)({
+                    bookingId: booking.id,
+                    cancellationId: id,
+                    agentId: booking.agentId,
+                    refundAmount: amount + reversed,
+                    commissionReversal: reversed,
+                    idempotencyPrefix: `CANCEL-${id}`,
+                });
+                await tx.ledgerEntry.createMany({
+                    data: (0, ledger_1.buildLedgerPostingData)({
+                        agentId: booking.agentId,
                         bookingId: booking.id,
-                        userId: targetUserId,
-                        status: client_1.CancellationStatus.COMPLETED,
-                        seatNos: resolvedSeatNos,
-                        providerNewHoldId: cancelRes.NewHoldId ? String(cancelRes.NewHoldId) : null,
-                        providerNewTicketNo: cancelRes.NewTicketNo ? String(cancelRes.NewTicketNo) : null,
-                        providerNewPnrNo: cancelRes.NewPNRNo ? String(cancelRes.NewPNRNo) : null,
-                        chargePct: Number(cancelRes.ChargePct ?? 0),
-                        chargeAmt: Number(cancelRes.ChargeAmt ?? cancelRes.CancellationCharge ?? 0),
-                        refundAmount,
-                        totalFare: Number(cancelRes.TotalFare || booking.totalFare),
-                        reason,
-                    },
+                        cancellationId: id,
+                        lines,
+                    }),
+                    skipDuplicates: true,
                 });
-                // Update booking status
-                await tx.booking.update({
-                    where: { id: booking.id },
-                    data: {
-                        status: client_1.BookingStatus.CANCELLED,
-                        cancelledAt: new Date(),
-                    },
-                });
-                // Update Ticket status to CANCELLED if ticket exists
-                if (booking.ticket) {
-                    await tx.ticket.update({
-                        where: { id: booking.ticket.id },
-                        data: { status: client_1.TicketStatus.CANCELLED },
-                    });
-                }
-                // Credit to customer wallet if requested
-                let customerNewWalletBalance = null;
-                if (creditToCustomerWallet && refundAmount > 0 && targetUserId) {
-                    const updatedUser = await tx.user.update({
-                        where: { id: targetUserId },
+                if (booking.commissionSnapshot)
+                    await tx.commissionSnapshot.update({
+                        where: { bookingId: booking.id },
                         data: {
-                            walletBalance: { increment: refundAmount },
+                            reversedAt: new Date(),
+                            reversalAmt: { increment: reversed },
                         },
-                        select: { walletBalance: true },
                     });
-                    customerNewWalletBalance = Number(updatedUser.walletBalance);
+                walletRemaining = amount;
+                gatewayRemaining = 0;
+            }
+            const split = (0, refundMath_1.splitRefund)(amount, walletRemaining, gatewayRemaining);
+            const created = [];
+            for (const [funding, value] of [
+                ["WALLET", split.wallet],
+                ["GATEWAY", split.gateway],
+            ]) {
+                const source = funding === "WALLET" || pending.refundToWallet
+                    ? "WALLET"
+                    : "ORIGINAL_PAYMENT_METHOD";
+                const paymentId = funding === "WALLET" && payment.gateway !== "WALLET"
+                    ? null
+                    : payment.id;
+                if (value <= 0)
+                    continue;
+                if (source === "WALLET" && booking.userId && !booking.agentId) {
+                    const user = await tx.user.update({
+                        where: { id: booking.userId },
+                        data: { walletBalance: { increment: value } },
+                    });
                     await tx.walletTransaction.create({
                         data: {
-                            userId: targetUserId,
-                            type: client_1.WalletTransactionType.REFUND,
-                            amount: refundAmount,
-                            balanceAfter: updatedUser.walletBalance,
-                            referenceType: 'BOOKING_CANCELLATION',
-                            referenceId: booking.bookingNumber,
-                            description: `Refund for cancellation of booking #${booking.bookingNumber}`,
+                            userId: booking.userId,
+                            type: "REFUND",
+                            amount: value,
+                            balanceAfter: user.walletBalance,
+                            referenceType: "CANCELLATION",
+                            referenceId: id,
+                            description: `Cancellation refund for ${booking.bookingNumber}`,
                         },
                     });
                 }
-                const isWalletDestination = isAgentBooking || creditToCustomerWallet;
-                // Create Refund record
-                const refund = await tx.refund.create({
+                created.push(await tx.refund.create({
                     data: {
                         bookingId: booking.id,
-                        paymentId: payment?.id ?? null,
-                        cancellationId: cancellation.id,
-                        userId: targetUserId,
-                        amount: refundAmount,
-                        status: isWalletDestination || refundAmount === 0 ? client_1.RefundStatus.COMPLETED : client_1.RefundStatus.PENDING,
-                        destination: isWalletDestination ? client_1.RefundDestination.WALLET : client_1.RefundDestination.ORIGINAL_PAYMENT_METHOD,
-                        reason: reason || 'Seat cancellation processed',
-                        completedAt: isWalletDestination || refundAmount === 0 ? new Date() : null,
+                        paymentId,
+                        cancellationId: id,
+                        userId: booking.userId,
+                        amount: value,
+                        destination: source,
+                        status: source === "WALLET" ? "COMPLETED" : "PENDING",
+                        completedAt: source === "WALLET" ? new Date() : null,
+                        idempotencyKey: `cancellation-${id}-${funding}`,
+                        reason: pending.reason || "Seat cancellation",
+                    },
+                }));
+            }
+            const completed = await tx.refund.aggregate({
+                where: { paymentId: payment.id, status: "COMPLETED" },
+                _sum: { amount: true },
+            });
+            if (Number(completed._sum.amount ?? 0) > 0)
+                await tx.payment.update({
+                    where: { id: payment.id },
+                    data: {
+                        status: Number(completed._sum.amount) >= Number(payment.amount)
+                            ? "REFUNDED"
+                            : "PARTIALLY_REFUNDED",
                     },
                 });
-                // If agent booking: credit agent wallet and post balanced double-entry ledger reversals
-                if (booking.agentId) {
-                    await tx.agentWallet.update({
-                        where: { agentId: booking.agentId },
-                        data: {
-                            cashBalance: { increment: netRefundToAgent },
-                            totalRefunds: { increment: refundAmount },
-                            version: { increment: 1 },
-                        },
-                    });
-                    const idempotencyPrefix = `CANCEL-${cancellation.id}-${Date.now()}`;
-                    const ledgerLines = (0, ledger_1.buildRefundLines)({
-                        bookingId: booking.id,
-                        cancellationId: cancellation.id,
-                        agentId: booking.agentId,
-                        refundAmount,
-                        commissionReversal,
-                        idempotencyPrefix,
-                    });
-                    const ledgerData = (0, ledger_1.buildLedgerPostingData)({
-                        agentId: booking.agentId,
-                        bookingId: booking.id,
-                        cancellationId: cancellation.id,
-                        referenceId: booking.bookingNumber,
-                        createdBy: userId || 'SYSTEM',
-                        lines: ledgerLines,
-                    });
-                    await tx.ledgerEntry.createMany({ data: ledgerData, skipDuplicates: true });
-                    if (booking.commissionSnapshot && commissionReversal > 0) {
-                        await tx.commissionSnapshot.update({
-                            where: { id: booking.commissionSnapshot.id },
-                            data: {
-                                reversedAt: new Date(),
-                                reversalAmt: commissionReversal,
-                            },
-                        });
-                    }
-                }
-                return {
-                    cancellation,
-                    refund,
-                    providerResponse: cancelRes,
-                    commissionReversal,
-                    netRefundToAgent: isAgentBooking ? netRefundToAgent : undefined,
-                    walletCredited: isWalletDestination,
-                    newWalletBalance: customerNewWalletBalance,
-                };
-            });
-            // 4. Enqueue gateway refund processing job only for customer credit-card/UPI payments if not credited to wallet
-            if (!isAgentBooking && !creditToCustomerWallet && refundAmount > 0) {
-                try {
-                    await (0, queues_1.addJob)(constants_1.QueueName.REFUND_PROCESSING, 'process-refund', {
-                        refundId: cancellationResult.refund.id,
-                        bookingId: booking.id,
-                        amount: refundAmount,
-                    }, { jobId: `refund-${cancellationResult.refund.id}`, attempts: 8, backoff: { type: 'exponential', delay: 30_000 } });
-                }
-                catch (queueErr) {
-                    this.cancelLogger.warn({ queueErr }, 'Failed to queue refund processing job');
-                }
-            }
-            this.cancelLogger.info({ bookingId: booking.id, refundAmount, isAgentBooking, creditToCustomerWallet }, 'Cancellation completed and financials settled');
-            return cancellationResult;
-        }
-        catch (err) {
-            this.cancelLogger.error({ bookingId: booking.id }, 'Cancellation requires reconciliation');
-            throw err;
-        }
+            return created;
+        });
+        for (const refund of refunds)
+            if (refund.status !== "COMPLETED")
+                await (0, queues_1.addJob)(constants_1.QueueName.REFUND_PROCESSING, "process-refund", { refundId: refund.id }, {
+                    jobId: `refund-${refund.id}`,
+                    attempts: 8,
+                    backoff: { type: "exponential", delay: 30000 },
+                });
     }
 }
 exports.CancellationsService = CancellationsService;

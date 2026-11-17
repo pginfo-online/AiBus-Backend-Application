@@ -43,7 +43,9 @@ class BookingsController {
     getUserBookings = async (req, res, next) => {
         try {
             const userId = req.user.sub;
-            const bookings = await this.bookingsService.getUserBookings(userId);
+            const bookings = await this.bookingsService.getUserBookings(userId, req.query.limit || req.query.cursor || req.query.filter ? {
+                limit: Number(req.query.limit || 20), cursor: req.query.cursor, filter: req.query.filter,
+            } : undefined);
             response_1.ApiResponse.success(res, bookings);
         }
         catch (error) {

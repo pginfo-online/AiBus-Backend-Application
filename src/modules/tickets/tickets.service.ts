@@ -1,331 +1,188 @@
-import { getPrismaClient } from '../../infrastructure/database';
-import { NotFoundError } from '../../shared/errors';
-import { GdsAdapter } from '../../providers/gds/gdsAdapter';
-import { generateTicketPdf, TicketPdfData } from '../../infrastructure/pdf/ticketPdfGenerator';
+import { getPrismaClient } from "../../infrastructure/database";
+import { NotFoundError } from "../../shared/errors";
+import { GdsAdapter } from "../../providers/gds/gdsAdapter";
+import {
+  generateTicketPdf,
+  TicketPdfData,
+} from "../../infrastructure/pdf/ticketPdfGenerator";
 
 export class TicketsService {
   private static instance: TicketsService;
-  private gdsAdapter: GdsAdapter;
-
-  private constructor() {
-    this.gdsAdapter = GdsAdapter.getInstance();
+  static getInstance() {
+    return (this.instance ??= new TicketsService());
   }
-
-  public static getInstance(): TicketsService {
-    if (!TicketsService.instance) {
-      TicketsService.instance = new TicketsService();
-    }
-    return TicketsService.instance;
-  }
-
-  public async getGdsBookingDetails(pnr: string, ticketNo: string, userId: string) {
+  async getGdsBookingDetails(pnr: string, ticketNo: string, userId: string) {
     const booking = await getPrismaClient().booking.findFirst({
-      where: { userId, providerPnrNo: pnr, providerTicketNo: ticketNo }, select: { id: true },
+      where: { userId, providerPnrNo: pnr, providerTicketNo: ticketNo },
+      select: { id: true },
     });
-    if (!booking) throw new NotFoundError('Booking not found');
-    return this.gdsAdapter.getBookingDetails(pnr, ticketNo);
+    if (!booking) throw new NotFoundError("Booking");
+    return GdsAdapter.getInstance().getBookingDetails(pnr, ticketNo);
   }
-
-  public async getTicketByBookingId(bookingIdentifier: string, forceRefresh: boolean = false) {
-    const prisma = getPrismaClient();
-
-    const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(bookingIdentifier);
-    const booking = isUuid
-      ? await prisma.booking.findUnique({
-          where: { id: bookingIdentifier },
-          include: {
-            seats: true,
-            passengers: true,
-            ticket: true,
-            payments: true,
-            cancellations: true,
-          },
-        })
-      : await prisma.booking.findUnique({
-          where: { bookingNumber: bookingIdentifier },
-          include: {
-            seats: true,
-            passengers: true,
-            ticket: true,
-            payments: true,
-            cancellations: true,
-          },
-        });
-
-    if (!booking) {
-      throw new NotFoundError('Booking not found');
-    }
-
-    let gdsDetails = null;
-    // Only call external GDS if explicitly requested with forceRefresh, OR if ticket record is missing and provider identifiers exist
-    if (forceRefresh && booking.providerPnrNo && booking.providerTicketNo) {
-      try {
-        gdsDetails = await Promise.race([
-          this.gdsAdapter.getBookingDetails(booking.providerPnrNo, booking.providerTicketNo),
-          new Promise<null>((_, reject) => setTimeout(() => reject(new Error('GDS details fetch timeout')), 2500)),
-        ]);
-      } catch {
-        // Continue immediately with database record if provider details query fails or times out
-      }
-    }
-
-    // Prioritize actual 3rd party Ticket Number (e.g. 502627948, 502627910) per Transactionapi.md
-    let ticketNo =
-      booking.providerTicketNo ||
-      gdsDetails?.TicketNo ||
-      (booking.ticket?.ticketNumber && !booking.ticket.ticketNumber.startsWith('TKT-') ? booking.ticket.ticketNumber : null) ||
-      booking.ticket?.ticketNumber ||
-      booking.bookingNumber;
-
-    const pnrNo =
-      booking.providerPnrNo ||
-      gdsDetails?.PNRNo ||
-      booking.ticket?.pnrNumber ||
-      'N/A';
-
-    // Synchronize booking provider fields if live GDS details provided them
-    if (gdsDetails?.TicketNo && !booking.providerTicketNo) {
-      try {
-        await prisma.booking.update({
-          where: { id: booking.id },
-          data: {
-            providerTicketNo: String(gdsDetails.TicketNo),
-            ...(gdsDetails.PNRNo && !booking.providerPnrNo ? { providerPnrNo: String(gdsDetails.PNRNo) } : {}),
-          },
-        });
-        booking.providerTicketNo = String(gdsDetails.TicketNo);
-        if (gdsDetails.PNRNo) booking.providerPnrNo = String(gdsDetails.PNRNo);
-        ticketNo = String(gdsDetails.TicketNo);
-      } catch {
-        // Safe ignore
-      }
-    }
-
-    // Synchronize ticket record if it previously held synthetic TKT- prefix
-    if (booking.ticket && ticketNo && booking.ticket.ticketNumber.startsWith('TKT-')) {
-      try {
-        await prisma.ticket.update({
-          where: { id: booking.ticket.id },
-          data: { ticketNumber: String(ticketNo) },
-        });
-        booking.ticket.ticketNumber = String(ticketNo);
-      } catch {
-        // Safe ignore on race
-      }
-    }
-
-    // Create ticket record if missing for confirmed booking
-    if (!booking.ticket && (booking.status === 'CONFIRMED' || booking.providerTicketNo)) {
-      try {
-        const created = await prisma.ticket.create({
-          data: {
-            bookingId: booking.id,
-            ticketNumber: String(ticketNo),
-            pnrNumber: String(pnrNo),
-            status: 'ISSUED',
-            bookingSnapshot: booking as any,
-          },
-        });
-        booking.ticket = created;
-      } catch {
-        // Safe ignore
-      }
-    }
-
-    const status = booking.ticket?.status || (booking.status === 'CONFIRMED' ? 'ISSUED' : booking.status);
-
-    return {
-      id: booking.ticket?.id || booking.id,
-      bookingId: booking.id,
-      ticketNumber: ticketNo,
-      pnrNumber: pnrNo,
-      status,
-      pdfUrl: booking.ticket?.pdfUrl || null,
-      generatedAt: booking.ticket?.generatedAt || booking.confirmedAt || booking.createdAt,
-      ticket: booking.ticket,
-      booking,
-      gdsDetails,
-    };
+  async refreshProviderDetails(bookingId: string) {
+    const db = getPrismaClient();
+    const booking = await db.booking.findUniqueOrThrow({
+      where: { id: bookingId },
+    });
+    if (
+      !booking.providerTicketNo ||
+      !booking.providerPnrNo ||
+      booking.status !== "CONFIRMED"
+    )
+      return;
+    const details = await GdsAdapter.getInstance().getBookingDetails(
+      booking.providerPnrNo,
+      booking.providerTicketNo,
+    );
+    if (
+      details.TicketNo &&
+      String(details.TicketNo) !== booking.providerTicketNo
+    )
+      return;
+    const pickup = (booking.pickupSnapshot as Record<string, unknown>) || {};
+    const dropoff = (booking.dropoffSnapshot as Record<string, unknown>) || {};
+    await db.booking.updateMany({
+      where: { id: bookingId, version: booking.version, status: "CONFIRMED" },
+      data: {
+        ticketEnrichedAt: new Date(),
+        operatorName: details.CompanyName || booking.operatorName,
+        busType: details.BusTypeName || booking.busType,
+        fromCityName: details.FromCityName || booking.fromCityName,
+        toCityName: details.ToCityName || booking.toCityName,
+        pickupLocation: details.PickupInfo?.PickupName || booking.pickupLocation,
+        pickupSnapshot: {
+          ...pickup,
+          address: details.PickupInfo?.Address ?? pickup.address ?? null,
+          landmark: details.PickupInfo?.Landmark ?? pickup.landmark ?? null,
+          contact: details.PickupInfo?.Phone ?? pickup.contact ?? null,
+          departureDateTime: details.DepartureDateTime ?? null,
+        },
+        dropoffSnapshot: {
+          ...dropoff,
+          arrivalDateTime: details.ArrivalDateTime ?? null,
+        },
+      },
+    });
   }
-
-  public async getTicketByTicketNumber(ticketNumber: string) {
-    const prisma = getPrismaClient();
-
-    // Look up by ticket table ticketNumber, or booking.providerTicketNo, or booking.providerPnrNo
-    let ticket = await prisma.ticket.findUnique({
-      where: { ticketNumber },
+  async getTicketByBookingId(
+    identifier: string,
+    forceRefresh = false,
+    userId?: string,
+  ) {
+    const db = getPrismaClient();
+    const where = /^[0-9a-f-]{36}$/i.test(identifier)
+      ? { id: identifier }
+      : { bookingNumber: identifier };
+    const booking = await db.booking.findFirst({
+      where: { ...where, ...(userId ? { userId } : {}) },
       include: {
-        booking: {
-          include: {
-            seats: true,
-            passengers: true,
-            payments: true,
-            cancellations: true,
+        seats: true,
+        passengers: true,
+        ticket: {
+          select: {
+            id: true,
+            ticketNumber: true,
+            pnrNumber: true,
+            status: true,
+            pdfUrl: true,
+            generatedAt: true,
+          },
+        },
+        payments: {
+          select: {
+            id: true,
+            status: true,
+            amount: true,
+            gateway: true,
+            merchantTxnId: true,
+          },
+        },
+        cancellations: {
+          select: {
+            id: true,
+            status: true,
+            seatNos: true,
+            refundAmount: true,
+            chargeAmt: true,
+            createdAt: true,
+            lastError: true,
+          },
+        },
+        refunds: {
+          select: {
+            id: true,
+            amount: true,
+            status: true,
+            destination: true,
+            completedAt: true,
           },
         },
       },
     });
-
-    if (!ticket) {
-      const booking = await prisma.booking.findFirst({
-        where: {
-          OR: [
-            { providerTicketNo: ticketNumber },
-            { providerPnrNo: ticketNumber },
-            { bookingNumber: ticketNumber },
-          ],
-        },
-        include: {
-          seats: true,
-          passengers: true,
-          ticket: true,
-          payments: true,
-          cancellations: true,
-        },
-      });
-
-      if (!booking) {
-        throw new NotFoundError('Ticket or booking not found');
-      }
-
-      let gdsDetails = null;
-      if (booking.providerPnrNo && booking.providerTicketNo) {
-        try {
-          gdsDetails = await this.gdsAdapter.getBookingDetails(booking.providerPnrNo, booking.providerTicketNo);
-        } catch {
-          // Provider fetch optional
-        }
-      }
-
-      let ticketNo =
-        booking.providerTicketNo ||
-        gdsDetails?.TicketNo ||
-        (booking.ticket?.ticketNumber && !booking.ticket.ticketNumber.startsWith('TKT-') ? booking.ticket.ticketNumber : null) ||
-        booking.ticket?.ticketNumber ||
-        booking.bookingNumber;
-
-      const pnrNo =
-        booking.providerPnrNo ||
-        gdsDetails?.PNRNo ||
-        booking.ticket?.pnrNumber ||
-        'N/A';
-
-      if (booking.ticket && booking.providerTicketNo && booking.ticket.ticketNumber.startsWith('TKT-')) {
-        try {
-          await prisma.ticket.update({
-            where: { id: booking.ticket.id },
-            data: { ticketNumber: booking.providerTicketNo },
-          });
-          booking.ticket.ticketNumber = booking.providerTicketNo;
-          ticketNo = booking.providerTicketNo;
-        } catch {
-          // Safe ignore
-        }
-      }
-
-      const status = booking.ticket?.status || (booking.status === 'CONFIRMED' ? 'ISSUED' : booking.status);
-
-      return {
-        id: booking.ticket?.id || booking.id,
-        bookingId: booking.id,
-        ticketNumber: ticketNo,
-        pnrNumber: pnrNo,
-        status,
-        pdfUrl: booking.ticket?.pdfUrl || null,
-        generatedAt: booking.ticket?.generatedAt || booking.confirmedAt || booking.createdAt,
-        ticket: booking.ticket,
-        booking,
-        gdsDetails,
-      };
-    }
-
-    let gdsDetails = null;
-    if (ticket.booking?.providerPnrNo && ticket.booking?.providerTicketNo) {
-      try {
-        gdsDetails = await this.gdsAdapter.getBookingDetails(
-          ticket.booking.providerPnrNo,
-          ticket.booking.providerTicketNo
-        );
-      } catch {
-        // Optional
-      }
-    }
-
-    let ticketNo =
-      ticket.booking?.providerTicketNo ||
-      gdsDetails?.TicketNo ||
-      (!ticket.ticketNumber.startsWith('TKT-') ? ticket.ticketNumber : null) ||
-      ticket.ticketNumber ||
-      ticket.booking?.bookingNumber;
-
-    const pnrNo =
-      ticket.booking?.providerPnrNo ||
-      gdsDetails?.PNRNo ||
-      ticket.pnrNumber ||
-      'N/A';
-
-    if (ticket.booking?.providerTicketNo && ticket.ticketNumber.startsWith('TKT-')) {
-      try {
-        await prisma.ticket.update({
-          where: { id: ticket.id },
-          data: { ticketNumber: ticket.booking.providerTicketNo },
-        });
-        ticket.ticketNumber = ticket.booking.providerTicketNo;
-        ticketNo = ticket.booking.providerTicketNo;
-      } catch {
-        // Safe ignore
-      }
-    }
-
+    if (!booking) throw new NotFoundError("Booking");
+    // Read paths never issue tickets or manufacture operator identifiers.
+    const issued = [
+      "CONFIRMED",
+      "CANCELLATION_REQUESTED",
+      "CANCELLED",
+      "REFUNDED",
+    ].includes(booking.status);
     return {
-      id: ticket.id,
-      bookingId: ticket.bookingId,
-      ticketNumber: ticketNo,
-      pnrNumber: pnrNo,
-      status: ticket.status,
-      pdfUrl: ticket.pdfUrl || null,
-      generatedAt: ticket.generatedAt,
-      ticket,
-      booking: ticket.booking,
-      gdsDetails,
+      id: booking.ticket?.id || booking.id,
+      bookingId: booking.id,
+      ticketNumber: issued
+        ? booking.providerTicketNo || booking.ticket?.ticketNumber || null
+        : null,
+      pnrNumber: issued
+        ? booking.providerPnrNo || booking.ticket?.pnrNumber || null
+        : null,
+      status: booking.status,
+      pdfUrl: booking.ticket?.pdfUrl || null,
+      generatedAt:
+        booking.ticket?.generatedAt || booking.confirmedAt || booking.createdAt,
+      booking,
     };
   }
-
-  public async generateTicketPdfBuffer(
-    bookingIdentifier: string
-  ): Promise<{ buffer: Buffer; fileName: string }> {
-    const details = await this.getTicketByBookingId(bookingIdentifier);
-    const booking = details.booking as any;
-    if (!booking) {
-      throw new NotFoundError('Booking record not found for PDF generation');
-    }
-
+  async getTicketByTicketNumber(ticketNumber: string, userId?: string) {
+    const booking = await getPrismaClient().booking.findFirst({
+      where: {
+        ...(userId ? { userId } : {}),
+        OR: [
+          { providerTicketNo: ticketNumber },
+          { providerPnrNo: ticketNumber },
+          { bookingNumber: ticketNumber },
+          { ticket: { ticketNumber } },
+        ],
+      },
+      select: { id: true },
+    });
+    if (!booking) throw new NotFoundError("Ticket");
+    return this.getTicketByBookingId(booking.id, false, userId);
+  }
+  async generateTicketPdfBuffer(identifier: string, userId?: string) {
+    const details = await this.getTicketByBookingId(identifier, false, userId);
+    if (!details.ticketNumber || !details.pnrNumber)
+      throw new NotFoundError("Confirmed operator ticket");
+    const booking = details.booking;
     const pdfData: TicketPdfData = {
-      bookingNumber: booking.bookingNumber,
-      ticketNumber: String(details.ticketNumber),
-      pnrNumber: String(details.pnrNumber),
-      operatorName: booking.operatorName,
-      busType: booking.busType,
-      journeyDate: booking.journeyDate,
-      fromCityName: booking.fromCityName,
-      toCityName: booking.toCityName,
+      ...booking,
       pickupLocation: booking.pickupLocation,
-      pickupTime: booking.pickupTime,
       dropoffLocation: booking.dropoffLocation,
-      dropoffTime: booking.dropoffTime,
+      ticketNumber: details.ticketNumber,
+      pnrNumber: details.pnrNumber,
       totalFare: Number(booking.totalFare),
-      contactName: booking.contactName,
-      contactPhone: booking.contactPhone,
-      passengers: (booking.passengers || []).map((p: any) => ({
+      passengers: booking.passengers.map((p) => ({
         name: p.name,
         age: p.age,
         gender: p.gender,
         seatNo: p.seatNo,
+        cancelled: Boolean(booking.seats.find((s) => s.seatNo === p.seatNo)?.cancelledAt),
       })),
     };
-
     const buffer = await generateTicketPdf(pdfData);
-    const fileName = `AiBus-Ticket-${details.ticketNumber || booking.bookingNumber}.pdf`;
-    return { buffer, fileName };
+    return {
+      buffer,
+      fileName: `AiBus-Ticket-${details.ticketNumber.replace(/[^a-zA-Z0-9-]/g, "")}.pdf`,
+    };
   }
 }

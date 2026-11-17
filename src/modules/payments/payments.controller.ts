@@ -1,3 +1,4 @@
+import { paymentRedirect } from './paymentRedirect';
 import { Request, Response, NextFunction } from 'express';
 import { PaymentsService } from './payments.service';
 import { ApiResponse } from '../../shared/utils/response';
@@ -34,7 +35,7 @@ export class PaymentsController {
   public verifyPayment = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     try {
       const result = await this.paymentsService.verifyPayment(req.body, (req as any).user?.sub);
-      ApiResponse.success(res, result, 'Payment verified and booking confirmed');
+      ApiResponse.success(res, result, 'Current payment and booking status');
     } catch (error) {
       next(error);
     }
@@ -62,7 +63,14 @@ export class PaymentsController {
         return;
       }
 
-      const frontendUrl = `http://localhost:5173/payment-result?merchantTxnId=${encodeURIComponent(merchantTxnId)}&bookingId=${encodeURIComponent(bookingId)}`;
+      const target = new URL(paymentRedirect(redirectUrlParam));
+      target.searchParams.set('merchantTxnId', merchantTxnId);
+      target.searchParams.set('bookingId', bookingId);
+      for (const key of ['razorpay_order_id', 'razorpay_payment_id', 'razorpay_signature']) {
+        const value = req.body?.[key] || req.query?.[key];
+        if (typeof value === 'string') target.searchParams.set(key, value);
+      }
+      const frontendUrl = target.toString();
       res.redirect(frontendUrl);
     } catch (error) {
       next(error);

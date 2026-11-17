@@ -85,7 +85,7 @@ export class GdsAdapter implements IGdsAdapter {
     }
   }
 
-  public async bookSeats(holdId: string, totalFare = 1050): Promise<GdsBookResponse> {
+  public async bookSeats(holdId: string, totalFare?: number): Promise<GdsBookResponse> {
     const start = Date.now();
     let errorMsg: string | undefined;
     let res: GdsBookResponse | undefined;

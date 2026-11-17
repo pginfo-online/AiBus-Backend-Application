@@ -57,6 +57,11 @@ export declare class AgentsService {
                 walletBalance: Prisma.Decimal;
                 createdAt: Date;
                 updatedAt: Date;
+                dateOfBirth: Date | null;
+                gender: string | null;
+                state: string | null;
+                personalPhone: string | null;
+                contactEmail: string | null;
             };
         } & {
             userId: string;
@@ -89,8 +94,8 @@ export declare class AgentsService {
         status: import(".prisma/client").$Enums.AgentStatus;
         createdAt: Date;
         updatedAt: Date;
-        city: string;
         state: string;
+        city: string;
         businessName: string;
         contactPersonName: string;
         businessAddress: string;
@@ -316,6 +321,7 @@ export declare class AgentsService {
         bookings: ({
             seats: {
                 id: string;
+                cancelledAt: Date | null;
                 bookingId: string;
                 seatNo: string;
                 seatTypeId: number;
@@ -349,11 +355,11 @@ export declare class AgentsService {
             passengers: {
                 name: string;
                 id: string;
+                gender: string;
+                age: number;
                 bookingId: string;
                 seatNo: string;
                 seatTypeId: number;
-                age: number;
-                gender: string;
                 fare: Prisma.Decimal;
                 isAcSeat: boolean;
             }[];
@@ -364,6 +370,7 @@ export declare class AgentsService {
             status: import(".prisma/client").$Enums.BookingStatus;
             createdAt: Date;
             updatedAt: Date;
+            contactEmail: string;
             agentId: string | null;
             userType: string;
             bookingNumber: string;
@@ -392,9 +399,12 @@ export declare class AgentsService {
             operatorGst: Prisma.Decimal;
             convenienceFee: Prisma.Decimal;
             discountAmount: Prisma.Decimal;
+            paidPaymentId: string | null;
+            ticketEnrichedAt: Date | null;
+            walletAmount: Prisma.Decimal;
             contactName: string;
-            contactEmail: string;
             contactPhone: string;
+            passengerContext: Prisma.JsonValue | null;
             cancellationPolicy: Prisma.JsonValue | null;
             pickupSnapshot: Prisma.JsonValue | null;
             dropoffSnapshot: Prisma.JsonValue | null;

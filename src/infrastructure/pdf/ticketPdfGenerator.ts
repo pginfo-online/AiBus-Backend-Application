@@ -1,5 +1,5 @@
-import PDFDocument from 'pdfkit';
-
+import PDFDocument from "pdfkit";
+import path from "node:path";
 export interface TicketPdfData {
   bookingNumber: string;
   ticketNumber: string;
@@ -16,164 +16,211 @@ export interface TicketPdfData {
   totalFare: number | string;
   contactName: string;
   contactPhone: string;
-  passengers: Array<{
-    name: string;
-    age: number;
-    gender: string;
-    seatNo: string;
-  }>;
+  status?: string;
+  pickupSnapshot?: unknown;
+  dropoffSnapshot?: unknown;
+  passengers: { name: string; age: number; gender: string; seatNo: string; cancelled?: boolean }[];
 }
-
-/**
- * Generates an enterprise-styled, print-ready PDF e-ticket using PDFKit.
- * Returns a Buffer containing the complete binary PDF data.
- */
 export async function generateTicketPdf(data: TicketPdfData): Promise<Buffer> {
   return new Promise((resolve, reject) => {
+    const doc = new PDFDocument({
+      size: "A4",
+      margin: 40,
+      info: { Title: `AiBus Ticket ${data.ticketNumber}`, Author: "AiBus" },
+    });
+    const chunks: Buffer[] = [];
+    doc.on("data", (chunk) => chunks.push(chunk));
+    doc.on("end", () => resolve(Buffer.concat(chunks)));
+    doc.on("error", reject);
     try {
-      const doc = new PDFDocument({
-        size: 'A4',
-        margin: 40,
-        info: {
-          Title: `AiBus Ticket - ${data.ticketNumber}`,
-          Author: 'AiBus Booking Platform',
-          Subject: `Bus Travel Ticket ${data.pnrNumber}`,
-        },
-      });
-
-      const chunks: Buffer[] = [];
-      doc.on('data', (chunk) => chunks.push(chunk));
-      doc.on('end', () => resolve(Buffer.concat(chunks)));
-      doc.on('error', (err) => reject(err));
-
-      // Brand Colors
-      const primaryColor = '#1e3a8a'; // Deep Navy
-      const accentColor = '#0284c7';  // Sky Blue
-      const darkColor = '#0f172a';    // Slate Dark
-      const lightBg = '#f8fafc';      // Off-white / light slate
-      const grayColor = '#64748b';    // Muted slate
-
-      // Header Banner
-      doc.rect(40, 40, 515, 60).fill(primaryColor);
-      doc.fillColor('#ffffff').fontSize(22).font('Helvetica-Bold').text('AiBus', 55, 52);
-      doc.fontSize(10).font('Helvetica').text('ENTERPRISE TRAVEL SERVICES', 55, 78);
-
-      doc.fillColor('#ffffff').fontSize(12).font('Helvetica-Bold').text('E-TICKET / BOARDING PASS', 350, 55, { align: 'right', width: 190 });
-      doc.fontSize(9).font('Helvetica').text(`Generated: ${new Date().toLocaleDateString('en-IN')}`, 350, 75, { align: 'right', width: 190 });
-
-      // Booking Reference Cards
-      let y = 115;
-      doc.rect(40, y, 515, 65).fill(lightBg).stroke('#cbd5e1');
-
-      doc.fillColor(grayColor).fontSize(9).font('Helvetica').text('PNR NUMBER', 55, y + 12);
-      doc.fillColor(darkColor).fontSize(14).font('Helvetica-Bold').text(data.pnrNumber, 55, y + 26);
-
-      doc.fillColor(grayColor).fontSize(9).font('Helvetica').text('TICKET NUMBER', 200, y + 12);
-      doc.fillColor(darkColor).fontSize(14).font('Helvetica-Bold').text(data.ticketNumber, 200, y + 26);
-
-      doc.fillColor(grayColor).fontSize(9).font('Helvetica').text('BOOKING ID', 350, y + 12);
-      doc.fillColor(darkColor).fontSize(12).font('Helvetica-Bold').text(data.bookingNumber, 350, y + 28);
-
-      // Journey Details Section
-      y = 195;
-      doc.fillColor(primaryColor).fontSize(12).font('Helvetica-Bold').text('JOURNEY & OPERATOR DETAILS', 40, y);
-      doc.moveTo(40, y + 16).lineTo(555, y + 16).strokeColor('#e2e8f0').stroke();
-
-      y += 25;
-      doc.rect(40, y, 515, 90).fill(lightBg).stroke('#e2e8f0');
-
-      doc.fillColor(grayColor).fontSize(9).font('Helvetica').text('OPERATOR', 55, y + 10);
-      doc.fillColor(darkColor).fontSize(11).font('Helvetica-Bold').text(data.operatorName, 55, y + 24);
-
-      doc.fillColor(grayColor).fontSize(9).font('Helvetica').text('BUS TYPE', 240, y + 10);
-      doc.fillColor(darkColor).fontSize(10).font('Helvetica-Bold').text(data.busType, 240, y + 24, { width: 150 });
-
-      doc.fillColor(grayColor).fontSize(9).font('Helvetica').text('DATE OF JOURNEY', 410, y + 10);
-      doc.fillColor(darkColor).fontSize(11).font('Helvetica-Bold').text(data.journeyDate, 410, y + 24);
-
-      doc.fillColor(grayColor).fontSize(9).font('Helvetica').text('BOARDING POINT & TIME', 55, y + 50);
-      doc.fillColor(darkColor).fontSize(10).font('Helvetica-Bold').text(`${data.pickupLocation} (${data.pickupTime})`, 55, y + 64, { width: 175 });
-
-      doc.fillColor(grayColor).fontSize(9).font('Helvetica').text('DROPOFF POINT & TIME', 240, y + 50);
-      doc.fillColor(darkColor).fontSize(10).font('Helvetica-Bold').text(`${data.dropoffLocation} (${data.dropoffTime})`, 240, y + 64, { width: 160 });
-
-      doc.fillColor(grayColor).fontSize(9).font('Helvetica').text('ROUTE', 410, y + 50);
-      doc.fillColor(accentColor).fontSize(11).font('Helvetica-Bold').text(`${data.fromCityName} → ${data.toCityName}`, 410, y + 64);
-
-      // Passenger Details Table
-      y = 325;
-      doc.fillColor(primaryColor).fontSize(12).font('Helvetica-Bold').text('PASSENGER INFORMATION', 40, y);
-      doc.moveTo(40, y + 16).lineTo(555, y + 16).strokeColor('#e2e8f0').stroke();
-
-      y += 24;
-      // Table Header
-      doc.rect(40, y, 515, 22).fill(primaryColor);
-      doc.fillColor('#ffffff').fontSize(9).font('Helvetica-Bold')
-        .text('SL', 50, y + 6)
-        .text('PASSENGER NAME', 90, y + 6)
-        .text('AGE', 280, y + 6)
-        .text('GENDER', 340, y + 6)
-        .text('SEAT NO', 420, y + 6);
-
-      y += 22;
-      data.passengers.forEach((p, idx) => {
-        const rowBg = idx % 2 === 0 ? '#ffffff' : '#f8fafc';
-        doc.rect(40, y, 515, 22).fill(rowBg).stroke('#e2e8f0');
-        doc.fillColor(darkColor).fontSize(9).font('Helvetica')
-          .text(String(idx + 1), 50, y + 6)
-          .text(p.name, 90, y + 6, { width: 180 })
-          .text(String(p.age), 280, y + 6)
-          .text(p.gender === 'F' ? 'Female' : 'Male', 340, y + 6)
-          .font('Helvetica-Bold')
-          .text(p.seatNo, 420, y + 6);
-        y += 22;
-      });
-
-      // Contact & Fare Summary
-      y += 15;
-      doc.rect(40, y, 250, 75).fill(lightBg).stroke('#e2e8f0');
-      doc.fillColor(primaryColor).fontSize(10).font('Helvetica-Bold').text('PRIMARY CONTACT', 50, y + 10);
-      doc.fillColor(grayColor).fontSize(9).font('Helvetica').text('Name:', 50, y + 28);
-      doc.fillColor(darkColor).font('Helvetica-Bold').text(data.contactName, 90, y + 28);
-      doc.fillColor(grayColor).font('Helvetica').text('Phone:', 50, y + 44);
-      doc.fillColor(darkColor).font('Helvetica-Bold').text(data.contactPhone, 90, y + 44);
-
-      doc.rect(305, y, 250, 75).fill(lightBg).stroke('#e2e8f0');
-      doc.fillColor(primaryColor).fontSize(10).font('Helvetica-Bold').text('FARE SUMMARY', 315, y + 10);
-      doc.fillColor(grayColor).fontSize(9).font('Helvetica').text('Total Paid:', 315, y + 32);
-      doc.fillColor('#15803d').fontSize(16).font('Helvetica-Bold').text(`₹ ${Number(data.totalFare).toFixed(2)}`, 380, y + 28);
-      doc.fillColor(grayColor).fontSize(8).font('Helvetica').text('(Inclusive of all taxes & fees)', 380, y + 48);
-
-      // Important Terms & Conditions
-      y += 90;
-      doc.fillColor(primaryColor).fontSize(10).font('Helvetica-Bold').text('IMPORTANT INSTRUCTIONS', 40, y);
-      doc.moveTo(40, y + 14).lineTo(555, y + 14).strokeColor('#e2e8f0').stroke();
-
-      y += 20;
-      const terms = [
-        '1. Please arrive at the boarding location at least 15 minutes prior to scheduled departure.',
-        '2. A valid government photo ID is mandatory for all passengers during boarding and travel.',
-        '3. Cancellation is subject to the specific bus operator policy. Cancellations can be initiated via portal.',
-        '4. For any assistance or queries, please contact AiBus 24x7 Customer Support.',
-      ];
-      doc.fillColor(grayColor).fontSize(8).font('Helvetica');
-      terms.forEach((t) => {
-        doc.text(t, 45, y);
-        y += 13;
-      });
-
-      // Footer
-      doc.rect(40, 750, 515, 25).fill('#f1f5f9');
-      doc.fillColor(grayColor).fontSize(8).font('Helvetica').text(
-        'AiBus Commercial Travel Platform — Powered by Real-Time GDS Integration',
-        40,
-        758,
-        { align: 'center', width: 515 }
+      doc.registerFont(
+        "Unicode",
+        path.resolve(__dirname, "../../../assets/fonts/NotoSansDevanagari.ttf"),
       );
-
+      doc.font("Unicode");
+      const red = "#D84D56",
+        ink = "#414258",
+        muted = "#738099",
+        border = "#D8D8DF";
+      const x = 70,
+        w = 455;
+      let y = 35;
+      const text = (
+        value: unknown,
+        tx: number,
+        ty: number,
+        width: number,
+        size = 10,
+        color = ink,
+      ) => {
+        doc
+          .fillColor(color)
+          .fontSize(size)
+          .text(String(value ?? "—"), tx, ty, { width });
+        return doc.y;
+      };
+      const room = (height: number) => {
+        if (y + height > 790) {
+          doc.addPage();
+          y = 40;
+        }
+      };
+      doc.rect(x, y, w, 120).fill(red);
+      text("AiBus", x + 20, y + 12, 110, 17, "#FFFFFF");
+      text("Trip Details", x + 130, y + 20, 250, 15, "#FFFFFF");
+      text(
+        `${data.fromCityName}-${data.toCityName}`,
+        x + 120,
+        y + 55,
+        w - 140,
+        15,
+        "#FFFFFF",
+      );
+      doc
+        .moveTo(x + 14, y + 88)
+        .lineTo(x + w - 14, y + 88)
+        .strokeColor("#F2B3B8")
+        .stroke();
+      text(
+        `Ticket Number: ${data.ticketNumber}  |  PNR: ${data.pnrNumber}`,
+        x + 15,
+        y + 95,
+        w - 30,
+        9,
+        "#FFFFFF",
+      );
+      y += 140;
+      text(`Hello ${data.contactName},`, x + 4, y, w - 8);
+      y = doc.y + 14;
+      text(
+        `Your journey details from ${data.fromCityName} to ${data.toCityName} are below.`,
+        x + 4,
+        y,
+        w - 8,
+      );
+      y = doc.y + 24;
+      room(360);
+      const panelPage = doc.page;
+      const panelTop = y;
+      doc.rect(x, y, w, 28).fill("#E6EAF6");
+      text("Journey Details", x + 18, y + 6, w - 36, 12);
+      y += 44;
+      const pickup = (data.pickupSnapshot || {}) as Record<string, unknown>;
+      const drop = (data.dropoffSnapshot || {}) as Record<string, unknown>;
+      text("Departure date and time", x + 18, y, 200, 9, muted);
+      text("Arrival date and time", x + 245, y, 190, 9, muted);
+      y += 19;
+      const format = (v: unknown) => {
+        if (typeof v !== "string") return "—";
+        const date = new Date(v);
+        return Number.isNaN(date.getTime())
+          ? v
+          : date.toLocaleString("en-IN", {
+              timeZone: "Asia/Kolkata",
+              day: "2-digit",
+              month: "2-digit",
+              year: "numeric",
+              hour: "2-digit",
+              minute: "2-digit",
+            });
+      };
+      const left = text(
+        pickup.departureDateTime
+          ? format(pickup.departureDateTime)
+          : `${data.journeyDate} ${data.pickupTime}`,
+        x + 18,
+        y,
+        200,
+        10,
+      );
+      const right = text(
+        drop.arrivalDateTime
+          ? format(drop.arrivalDateTime)
+          : data.dropoffTime || "—",
+        x + 245,
+        y,
+        190,
+        10,
+      );
+      y = Math.max(left, right) + 18;
+      text("Travels", x + 18, y, w - 36, 9, muted);
+      y += 17;
+      text(data.operatorName, x + 18, y, w - 36, 11);
+      y = doc.y + 3;
+      text(data.busType, x + 18, y, w - 36, 9, muted);
+      y = doc.y + 18;
+      const rule = () => {
+        doc
+          .moveTo(x + 18, y)
+          .lineTo(x + w - 18, y)
+          .dash(2, { space: 2 })
+          .strokeColor(muted)
+          .stroke()
+          .undash();
+        y += 18;
+      };
+      rule();
+      text("Boarding Point", x + 18, y, 200, 9, muted);
+      text("Dropping Point", x + 245, y, 190, 9, muted);
+      y += 18;
+      const board = text(
+        [data.pickupLocation, pickup.address, pickup.landmark, pickup.contact]
+          .filter(Boolean)
+          .join("\n"),
+        x + 18,
+        y,
+        200,
+        10,
+      );
+      const dropping = text(
+        [data.dropoffLocation, drop.address, drop.landmark]
+          .filter(Boolean)
+          .join("\n"),
+        x + 245,
+        y,
+        190,
+        10,
+      );
+      y = Math.max(board, dropping) + 18;
+      rule();
+      text("Passenger Details", x + 18, y, 250, 9, muted);
+      text("Seat no", x + 355, y, 80, 9, muted);
+      y += 24;
+      for (const p of data.passengers) {
+        room(65);
+        text(p.cancelled ? `${p.name} (Cancelled)` : p.name, x + 18, y, 300, 11);
+        const after = doc.y;
+        text(p.seatNo, x + 355, y, 80, 11);
+        y = Math.max(after, doc.y) + 3;
+        text(
+          `${p.age} years, ${p.gender === "M" ? "Male" : p.gender === "F" ? "Female" : "Other"}`,
+          x + 18,
+          y,
+          300,
+          9,
+          muted,
+        );
+        y = doc.y + 18;
+      }
+      if (doc.page === panelPage) doc.rect(x, panelTop, w, y - panelTop).strokeColor(border).stroke();
+      room(70);
+      doc
+        .moveTo(x, y)
+        .lineTo(x + w, y)
+        .strokeColor(border)
+        .stroke();
+      y += 15;
+      text(
+        `Status: ${data.status || "—"}   |   Amount: INR ${Number(data.totalFare).toFixed(2)}`,
+        x + 18,
+        y,
+        w - 36,
+        9,
+      );
       doc.end();
     } catch (err) {
       reject(err);
+      doc.end();
     }
   });
 }

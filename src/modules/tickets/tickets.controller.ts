@@ -1,9 +1,9 @@
-import { BookingsService } from '../bookings/bookings.service';
-import { getPrismaClient } from '../../infrastructure/database';
-import { NotFoundError } from '../../shared/errors';
-import { Request, Response, NextFunction } from 'express';
-import { TicketsService } from './tickets.service';
-import { ApiResponse } from '../../shared/utils/response';
+import { BookingsService } from "../bookings/bookings.service";
+import { getPrismaClient } from "../../infrastructure/database";
+import { NotFoundError } from "../../shared/errors";
+import { Request, Response, NextFunction } from "express";
+import { TicketsService } from "./tickets.service";
+import { ApiResponse } from "../../shared/utils/response";
 
 export class TicketsController {
   private ticketsService: TicketsService;
@@ -12,60 +12,119 @@ export class TicketsController {
     this.ticketsService = TicketsService.getInstance();
   }
 
-  public getTicketByBookingId = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  public getTicketByBookingId = async (
+    req: Request,
+    res: Response,
+    next: NextFunction,
+  ): Promise<void> => {
     try {
-      const bookingId = Array.isArray(req.params.bookingId) ? req.params.bookingId[0] : req.params.bookingId;
-      await BookingsService.getInstance().getBooking(bookingId, req.user?.sub);
-      const forceRefresh = req.query.refresh === 'true' || req.query.forceRefresh === 'true';
-      const ticket = await this.ticketsService.getTicketByBookingId(bookingId, forceRefresh);
+      const bookingId = Array.isArray(req.params.bookingId)
+        ? req.params.bookingId[0]
+        : req.params.bookingId;
+      const forceRefresh =
+        req.query.refresh === "true" || req.query.forceRefresh === "true";
+      const ticket = await this.ticketsService.getTicketByBookingId(
+        bookingId,
+        forceRefresh,
+        req.user?.sub,
+      );
       ApiResponse.success(res, ticket);
     } catch (error) {
       next(error);
     }
   };
 
-  public getTicketByTicketNumber = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  public getTicketByTicketNumber = async (
+    req: Request,
+    res: Response,
+    next: NextFunction,
+  ): Promise<void> => {
     try {
-      const ticketNumber = Array.isArray(req.params.ticketNumber) ? req.params.ticketNumber[0] : req.params.ticketNumber;
+      const ticketNumber = Array.isArray(req.params.ticketNumber)
+        ? req.params.ticketNumber[0]
+        : req.params.ticketNumber;
       const owner = await getPrismaClient().booking.findFirst({
-        where: { userId: req.user!.sub, OR: [{ providerTicketNo: ticketNumber }, { ticket: { ticketNumber } }] },
+        where: {
+          userId: req.user!.sub,
+          OR: [
+            { providerTicketNo: ticketNumber },
+            { ticket: { ticketNumber } },
+          ],
+        },
         select: { id: true },
       });
-      if (!owner) throw new NotFoundError('Ticket not found');
-      const ticket = await this.ticketsService.getTicketByTicketNumber(ticketNumber);
+      if (!owner) throw new NotFoundError("Ticket not found");
+      const ticket = await this.ticketsService.getTicketByTicketNumber(
+        ticketNumber,
+        req.user?.sub,
+      );
       ApiResponse.success(res, ticket);
     } catch (error) {
       next(error);
     }
   };
 
-  public getGdsBookingDetails = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  public getGdsBookingDetails = async (
+    req: Request,
+    res: Response,
+    next: NextFunction,
+  ): Promise<void> => {
     try {
-      const pnr = (req.query.PNR || req.query.pnr || req.query.PNRNo || req.query.pnrNo || req.body?.PNR || req.body?.pnr || req.body?.PNRNo || req.body?.pnrNo) as string;
-      const ticketNo = (req.query.TicketNo || req.query.ticketNo || req.body?.TicketNo || req.body?.ticketNo) as string;
+      const pnr = (req.query.PNR ||
+        req.query.pnr ||
+        req.query.PNRNo ||
+        req.query.pnrNo ||
+        req.body?.PNR ||
+        req.body?.pnr ||
+        req.body?.PNRNo ||
+        req.body?.pnrNo) as string;
+      const ticketNo = (req.query.TicketNo ||
+        req.query.ticketNo ||
+        req.body?.TicketNo ||
+        req.body?.ticketNo) as string;
 
       if (!pnr || !ticketNo) {
-        ApiResponse.error(res, 'PNR and TicketNo are required query parameters', 'VALIDATION_ERROR', 400);
+        ApiResponse.error(
+          res,
+          "PNR and TicketNo are required query parameters",
+          "VALIDATION_ERROR",
+          400,
+        );
         return;
       }
 
-      const result = await this.ticketsService.getGdsBookingDetails(pnr, ticketNo, req.user!.sub);
-      ApiResponse.success(res, result, 'Provider booking details retrieved successfully');
+      const result = await this.ticketsService.getGdsBookingDetails(
+        pnr,
+        ticketNo,
+        req.user!.sub,
+      );
+      ApiResponse.success(
+        res,
+        result,
+        "Provider booking details retrieved successfully",
+      );
     } catch (error) {
       next(error);
     }
   };
 
-  public downloadTicketPdf = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  public downloadTicketPdf = async (
+    req: Request,
+    res: Response,
+    next: NextFunction,
+  ): Promise<void> => {
     try {
       const rawId = req.params.bookingId || req.params.id;
-      const identifier = Array.isArray(rawId) ? rawId[0] : String(rawId || '');
-      await BookingsService.getInstance().getBooking(identifier, req.user?.sub);
-      const { buffer, fileName } = await this.ticketsService.generateTicketPdfBuffer(identifier);
+      const identifier = Array.isArray(rawId) ? rawId[0] : String(rawId || "");
+      const { buffer, fileName } =
+        await this.ticketsService.generateTicketPdfBuffer(
+          identifier,
+          req.user?.sub,
+        );
 
-      res.setHeader('Content-Type', 'application/pdf');
-      res.setHeader('Content-Disposition', `inline; filename="${fileName}"`);
-      res.setHeader('Content-Length', buffer.length);
+      res.setHeader("Content-Type", "application/pdf");
+      res.setHeader("Content-Disposition", `inline; filename="${fileName}"`);
+      res.setHeader("Content-Length", buffer.length);
       res.end(buffer);
     } catch (error) {
       next(error);
