@@ -17,13 +17,9 @@ class CancellationsService {
     }
     provider = gdsAdapter_1.GdsAdapter.getInstance();
     async owned(identifier, userId) {
+        const isUuid = /^[0-9a-f-]{36}$/i.test(identifier);
         const booking = await (0, database_1.getPrismaClient)().booking.findFirst({
-            where: {
-                userId,
-                ...(/^[0-9a-f-]{36}$/i.test(identifier)
-                    ? { id: identifier }
-                    : { bookingNumber: identifier }),
-            },
+            where: isUuid ? { id: identifier } : { bookingNumber: identifier },
             include: {
                 seats: true,
                 payments: true,
@@ -33,8 +29,24 @@ class CancellationsService {
                 commissionSnapshot: true,
             },
         });
-        if (!userId || !booking || booking.userId !== userId)
+        if (!booking) {
             throw new errors_1.NotFoundError("Booking");
+        }
+        // If the booking is tied to an account and a user ID is passed, enforce ownership
+        if (booking.userId && userId && booking.userId !== userId) {
+            throw new errors_1.NotFoundError("Booking");
+        }
+        // If booking was created without an account (guest booking) and a user is now logged in,
+        // link it to this user
+        if (!booking.userId && userId) {
+            await (0, database_1.getPrismaClient)()
+                .booking.update({
+                where: { id: booking.id },
+                data: { userId },
+            })
+                .catch(() => { });
+            booking.userId = userId;
+        }
         return booking;
     }
     selected(booking, requested) {
@@ -52,12 +64,14 @@ class CancellationsService {
     }
     async checkCancellability(identifier, seats, userId) {
         const booking = await this.owned(identifier, userId);
+        const ticketNo = booking.providerTicketNo || booking.ticket?.ticketNumber;
+        const pnrNo = booking.providerPnrNo || booking.ticket?.pnrNumber;
         if (booking.status !== "CONFIRMED" ||
-            !booking.providerTicketNo ||
-            !booking.providerPnrNo)
+            !ticketNo ||
+            !pnrNo)
             throw new errors_1.ValidationError("This booking is not eligible for cancellation");
         const selected = this.selected(booking, seats);
-        const quote = await this.provider.isCancellable(booking.providerTicketNo, selected.join(","), booking.providerPnrNo);
+        const quote = await this.provider.isCancellable(ticketNo, selected.join(","), pnrNo);
         const grossTotal = booking.seats.reduce((sum, s) => sum + Number(s.fareTotal), 0);
         const selectedGross = booking.seats
             .filter((s) => selected.includes(s.seatNo))
@@ -76,6 +90,8 @@ class CancellationsService {
             bookingId: booking.id,
             bookingNumber: booking.bookingNumber,
             seatNos: selected.join(","),
+            ticketNo,
+            pnrNo,
         };
     }
     async cancelSeats(identifier, seats, reason, userId, refundToWallet = false) {
@@ -91,16 +107,18 @@ class CancellationsService {
             seats.every((s) => c.seatNos.includes(s)));
         if (previous)
             return this.result(previous.id);
+        const ticketNo = booking.providerTicketNo || booking.ticket?.ticketNumber;
+        const pnrNo = booking.providerPnrNo || booking.ticket?.pnrNumber;
         if (booking.status !== "CONFIRMED" ||
-            !booking.providerTicketNo ||
-            !booking.providerPnrNo)
+            !ticketNo ||
+            !pnrNo)
             throw new errors_1.ValidationError("This booking is not eligible for cancellation");
         const selected = this.selected(booking, seats);
-        const quote = await this.provider.isCancellable(booking.providerTicketNo, selected.join(","), booking.providerPnrNo);
+        const quote = await this.provider.isCancellable(ticketNo, selected.join(","), pnrNo);
         if (!quote.IsCancellable)
-            throw new errors_1.ValidationError("The operator declined cancellation");
+            throw new errors_1.ValidationError(quote.Message || "The operator declined cancellation");
         const key = (0, node_crypto_1.createHash)("sha256")
-            .update(`${booking.id}:${booking.providerTicketNo}:${selected.join(",")}`)
+            .update(`${booking.id}:${ticketNo}:${selected.join(",")}`)
             .digest("hex");
         const operation = await prisma.$transaction(async (tx) => {
             const claimed = await tx.booking.updateMany({
@@ -127,8 +145,8 @@ class CancellationsService {
                     refundAmount: 0,
                     totalFare: Number(booking.totalFare),
                     requestSnapshot: {
-                        ticketNo: booking.providerTicketNo,
-                        pnrNo: booking.providerPnrNo,
+                        ticketNo,
+                        pnrNo,
                         quote: JSON.parse(JSON.stringify(quote)),
                     },
                 },
@@ -136,8 +154,8 @@ class CancellationsService {
         });
         try {
             const response = await this.provider.cancelSeats({
-                TicketNo: booking.providerTicketNo,
-                PNR: booking.providerPnrNo,
+                TicketNo: ticketNo,
+                PNR: pnrNo,
                 SeatNos: selected.join(","),
             });
             await prisma.cancellation.update({
@@ -272,7 +290,7 @@ class CancellationsService {
             let walletRemaining = Math.max(0, walletFunded - priorRefunded);
             let gatewayRemaining = Math.max(0, Number(payment.amount) - Math.max(0, priorRefunded - walletFunded));
             let amount = refundAmount;
-            if (booking.agentId) {
+            if (booking.agentId && payment.gateway === "WALLET") {
                 const commission = Number(booking.commissionSnapshot?.commissionAmt ?? 0);
                 const reversed = Math.max(0, Math.min(commission - Number(booking.commissionSnapshot?.reversalAmt ?? 0), Math.round(((commission * refundAmount) / grossTotal) * 100) / 100));
                 amount = Math.max(0, Math.min(refundAmount - reversed, Number(payment.amount) - priorRefunded));

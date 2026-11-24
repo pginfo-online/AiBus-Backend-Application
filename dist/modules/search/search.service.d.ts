@@ -6,9 +6,16 @@ export declare class SearchService {
     private searchLogger;
     private constructor();
     static getInstance(): SearchService;
+    private resolveCityNames;
     searchBuses(query: SearchBusesQuery): Promise<{
         results: GdsBusSearchResult[];
         total: number;
+        fromCityId?: number;
+        toCityId?: number;
+        fromCityName?: string;
+        toCityName?: string;
+        from?: string;
+        to?: string;
     }>;
     searchSingleBus(query: {
         fromCityId: number;
@@ -18,6 +25,12 @@ export declare class SearchService {
     }): Promise<{
         results: GdsBusSearchResult[];
         total: number;
+        fromCityId?: number;
+        toCityId?: number;
+        fromCityName?: string;
+        toCityName?: string;
+        from?: string;
+        to?: string;
     }>;
 }
 //# sourceMappingURL=search.service.d.ts.map

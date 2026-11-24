@@ -10,6 +10,8 @@ export declare class CancellationsService {
         bookingId: string;
         bookingNumber: string;
         seatNos: string;
+        ticketNo: string;
+        pnrNo: string;
         IsCancellable: boolean;
         ChargePct?: number;
         ChargeAmt?: number;

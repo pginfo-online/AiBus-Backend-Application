@@ -1,7 +1,7 @@
 export declare class TicketsService {
     private static instance;
     static getInstance(): TicketsService;
-    getGdsBookingDetails(pnr: string, ticketNo: string, userId: string): Promise<import("../../providers/types").GdsBookingDetailsResponse>;
+    getGdsBookingDetails(pnr: string, ticketNo: string, userId?: string): Promise<import("../../providers/types").GdsBookingDetailsResponse>;
     refreshProviderDetails(bookingId: string): Promise<void>;
     getTicketByBookingId(identifier: string, forceRefresh?: boolean, userId?: string): Promise<{
         id: string;

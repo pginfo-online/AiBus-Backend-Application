@@ -51,6 +51,14 @@ export interface GdsBusSearchResult {
   BoardingPoints: GdsBoardingPoint[];
   DroppingPoints: GdsDroppingPoint[];
   CancellationPolicy?: Array<{ Amt: number; Pct: number; Mins: number }>;
+  FromCityId?: number;
+  ToCityId?: number;
+  FromCityName?: string;
+  ToCityName?: string;
+  FromName?: string;
+  ToName?: string;
+  from?: string;
+  to?: string;
 }
 
 export interface GdsSeatLayoutItem {
@@ -89,7 +97,7 @@ export interface GdsPassengerHold {
   SeatNo: string;
   SeatTypeId: number;
   Fare: number;
-  Gender: 'M' | 'F' | 'O';
+  Gender: 'M' | 'F';
   Age: number;
   Name: string;
   IsAcSeat: boolean;

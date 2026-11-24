@@ -10,8 +10,13 @@ exports.passengerHoldSchema = zod_1.z.object({
     gender: zod_1.z.preprocess((value) => {
         if (typeof value !== "string")
             return value;
-        return ({ MALE: "M", FEMALE: "F", OTHER: "O" }[value.trim().toUpperCase()] ?? value.trim().toUpperCase());
-    }, zod_1.z.enum(["M", "F", "O"])),
+        const upper = value.trim().toUpperCase();
+        if (upper === "MALE" || upper === "M")
+            return "M";
+        if (upper === "FEMALE" || upper === "F")
+            return "F";
+        return upper;
+    }, zod_1.z.enum(["M", "F"])),
     age: zod_1.z.coerce.number().int().min(1).max(120),
     name: zod_1.z.string().trim().min(2, "Passenger name is required").max(100),
     isAcSeat: zod_1.z.boolean().default(false),

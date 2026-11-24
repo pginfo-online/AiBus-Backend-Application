@@ -211,12 +211,20 @@ export class GdsTransactionClient {
   public async isCancellable(ticketNo: string, seatNos: string, pnrNo?: string): Promise<GdsIsCancellableResponse> {
     return this.circuitBreaker.execute(async () => {
       try {
+        const cleanTicketNo = String(ticketNo || "").trim();
+        const cleanSeatNos = String(seatNos || "").trim();
+        const cleanPnrNo = String(pnrNo || "").trim();
+
         const params: Record<string, string> = {
-          TicketNo: String(ticketNo),
-          seatNos: String(seatNos),
+          TicketNo: cleanTicketNo,
+          ticketNo: cleanTicketNo,
+          seatNos: cleanSeatNos,
+          SeatNos: cleanSeatNos,
         };
-        if (pnrNo) {
-          params.PNRNo = String(pnrNo);
+        if (cleanPnrNo) {
+          params.PNRNo = cleanPnrNo;
+          params.PNR = cleanPnrNo;
+          params.pnrNo = cleanPnrNo;
         }
 
         this.txLogger.info({ params }, 'Calling Mantis GDS GET /ota/IsCancellable');
@@ -227,19 +235,30 @@ export class GdsTransactionClient {
         const raw = response.data;
         const data = raw?.data || raw;
 
-        if (typeof data?.IsCancellable !== 'boolean' || (data.IsCancellable && (!Number.isFinite(Number(data.RefundAmount)) || Number(data.RefundAmount) < 0))) throw new ProviderError('GDS', 'Invalid cancellation quote');
+        const isCancellableBool =
+          data?.IsCancellable === true ||
+          data?.IsCancellable === 'true' ||
+          data?.IsCancellable === 1 ||
+          data?.isCancellable === true ||
+          data?.isCancellable === 'true' ||
+          data?.isCancellable === 1;
+
+        const refundAmt = Number(data?.RefundAmount ?? data?.refundAmount ?? 0);
+        const chargeAmt = Number(data?.ChargeAmt ?? data?.chargeAmt ?? data?.CancellationCharge ?? data?.cancellationCharge ?? 0);
+        const chargePct = Number(data?.ChargePct ?? data?.chargePct ?? data?.RefundPercentage ?? data?.refundPercentage ?? 0);
+        const totalFare = Number(data?.TotalFare ?? data?.totalFare ?? data?.CancSeatsTotalFare ?? 0);
+
         return {
-          IsCancellable: data?.IsCancellable === true,
-          ChargePct: Number(data?.ChargePct ?? data?.chargePct ?? data?.RefundPercentage ?? 0),
-          ChargeAmt: Number(data?.ChargeAmt ?? data?.chargeAmt ?? data?.CancellationCharge ?? 0),
-          TotalFare: Number(data?.TotalFare ?? data?.totalFare ?? data?.CancSeatsTotalFare ?? 0),
-          CancSeatsTotalFare: Number(data?.CancSeatsTotalFare ?? data?.cancSeatsTotalFare ?? data?.TotalFare ?? 0),
-          RefundAmount: Number(data?.RefundAmount ?? data?.refundAmount ?? 0),
-          Message: data?.Message || 'Cancellability checked successfully',
+          IsCancellable: isCancellableBool,
+          ChargePct: Number.isFinite(chargePct) ? chargePct : 0,
+          ChargeAmt: Number.isFinite(chargeAmt) ? chargeAmt : 0,
+          TotalFare: Number.isFinite(totalFare) ? totalFare : 0,
+          CancSeatsTotalFare: Number(data?.CancSeatsTotalFare ?? data?.cancSeatsTotalFare ?? totalFare),
+          RefundAmount: Number.isFinite(refundAmt) ? refundAmt : 0,
+          Message: data?.Message || data?.message || (isCancellableBool ? 'Cancellability checked successfully' : 'Ticket is not cancellable under operator policy'),
         };
       } catch (err: any) {
         this.txLogger.error({ err: err.message, ticketNo, seatNos, pnrNo }, 'GDS IsCancellable failed');
-
         throw err;
       }
     });
@@ -248,12 +267,18 @@ export class GdsTransactionClient {
   public async cancelSeats(request: GdsCancelRequest): Promise<GdsCancelResponse> {
     return this.circuitBreaker.execute(async () => {
       try {
+        const cleanTicketNo = String(request.TicketNo || "").trim();
+        const cleanSeatNos = String(request.SeatNos || "").trim();
+        const cleanPnr = String(request.PNR || request.PNRNo || "").trim();
+
         const payload: any = {
-          TicketNo: String(request.TicketNo),
-          SeatNos: String(request.SeatNos),
+          TicketNo: cleanTicketNo,
+          SeatNos: cleanSeatNos,
+          seatNos: cleanSeatNos,
         };
-        if (request.PNR || request.PNRNo) {
-          payload.PNR = String(request.PNR || request.PNRNo);
+        if (cleanPnr) {
+          payload.PNR = cleanPnr;
+          payload.PNRNo = cleanPnr;
         }
 
         this.txLogger.info({ payload }, 'Calling Mantis GDS POST /ota/CancelSeats');
@@ -261,10 +286,23 @@ export class GdsTransactionClient {
         const raw = response.data;
         const data = raw?.data || raw;
 
-        if (raw?.success !== true || typeof data?.RefundAmount !== 'number'
-          || !Number.isFinite(data.RefundAmount) || data.RefundAmount < 0) {
-          throw new ProviderError('GDS', 'Invalid cancellation response');
+        const refundAmt = Number(data?.RefundAmount ?? data?.refundAmount ?? 0);
+        const isSuccess =
+          raw?.success === true ||
+          data?.Status === 1 ||
+          data?.status === 1 ||
+          data?.Status === '1' ||
+          Boolean(data?.NewTicketNo) ||
+          (data?.RefundAmount !== undefined && !data?.Error && !data?.error);
+
+        if (!isSuccess || !Number.isFinite(refundAmt) || refundAmt < 0) {
+          const errMsg = data?.Message || data?.message || data?.Error?.Msg || data?.Error?.msg || 'Failed to cancel seats with provider';
+          throw new ProviderError('GDS', errMsg);
         }
+
+        const chargeAmt = Number(data?.ChargeAmt ?? data?.chargeAmt ?? data?.CancellationCharge ?? data?.cancellationCharge ?? 0);
+        const chargePct = Number(data?.ChargePct ?? data?.chargePct ?? 0);
+        const totalFare = Number(data?.TotalFare ?? data?.totalFare ?? 0);
 
         return {
           Status: data?.Status === undefined ? 1 : Number(data.Status),
@@ -272,16 +310,15 @@ export class GdsTransactionClient {
           NewTicketNo: data?.NewTicketNo ? String(data.NewTicketNo) : undefined,
           NewPNRNo: data?.NewPNRNo ? String(data.NewPNRNo) : undefined,
           NewTotalFare: Number(data?.NewTotalFare ?? 0),
-          ChargeAmt: Number(data?.ChargeAmt ?? data?.CancellationCharge ?? 0),
-          ChargePct: Number(data?.ChargePct ?? 0),
-          RefundAmount: Number(data?.RefundAmount ?? data?.refundAmount ?? 0),
-          CancellationCharge: Number(data?.CancellationCharge ?? data?.ChargeAmt ?? 0),
-          TotalFare: Number(data?.TotalFare ?? 0),
-          Message: data?.Message || 'Seats cancelled successfully',
+          ChargeAmt: Number.isFinite(chargeAmt) ? chargeAmt : 0,
+          ChargePct: Number.isFinite(chargePct) ? chargePct : 0,
+          RefundAmount: Number.isFinite(refundAmt) ? refundAmt : 0,
+          CancellationCharge: Number.isFinite(chargeAmt) ? chargeAmt : 0,
+          TotalFare: Number.isFinite(totalFare) ? totalFare : 0,
+          Message: data?.Message || data?.message || 'Seats cancelled successfully',
         };
       } catch (err: any) {
         this.txLogger.error({ err: err.message, request }, 'GDS CancelSeats failed');
-
         throw err;
       }
     });

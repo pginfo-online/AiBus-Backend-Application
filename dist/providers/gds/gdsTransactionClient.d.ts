@@ -4,7 +4,7 @@ export declare function buildGdsHoldSeatsPayload(request: GdsHoldRequest): {
     Passengers: {
         Name: string;
         Age: number;
-        Gender: "O" | "M" | "F";
+        Gender: "M" | "F";
         SeatNo: string;
         Fare: number;
         SeatTypeId: number;

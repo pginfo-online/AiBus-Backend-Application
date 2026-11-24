@@ -1,5 +1,6 @@
 import crypto from 'crypto';
 import { GdsAdapter } from '../../providers/gds/gdsAdapter';
+import { CitiesService } from '../cities/cities.service';
 import { getRedisClient } from '../../infrastructure/redis';
 import { RedisPrefix } from '../../shared/constants';
 import { logger } from '../../infrastructure/logger';
@@ -22,7 +23,65 @@ export class SearchService {
     return SearchService.instance;
   }
 
-  public async searchBuses(query: SearchBusesQuery): Promise<{ results: GdsBusSearchResult[]; total: number }> {
+  private async resolveCityNames(fromCityId: number, toCityId: number): Promise<{ fromCityName: string; toCityName: string }> {
+    const commonCityMap: Record<number, string> = {
+      4292: 'Bengaluru',
+      4562: 'Chennai',
+      6772: 'Pune',
+      4492: 'Pune',
+      19: 'Pune',
+      4300: 'Mumbai',
+      18: 'Mumbai',
+      4120: 'Hyderabad',
+      23: 'Hyderabad',
+      1: 'Delhi',
+      2: 'Jaipur',
+      3: 'Agra',
+      4: 'Dehradun',
+      5: 'Chandigarh',
+      6: 'Manali',
+      7: 'Shimla',
+      8: 'Haridwar',
+      9: 'Rishikesh',
+      10: 'Lucknow',
+      11: 'Varanasi',
+      12: 'Kanpur',
+      13: 'Prayagraj',
+      14: 'Ahmedabad',
+      15: 'Surat',
+      16: 'Vadodara',
+      17: 'Rajkot',
+      20: 'Nagpur',
+      21: 'Nashik',
+      22: 'Goa',
+      24: 'Vijayawada',
+      25: 'Visakhapatnam',
+      26: 'Kochi',
+      27: 'Trivandrum',
+      28: 'Coimbatore',
+      29: 'Madurai',
+      30: 'Mysuru',
+      31: 'Tirupati',
+      32: 'Mangalore',
+    };
+
+    let fromCityName = commonCityMap[Number(fromCityId)] || 'Origin';
+    let toCityName = commonCityMap[Number(toCityId)] || 'Destination';
+
+    try {
+      const cities = await CitiesService.getInstance().getCities();
+      const fromMatch = cities.find((c) => Number(c.CityId || c.providerCityId) === Number(fromCityId));
+      if (fromMatch) fromCityName = fromMatch.name || fromMatch.City;
+      const toMatch = cities.find((c) => Number(c.CityId || c.providerCityId) === Number(toCityId));
+      if (toMatch) toCityName = toMatch.name || toMatch.City;
+    } catch (err: any) {
+      this.searchLogger.warn({ err: err.message }, 'Failed to resolve city names from CitiesService, using fallback');
+    }
+
+    return { fromCityName, toCityName };
+  }
+
+  public async searchBuses(query: SearchBusesQuery): Promise<{ results: GdsBusSearchResult[]; total: number; fromCityId?: number; toCityId?: number; fromCityName?: string; toCityName?: string; from?: string; to?: string }> {
     const rawCacheKey = `${query.fromCityId}:${query.toCityId}:${query.journeyDate}`;
     const hash = crypto.createHash('md5').update(rawCacheKey).digest('hex');
     const cacheKey = `${RedisPrefix.CACHE_SEARCH}gds:${hash}`;
@@ -104,9 +163,39 @@ export class SearchService {
       }
     }
 
+    const { fromCityName, toCityName } = await this.resolveCityNames(query.fromCityId, query.toCityId);
+
+    const enrichedResults = filtered.map((b) => {
+      const baseFare = Number(b.BaseFare || b.TotalFare || 0);
+      const totalFare = Number(b.TotalFare || b.BaseFare || 0);
+      const serviceTax = Number(b.ServiceTax ?? Math.max(0, totalFare - baseFare));
+      return {
+        ...b,
+        BaseFare: baseFare,
+        TotalFare: totalFare,
+        ServiceTax: serviceTax,
+        price: totalFare,
+        fare: totalFare,
+        FromCityId: query.fromCityId,
+        ToCityId: query.toCityId,
+        FromCityName: fromCityName,
+        ToCityName: toCityName,
+        FromName: fromCityName,
+        ToName: toCityName,
+        from: fromCityName,
+        to: toCityName,
+      };
+    });
+
     return {
-      results: filtered,
-      total: filtered.length,
+      fromCityId: query.fromCityId,
+      toCityId: query.toCityId,
+      fromCityName,
+      toCityName,
+      from: fromCityName,
+      to: toCityName,
+      results: enrichedResults,
+      total: enrichedResults.length,
     };
   }
 
@@ -115,7 +204,7 @@ export class SearchService {
     toCityId: number;
     journeyDate: string;
     busId: number;
-  }): Promise<{ results: GdsBusSearchResult[]; total: number }> {
+  }): Promise<{ results: GdsBusSearchResult[]; total: number; fromCityId?: number; toCityId?: number; fromCityName?: string; toCityName?: string; from?: string; to?: string }> {
     const rawCacheKey = `single:${query.busId}:${query.fromCityId}:${query.toCityId}:${query.journeyDate}`;
     const hash = crypto.createHash('md5').update(rawCacheKey).digest('hex');
     const cacheKey = `${RedisPrefix.CACHE_SEARCH}gds:${hash}`;
@@ -171,9 +260,39 @@ export class SearchService {
       }
     }
 
+    const { fromCityName, toCityName } = await this.resolveCityNames(query.fromCityId, query.toCityId);
+
+    const enrichedBuses = buses.map((b) => {
+      const baseFare = Number(b.BaseFare || b.TotalFare || 0);
+      const totalFare = Number(b.TotalFare || b.BaseFare || 0);
+      const serviceTax = Number(b.ServiceTax ?? Math.max(0, totalFare - baseFare));
+      return {
+        ...b,
+        BaseFare: baseFare,
+        TotalFare: totalFare,
+        ServiceTax: serviceTax,
+        price: totalFare,
+        fare: totalFare,
+        FromCityId: query.fromCityId,
+        ToCityId: query.toCityId,
+        FromCityName: fromCityName,
+        ToCityName: toCityName,
+        FromName: fromCityName,
+        ToName: toCityName,
+        from: fromCityName,
+        to: toCityName,
+      };
+    });
+
     return {
-      results: buses,
-      total: buses.length,
+      fromCityId: query.fromCityId,
+      toCityId: query.toCityId,
+      fromCityName,
+      toCityName,
+      from: fromCityName,
+      to: toCityName,
+      results: enrichedBuses,
+      total: enrichedBuses.length,
     };
   }
 }

@@ -29,9 +29,63 @@ function parseBus(value: unknown, index: number): GdsBusSearchResult {
   const busType = isJsonObject(value.BusType) ? value.BusType : {};
   const busStatus = isJsonObject(value.BusStatus) ? value.BusStatus : {};
   const availability = requiredNumber(busStatus.Availability, `${field}.BusStatus.Availability`);
-  const fares = Array.isArray(busStatus.BaseFares) ? busStatus.BaseFares : [];
-  const baseFare = fares.length > 0 ? requiredNumber(fares[0], `${field}.BusStatus.BaseFares[0]`) : 0;
-  const serviceTax = typeof busStatus.TotalTax === 'number' ? busStatus.TotalTax : 0;
+
+  // 1. Base Fare: check BaseFares array or BaseFare number
+  const baseFares = Array.isArray(busStatus.BaseFares)
+    ? busStatus.BaseFares
+    : (Array.isArray(value.BaseFares) ? value.BaseFares : []);
+  const rawBaseFare = baseFares.length > 0 && typeof baseFares[0] === 'number'
+    ? baseFares[0]
+    : (typeof busStatus.BaseFare === 'number'
+        ? busStatus.BaseFare
+        : (typeof value.BaseFare === 'number' ? value.BaseFare : 0));
+
+  // 2. Total Fare: check TotalFares array, TotalFare number, or GrossFare
+  const totalFaresArray = Array.isArray(busStatus.TotalFares)
+    ? busStatus.TotalFares
+    : (Array.isArray(value.TotalFares) ? value.TotalFares : []);
+  const rawTotalFare = totalFaresArray.length > 0 && typeof totalFaresArray[0] === 'number'
+    ? totalFaresArray[0]
+    : (typeof busStatus.TotalFare === 'number'
+        ? busStatus.TotalFare
+        : (typeof value.TotalFare === 'number'
+            ? value.TotalFare
+            : (typeof busStatus.GrossFare === 'number'
+                ? busStatus.GrossFare
+                : (typeof value.GrossFare === 'number' ? value.GrossFare : undefined))));
+
+  // 3. Tax / GST: check TotalTax, ServiceTax, Tax, GST across busStatus and value
+  const rawTax = typeof busStatus.TotalTax === 'number'
+    ? busStatus.TotalTax
+    : (typeof busStatus.ServiceTax === 'number'
+        ? busStatus.ServiceTax
+        : (typeof busStatus.Tax === 'number'
+            ? busStatus.Tax
+            : (typeof busStatus.GST === 'number'
+                ? busStatus.GST
+                : (typeof busStatus.Gst === 'number'
+                    ? busStatus.Gst
+                    : (typeof value.TotalTax === 'number'
+                        ? value.TotalTax
+                        : (typeof value.ServiceTax === 'number'
+                            ? value.ServiceTax
+                            : (typeof value.Tax === 'number'
+                                ? value.Tax
+                                : (typeof value.GST === 'number'
+                                    ? value.GST
+                                    : (typeof value.Gst === 'number' ? value.Gst : undefined)))))))));
+
+  let baseFare = rawBaseFare;
+  let totalFare = rawTotalFare !== undefined ? rawTotalFare : (rawTax !== undefined ? baseFare + rawTax : baseFare);
+  let serviceTax = rawTax !== undefined ? rawTax : (rawTotalFare !== undefined && rawTotalFare >= baseFare ? rawTotalFare - baseFare : 0);
+
+  // If totalFare is smaller than baseFare and both are positive, swap/adjust
+  if (totalFare < baseFare && totalFare > 0) {
+    const temp = totalFare;
+    totalFare = baseFare;
+    baseFare = temp;
+    serviceTax = totalFare - baseFare;
+  }
   const busLabel = requiredString(value.BusLabel, `${field}.BusLabel`);
   const seatsFromLabel = busLabel.match(/\((\d+)\)/);
   const cancellationPolicy = Array.isArray(value.Canc)

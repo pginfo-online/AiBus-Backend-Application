@@ -85,11 +85,6 @@ export class PaymentsService {
       throw new NotFoundError("Booking not found");
     }
 
-    if (booking.agentId)
-      throw new ValidationError(
-        "Agent bookings must be paid from the agent wallet",
-      );
-
     if (booking.status === BookingStatus.CONFIRMED) {
       throw new ValidationError("Booking is already confirmed and completed");
     }

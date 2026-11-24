@@ -7,12 +7,12 @@ const controller = new TicketsController();
 
 ticketsRouter.get(
   "/gds-details",
-  authenticate,
+  optionalAuth,
   controller.getGdsBookingDetails,
 );
 ticketsRouter.post(
   "/gds-details",
-  authenticate,
+  optionalAuth,
   controller.getGdsBookingDetails,
 );
 ticketsRouter.get(
@@ -27,7 +27,7 @@ ticketsRouter.get(
 );
 ticketsRouter.get(
   "/number/:ticketNumber",
-  authenticate,
+  optionalAuth,
   controller.getTicketByTicketNumber,
 );
 ticketsRouter.get("/:id/pdf", optionalAuth, controller.downloadTicketPdf);

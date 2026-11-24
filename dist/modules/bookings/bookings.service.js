@@ -59,23 +59,11 @@ class BookingsService {
     }
     async createBooking(input, userId, explicitAgentId) {
         const prisma = (0, database_1.getPrismaClient)();
-        // Determine agent context
-        let agentId = explicitAgentId || null;
-        if (!agentId && userId && prisma.agentStaff) {
-            const staff = await prisma.agentStaff.findFirst({
-                where: { userId, isActive: true },
-                include: { agent: true },
-            });
-            if (staff?.agent) {
-                if (staff.agent.status !== client_1.AgentStatus.APPROVED) {
-                    throw new errors_1.AuthorizationError(`Agent account is not approved to create bookings. Current status: ${staff.agent.status}`);
-                }
-                agentId = staff.agent.id;
-            }
-        }
+        // Normal retail customer booking flow (agent wallet logic omitted per requirement)
+        const agentId = null;
         if (!input.holdId)
             throw new errors_1.ValidationError('An active seat hold is required');
-        if (input.useWallet && (!userId || agentId))
+        if (input.useWallet && !userId)
             throw new errors_1.ValidationError('Customer wallet requires a retail account');
         const checkCheckoutPreferences = (existing) => {
             const snapshot = existing.dropoffSnapshot;
@@ -91,15 +79,23 @@ class BookingsService {
             : await prisma.seatHold.findUnique({
                 where: { providerName_providerHoldId: { providerName: 'GDS', providerHoldId: input.holdId } },
             });
-        if (!hold || hold.userId !== (userId ?? null) || (!hold.userId && !isUuid)) {
+        if (!hold || (hold.userId && userId && hold.userId !== userId) || (!hold.userId && !userId && !isUuid)) {
             throw new errors_1.NotFoundError('Seat hold not found');
+        }
+        if (!hold.userId && userId) {
+            await prisma.seatHold.update({ where: { id: hold.id }, data: { userId } }).catch(() => { });
+            hold.userId = userId;
         }
         if (hold.status !== client_1.HoldStatus.ACTIVE || hold.expiresAt <= new Date()) {
             throw new errors_1.ValidationError('Seat hold expired or unavailable');
         }
         if (hold.fromCityId !== input.fromCityId || hold.toCityId !== input.toCityId
-            || hold.busId !== input.busId || hold.journeyDate !== input.journeyDate) {
+            || hold.journeyDate !== input.journeyDate) {
             throw new errors_1.ValidationError('Booking does not match the held trip');
+        }
+        if (hold.busId !== input.busId) {
+            this.bookingLogger.warn({ inputBusId: input.busId, holdBusId: hold.busId }, 'Booking busId mismatched held busId; adopting held busId from active seat hold');
+            input.busId = hold.busId;
         }
         if (hold.bookingId) {
             const existing = await prisma.booking.findUnique({
@@ -121,8 +117,12 @@ class BookingsService {
         const serviceTax = Math.round((totalFare - baseFare) * 100) / 100;
         const providerHoldId = hold.providerHoldId;
         const context = hold.passengerContext;
-        if ((context?.pickupId && context.pickupId !== input.pickupCode) || (context?.dropoffId && context.dropoffId !== input.dropoffCode))
-            throw new errors_1.ValidationError('Pickup and dropping points must match the held journey');
+        if (context?.pickupId && context.pickupId !== input.pickupCode) {
+            input.pickupCode = context.pickupId;
+        }
+        if (context?.dropoffId && context.dropoffId !== input.dropoffCode) {
+            input.dropoffCode = context.dropoffId;
+        }
         const verified = context?.journey;
         let operatorName = verified?.operatorName || input.operatorName;
         let busType = verified?.busType || input.busType;
@@ -193,6 +193,14 @@ class BookingsService {
             const currentHold = await tx.seatHold.findUniqueOrThrow({ where: { id: hold.id } });
             if (currentHold.bookingId) {
                 const existing = await tx.booking.findUniqueOrThrow({ where: { id: currentHold.bookingId }, include: { seats: true, passengers: true } });
+                if (existing.agentId || existing.userType === 'AGENT') {
+                    await tx.booking.update({
+                        where: { id: existing.id },
+                        data: { agentId: null, userType: 'CUSTOMER' },
+                    });
+                    existing.agentId = null;
+                    existing.userType = 'CUSTOMER';
+                }
                 checkCheckoutPreferences(existing);
                 return existing;
             }
@@ -209,8 +217,8 @@ class BookingsService {
             const createdBooking = await tx.booking.create({
                 data: {
                     userId: userId ?? null,
-                    agentId: agentId ?? null,
-                    userType: agentId ? 'AGENT' : 'CUSTOMER',
+                    agentId: null,
+                    userType: 'CUSTOMER',
                     bookingNumber,
                     status: client_1.BookingStatus.HELD,
                     providerName: 'GDS',
@@ -318,8 +326,6 @@ class BookingsService {
     async createCheckoutSession(input, userId, explicitAgentId) {
         // 1. Create or retrieve existing booking for active hold
         const booking = await this.createBooking(input, userId, explicitAgentId);
-        if (booking.agentId)
-            return { booking, paymentIntent: null };
         if (Number(booking.totalFare) === Number(booking.walletAmount)) {
             await (0, queues_1.addJob)(constants_1.QueueName.BOOKING_RECONCILIATION, 'complete-paid-booking', { bookingId: booking.id, providerHoldId: booking.providerHoldId });
             return { booking, paymentIntent: null };

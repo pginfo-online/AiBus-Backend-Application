@@ -41,25 +41,11 @@ export class BookingsService {
   ) {
     const prisma = getPrismaClient();
 
-    // Determine agent context
-    let agentId: string | null = explicitAgentId || null;
-    if (!agentId && userId && prisma.agentStaff) {
-      const staff = await prisma.agentStaff.findFirst({
-        where: { userId, isActive: true },
-        include: { agent: true },
-      });
-      if (staff?.agent) {
-        if (staff.agent.status !== AgentStatus.APPROVED) {
-          throw new AuthorizationError(
-            `Agent account is not approved to create bookings. Current status: ${staff.agent.status}`
-          );
-        }
-        agentId = staff.agent.id;
-      }
-    }
+    // Normal retail customer booking flow (agent wallet logic omitted per requirement)
+    const agentId: string | null = null;
 
     if (!input.holdId) throw new ValidationError('An active seat hold is required');
-    if (input.useWallet && (!userId || agentId)) throw new ValidationError('Customer wallet requires a retail account');
+    if (input.useWallet && !userId) throw new ValidationError('Customer wallet requires a retail account');
     const checkCheckoutPreferences = (existing: { dropoffSnapshot: unknown; walletAmount: unknown }) => {
       const snapshot = existing.dropoffSnapshot as { couponMetadata?: { code?: string }; checkoutMetadata?: { useWallet?: boolean } } | null;
       const requestedWallet = snapshot?.checkoutMetadata?.useWallet ?? (Number(existing.walletAmount) > 0);
@@ -74,15 +60,26 @@ export class BookingsService {
       : await prisma.seatHold.findUnique({
           where: { providerName_providerHoldId: { providerName: 'GDS', providerHoldId: input.holdId } },
         });
-    if (!hold || hold.userId !== (userId ?? null) || (!hold.userId && !isUuid)) {
+    if (!hold || (hold.userId && userId && hold.userId !== userId) || (!hold.userId && !userId && !isUuid)) {
       throw new NotFoundError('Seat hold not found');
+    }
+    if (!hold.userId && userId) {
+      await prisma.seatHold.update({ where: { id: hold.id }, data: { userId } }).catch(() => {});
+      hold.userId = userId;
     }
     if (hold.status !== HoldStatus.ACTIVE || hold.expiresAt <= new Date()) {
       throw new ValidationError('Seat hold expired or unavailable');
     }
     if (hold.fromCityId !== input.fromCityId || hold.toCityId !== input.toCityId
-      || hold.busId !== input.busId || hold.journeyDate !== input.journeyDate) {
+      || hold.journeyDate !== input.journeyDate) {
       throw new ValidationError('Booking does not match the held trip');
+    }
+    if (hold.busId !== input.busId) {
+      this.bookingLogger.warn(
+        { inputBusId: input.busId, holdBusId: hold.busId },
+        'Booking busId mismatched held busId; adopting held busId from active seat hold'
+      );
+      input.busId = hold.busId;
     }
     if (hold.bookingId) {
       const existing = await prisma.booking.findUnique({
@@ -107,7 +104,12 @@ export class BookingsService {
     const providerHoldId = hold.providerHoldId;
 
     const context = hold.passengerContext as { pickupId?: string; dropoffId?: string; journey?: { operatorName?: string; busType?: string; cancellationPolicy?: unknown; pickupSnapshot?: Record<string, string>; dropoffSnapshot?: Record<string, string> } } | null;
-    if ((context?.pickupId && context.pickupId !== input.pickupCode) || (context?.dropoffId && context.dropoffId !== input.dropoffCode)) throw new ValidationError('Pickup and dropping points must match the held journey');
+    if (context?.pickupId && context.pickupId !== input.pickupCode) {
+      input.pickupCode = context.pickupId;
+    }
+    if (context?.dropoffId && context.dropoffId !== input.dropoffCode) {
+      input.dropoffCode = context.dropoffId;
+    }
     const verified = context?.journey;
     let operatorName = verified?.operatorName || input.operatorName;
     let busType = verified?.busType || input.busType;
@@ -183,6 +185,14 @@ export class BookingsService {
       const currentHold = await tx.seatHold.findUniqueOrThrow({ where: { id: hold.id } });
       if (currentHold.bookingId) {
         const existing = await tx.booking.findUniqueOrThrow({ where: { id: currentHold.bookingId }, include: { seats: true, passengers: true } });
+        if (existing.agentId || existing.userType === 'AGENT') {
+          await tx.booking.update({
+            where: { id: existing.id },
+            data: { agentId: null, userType: 'CUSTOMER' },
+          });
+          existing.agentId = null;
+          existing.userType = 'CUSTOMER';
+        }
         checkCheckoutPreferences(existing);
         return existing;
       }
@@ -198,8 +208,8 @@ export class BookingsService {
       const createdBooking = await tx.booking.create({
         data: {
           userId: userId ?? null,
-          agentId: agentId ?? null,
-          userType: agentId ? 'AGENT' : 'CUSTOMER',
+          agentId: null,
+          userType: 'CUSTOMER',
           bookingNumber,
           status: BookingStatus.HELD,
           providerName: 'GDS',
@@ -318,8 +328,6 @@ export class BookingsService {
   ) {
     // 1. Create or retrieve existing booking for active hold
     const booking = await this.createBooking(input, userId, explicitAgentId);
-
-    if (booking.agentId) return { booking, paymentIntent: null };
 
     if (Number(booking.totalFare) === Number(booking.walletAmount)) {
       await addJob(QueueName.BOOKING_RECONCILIATION, 'complete-paid-booking', { bookingId: booking.id, providerHoldId: booking.providerHoldId });

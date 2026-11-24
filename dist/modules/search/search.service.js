@@ -6,6 +6,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.SearchService = void 0;
 const crypto_1 = __importDefault(require("crypto"));
 const gdsAdapter_1 = require("../../providers/gds/gdsAdapter");
+const cities_service_1 = require("../cities/cities.service");
 const redis_1 = require("../../infrastructure/redis");
 const constants_1 = require("../../shared/constants");
 const logger_1 = require("../../infrastructure/logger");
@@ -21,6 +22,63 @@ class SearchService {
             SearchService.instance = new SearchService();
         }
         return SearchService.instance;
+    }
+    async resolveCityNames(fromCityId, toCityId) {
+        const commonCityMap = {
+            4292: 'Bengaluru',
+            4562: 'Chennai',
+            6772: 'Pune',
+            4492: 'Pune',
+            19: 'Pune',
+            4300: 'Mumbai',
+            18: 'Mumbai',
+            4120: 'Hyderabad',
+            23: 'Hyderabad',
+            1: 'Delhi',
+            2: 'Jaipur',
+            3: 'Agra',
+            4: 'Dehradun',
+            5: 'Chandigarh',
+            6: 'Manali',
+            7: 'Shimla',
+            8: 'Haridwar',
+            9: 'Rishikesh',
+            10: 'Lucknow',
+            11: 'Varanasi',
+            12: 'Kanpur',
+            13: 'Prayagraj',
+            14: 'Ahmedabad',
+            15: 'Surat',
+            16: 'Vadodara',
+            17: 'Rajkot',
+            20: 'Nagpur',
+            21: 'Nashik',
+            22: 'Goa',
+            24: 'Vijayawada',
+            25: 'Visakhapatnam',
+            26: 'Kochi',
+            27: 'Trivandrum',
+            28: 'Coimbatore',
+            29: 'Madurai',
+            30: 'Mysuru',
+            31: 'Tirupati',
+            32: 'Mangalore',
+        };
+        let fromCityName = commonCityMap[Number(fromCityId)] || 'Origin';
+        let toCityName = commonCityMap[Number(toCityId)] || 'Destination';
+        try {
+            const cities = await cities_service_1.CitiesService.getInstance().getCities();
+            const fromMatch = cities.find((c) => Number(c.CityId || c.providerCityId) === Number(fromCityId));
+            if (fromMatch)
+                fromCityName = fromMatch.name || fromMatch.City;
+            const toMatch = cities.find((c) => Number(c.CityId || c.providerCityId) === Number(toCityId));
+            if (toMatch)
+                toCityName = toMatch.name || toMatch.City;
+        }
+        catch (err) {
+            this.searchLogger.warn({ err: err.message }, 'Failed to resolve city names from CitiesService, using fallback');
+        }
+        return { fromCityName, toCityName };
     }
     async searchBuses(query) {
         const rawCacheKey = `${query.fromCityId}:${query.toCityId}:${query.journeyDate}`;
@@ -95,9 +153,37 @@ class SearchService {
                     break;
             }
         }
+        const { fromCityName, toCityName } = await this.resolveCityNames(query.fromCityId, query.toCityId);
+        const enrichedResults = filtered.map((b) => {
+            const baseFare = Number(b.BaseFare || b.TotalFare || 0);
+            const totalFare = Number(b.TotalFare || b.BaseFare || 0);
+            const serviceTax = Number(b.ServiceTax ?? Math.max(0, totalFare - baseFare));
+            return {
+                ...b,
+                BaseFare: baseFare,
+                TotalFare: totalFare,
+                ServiceTax: serviceTax,
+                price: totalFare,
+                fare: totalFare,
+                FromCityId: query.fromCityId,
+                ToCityId: query.toCityId,
+                FromCityName: fromCityName,
+                ToCityName: toCityName,
+                FromName: fromCityName,
+                ToName: toCityName,
+                from: fromCityName,
+                to: toCityName,
+            };
+        });
         return {
-            results: filtered,
-            total: filtered.length,
+            fromCityId: query.fromCityId,
+            toCityId: query.toCityId,
+            fromCityName,
+            toCityName,
+            from: fromCityName,
+            to: toCityName,
+            results: enrichedResults,
+            total: enrichedResults.length,
         };
     }
     async searchSingleBus(query) {
@@ -152,9 +238,37 @@ class SearchService {
                 }
             }
         }
+        const { fromCityName, toCityName } = await this.resolveCityNames(query.fromCityId, query.toCityId);
+        const enrichedBuses = buses.map((b) => {
+            const baseFare = Number(b.BaseFare || b.TotalFare || 0);
+            const totalFare = Number(b.TotalFare || b.BaseFare || 0);
+            const serviceTax = Number(b.ServiceTax ?? Math.max(0, totalFare - baseFare));
+            return {
+                ...b,
+                BaseFare: baseFare,
+                TotalFare: totalFare,
+                ServiceTax: serviceTax,
+                price: totalFare,
+                fare: totalFare,
+                FromCityId: query.fromCityId,
+                ToCityId: query.toCityId,
+                FromCityName: fromCityName,
+                ToCityName: toCityName,
+                FromName: fromCityName,
+                ToName: toCityName,
+                from: fromCityName,
+                to: toCityName,
+            };
+        });
         return {
-            results: buses,
-            total: buses.length,
+            fromCityId: query.fromCityId,
+            toCityId: query.toCityId,
+            fromCityName,
+            toCityName,
+            from: fromCityName,
+            to: toCityName,
+            results: enrichedBuses,
+            total: enrichedBuses.length,
         };
     }
 }

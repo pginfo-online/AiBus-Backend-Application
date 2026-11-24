@@ -8,13 +8,12 @@ export const passengerHoldSchema = z.object({
   gender: z.preprocess(
     (value) => {
       if (typeof value !== "string") return value;
-      return (
-        ({ MALE: "M", FEMALE: "F", OTHER: "O" } as Record<string, string>)[
-          value.trim().toUpperCase()
-        ] ?? value.trim().toUpperCase()
-      );
+      const upper = value.trim().toUpperCase();
+      if (upper === "MALE" || upper === "M") return "M";
+      if (upper === "FEMALE" || upper === "F") return "F";
+      return upper;
     },
-    z.enum(["M", "F", "O"]),
+    z.enum(["M", "F"]),
   ),
   age: z.coerce.number().int().min(1).max(120),
   name: z.string().trim().min(2, "Passenger name is required").max(100),

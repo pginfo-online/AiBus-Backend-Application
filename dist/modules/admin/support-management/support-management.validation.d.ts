@@ -41,11 +41,11 @@ export declare const createTicketBodySchema: z.ZodObject<{
     description: z.ZodString;
     category: z.ZodEnum<{
         REFUND: "REFUND";
-        OTHER: "OTHER";
         BOOKING: "BOOKING";
         CANCELLATION: "CANCELLATION";
         PAYMENT: "PAYMENT";
         GENERAL: "GENERAL";
+        OTHER: "OTHER";
     }>;
     priority: z.ZodDefault<z.ZodOptional<z.ZodEnum<{
         LOW: "LOW";
@@ -72,11 +72,11 @@ export declare const updateTicketBodySchema: z.ZodObject<{
     }>>;
     category: z.ZodOptional<z.ZodEnum<{
         REFUND: "REFUND";
-        OTHER: "OTHER";
         BOOKING: "BOOKING";
         CANCELLATION: "CANCELLATION";
         PAYMENT: "PAYMENT";
         GENERAL: "GENERAL";
+        OTHER: "OTHER";
     }>>;
     assignedTo: z.ZodOptional<z.ZodNullable<z.ZodString>>;
 }, z.core.$strict>;

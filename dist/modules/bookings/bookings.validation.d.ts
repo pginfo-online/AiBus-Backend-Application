@@ -27,7 +27,6 @@ export declare const createBookingSchema: z.ZodObject<{
         seatTypeId: z.ZodDefault<z.ZodCoercedNumber<unknown>>;
         fare: z.ZodCoercedNumber<unknown>;
         gender: z.ZodPreprocess<z.ZodEnum<{
-            O: "O";
             M: "M";
             F: "F";
         }>, unknown>;
@@ -69,7 +68,6 @@ export declare const createCheckoutSessionSchema: z.ZodObject<{
         seatTypeId: z.ZodDefault<z.ZodCoercedNumber<unknown>>;
         fare: z.ZodCoercedNumber<unknown>;
         gender: z.ZodPreprocess<z.ZodEnum<{
-            O: "O";
             M: "M";
             F: "F";
         }>, unknown>;

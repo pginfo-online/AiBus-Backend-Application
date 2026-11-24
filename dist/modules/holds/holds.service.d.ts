@@ -26,7 +26,7 @@ export declare class HoldsService {
             baseFare: number;
             serviceTax: number;
             seatNo: string;
-            gender: "O" | "M" | "F";
+            gender: "M" | "F";
             age: number;
             name: string;
             isAcSeat: boolean;

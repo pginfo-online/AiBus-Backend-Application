@@ -11,12 +11,20 @@ export class TicketsService {
   static getInstance() {
     return (this.instance ??= new TicketsService());
   }
-  async getGdsBookingDetails(pnr: string, ticketNo: string, userId: string) {
+  async getGdsBookingDetails(pnr: string, ticketNo: string, userId?: string) {
     const booking = await getPrismaClient().booking.findFirst({
-      where: { userId, providerPnrNo: pnr, providerTicketNo: ticketNo },
-      select: { id: true },
+      where: {
+        OR: [
+          { providerPnrNo: pnr, providerTicketNo: ticketNo },
+          { providerPnrNo: pnr },
+          { providerTicketNo: ticketNo },
+        ],
+      },
+      select: { id: true, userId: true },
     });
-    if (!booking) throw new NotFoundError("Booking");
+    if (booking?.userId && userId && booking.userId !== userId) {
+      throw new NotFoundError("Booking");
+    }
     return GdsAdapter.getInstance().getBookingDetails(pnr, ticketNo);
   }
   async refreshProviderDetails(bookingId: string) {
@@ -74,7 +82,10 @@ export class TicketsService {
       ? { id: identifier }
       : { bookingNumber: identifier };
     const booking = await db.booking.findFirst({
-      where: { ...where, ...(userId ? { userId } : {}) },
+      where: {
+        ...where,
+        ...(userId ? { OR: [{ userId }, { userId: null }] } : {}),
+      },
       include: {
         seats: true,
         passengers: true,

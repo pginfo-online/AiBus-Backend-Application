@@ -53,8 +53,6 @@ class PaymentsService {
         if (!booking || (booking.userId && booking.userId !== userId)) {
             throw new errors_1.NotFoundError("Booking not found");
         }
-        if (booking.agentId)
-            throw new errors_1.ValidationError("Agent bookings must be paid from the agent wallet");
         if (booking.status === client_1.BookingStatus.CONFIRMED) {
             throw new errors_1.ValidationError("Booking is already confirmed and completed");
         }

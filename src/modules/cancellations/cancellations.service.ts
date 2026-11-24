@@ -22,13 +22,9 @@ export class CancellationsService {
   }
   private provider = GdsAdapter.getInstance();
   private async owned(identifier: string, userId?: string) {
+    const isUuid = /^[0-9a-f-]{36}$/i.test(identifier);
     const booking = await getPrismaClient().booking.findFirst({
-      where: {
-        userId,
-        ...(/^[0-9a-f-]{36}$/i.test(identifier)
-          ? { id: identifier }
-          : { bookingNumber: identifier }),
-      },
+      where: isUuid ? { id: identifier } : { bookingNumber: identifier },
       include: {
         seats: true,
         payments: true,
@@ -38,8 +34,24 @@ export class CancellationsService {
         commissionSnapshot: true,
       },
     });
-    if (!userId || !booking || booking.userId !== userId)
+    if (!booking) {
       throw new NotFoundError("Booking");
+    }
+    // If the booking is tied to an account and a user ID is passed, enforce ownership
+    if (booking.userId && userId && booking.userId !== userId) {
+      throw new NotFoundError("Booking");
+    }
+    // If booking was created without an account (guest booking) and a user is now logged in,
+    // link it to this user
+    if (!booking.userId && userId) {
+      await getPrismaClient()
+        .booking.update({
+          where: { id: booking.id },
+          data: { userId },
+        })
+        .catch(() => {});
+      booking.userId = userId;
+    }
     return booking;
   }
   private selected(
@@ -68,19 +80,22 @@ export class CancellationsService {
     userId?: string,
   ) {
     const booking = await this.owned(identifier, userId);
+    const ticketNo = booking.providerTicketNo || booking.ticket?.ticketNumber;
+    const pnrNo = booking.providerPnrNo || booking.ticket?.pnrNumber;
+
     if (
       booking.status !== "CONFIRMED" ||
-      !booking.providerTicketNo ||
-      !booking.providerPnrNo
+      !ticketNo ||
+      !pnrNo
     )
       throw new ValidationError(
         "This booking is not eligible for cancellation",
       );
     const selected = this.selected(booking, seats);
     const quote = await this.provider.isCancellable(
-      booking.providerTicketNo,
+      ticketNo,
       selected.join(","),
-      booking.providerPnrNo,
+      pnrNo,
     );
     const grossTotal = booking.seats.reduce(
       (sum, s) => sum + Number(s.fareTotal),
@@ -103,6 +118,8 @@ export class CancellationsService {
       bookingId: booking.id,
       bookingNumber: booking.bookingNumber,
       seatNos: selected.join(","),
+      ticketNo,
+      pnrNo,
     };
   }
   async cancelSeats(
@@ -127,24 +144,28 @@ export class CancellationsService {
         seats.every((s) => c.seatNos.includes(s)),
     );
     if (previous) return this.result(previous.id);
+
+    const ticketNo = booking.providerTicketNo || booking.ticket?.ticketNumber;
+    const pnrNo = booking.providerPnrNo || booking.ticket?.pnrNumber;
+
     if (
       booking.status !== "CONFIRMED" ||
-      !booking.providerTicketNo ||
-      !booking.providerPnrNo
+      !ticketNo ||
+      !pnrNo
     )
       throw new ValidationError(
         "This booking is not eligible for cancellation",
       );
     const selected = this.selected(booking, seats);
     const quote = await this.provider.isCancellable(
-      booking.providerTicketNo,
+      ticketNo,
       selected.join(","),
-      booking.providerPnrNo,
+      pnrNo,
     );
     if (!quote.IsCancellable)
-      throw new ValidationError("The operator declined cancellation");
+      throw new ValidationError(quote.Message || "The operator declined cancellation");
     const key = createHash("sha256")
-      .update(`${booking.id}:${booking.providerTicketNo}:${selected.join(",")}`)
+      .update(`${booking.id}:${ticketNo}:${selected.join(",")}`)
       .digest("hex");
     const operation = await prisma.$transaction(async (tx) => {
       const claimed = await tx.booking.updateMany({
@@ -173,8 +194,8 @@ export class CancellationsService {
           refundAmount: 0,
           totalFare: Number(booking.totalFare),
           requestSnapshot: {
-            ticketNo: booking.providerTicketNo,
-            pnrNo: booking.providerPnrNo,
+            ticketNo,
+            pnrNo,
             quote: JSON.parse(JSON.stringify(quote)),
           },
         },
@@ -182,8 +203,8 @@ export class CancellationsService {
     });
     try {
       const response = await this.provider.cancelSeats({
-        TicketNo: booking.providerTicketNo,
-        PNR: booking.providerPnrNo,
+        TicketNo: ticketNo,
+        PNR: pnrNo,
         SeatNos: selected.join(","),
       });
       await prisma.cancellation.update({
@@ -339,7 +360,7 @@ export class CancellationsService {
         Number(payment.amount) - Math.max(0, priorRefunded - walletFunded),
       );
       let amount = refundAmount;
-      if (booking.agentId) {
+      if (booking.agentId && payment.gateway === "WALLET") {
         const commission = Number(
           booking.commissionSnapshot?.commissionAmt ?? 0,
         );

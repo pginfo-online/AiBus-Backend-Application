@@ -92,10 +92,25 @@ export class HoldsService {
           );
           if (conflict) {
             const context = existingDbHold.passengerContext as { pickupId?: string; dropoffId?: string } | null;
-            const same = userId && existingDbHold.userId === userId && heldSeats.length === input.passengers.length
-              && (existingDbHold.passengerContext as { requestHash?: string } | null)?.requestHash === requestHash && context?.pickupId === input.pickupId && context?.dropoffId === input.dropoffId
-              && input.passengers.every((p) => heldSeats.some((s) => s.seatNo === p.seatNo && s.name === p.name && s.gender === p.gender && s.age === p.age));
-            if (same) return { id: existingDbHold.id, holdId: existingDbHold.providerHoldId, providerHoldId: existingDbHold.providerHoldId, expiresAt: existingDbHold.expiresAt, ttlSeconds: Math.max(0, Math.floor((existingDbHold.expiresAt.getTime() - Date.now()) / 1000)), totalFare: heldSeats.reduce((sum, s) => sum + Number(s.fare), 0) };
+            const isSameUser = (userId && existingDbHold.userId === userId) || (!userId && !existingDbHold.userId);
+            const isSameSeats =
+              heldSeats.length === input.passengers.length &&
+              input.passengers.every((p) =>
+                heldSeats.some((hs) => {
+                  const s = typeof hs === 'string' ? hs : (hs.SeatNo || hs.seatNo);
+                  return String(s).trim().toUpperCase() === String(p.seatNo).trim().toUpperCase();
+                })
+              );
+            if (isSameUser && isSameSeats) {
+              return {
+                id: existingDbHold.id,
+                holdId: existingDbHold.providerHoldId,
+                providerHoldId: existingDbHold.providerHoldId,
+                expiresAt: existingDbHold.expiresAt,
+                ttlSeconds: Math.max(0, Math.floor((existingDbHold.expiresAt.getTime() - Date.now()) / 1000)),
+                totalFare: heldSeats.reduce((sum, s) => sum + Number(s.fare || s.Fare || 0), 0),
+              };
+            }
             throw new SeatUnavailableError('One or more of the selected seats are already on hold.');
           }
         }
@@ -107,18 +122,26 @@ export class HoldsService {
       const chart = await this.gdsAdapter.getSeatChart(input.busId, {
         fromCityId: input.fromCityId, toCityId: input.toCityId, journeyDate: input.journeyDate,
       });
-      const pickup = chart.BoardingPoints.find((point) => String(point.PickupCode) === input.pickupId);
-      const dropoff = chart.DroppingPoints.find((point) => String(point.DropoffCode) === input.dropoffId);
-      if ((chart.BoardingPoints.length && !pickup) || (chart.DroppingPoints.length && !dropoff)) throw new SeatUnavailableError('Boarding or dropping point is no longer available');
+      let pickup = chart.BoardingPoints.find((point) => String(point.PickupCode) === input.pickupId);
+      if (!pickup && chart.BoardingPoints.length > 0) {
+        pickup = chart.BoardingPoints[0];
+        input.pickupId = String(pickup.PickupCode);
+      }
+      let dropoff = chart.DroppingPoints.find((point) => String(point.DropoffCode) === input.dropoffId);
+      if (!dropoff && chart.DroppingPoints.length > 0) {
+        dropoff = chart.DroppingPoints[0];
+        input.dropoffId = String(dropoff.DropoffCode);
+      }
       const journey = {
         operatorName: chart.CompanyName ?? null, busType: chart.BusTypeName ?? null,
         cancellationPolicy: chart.CancellationPolicy,
         pickupSnapshot: pickup ? { code: pickup.PickupCode, name: pickup.PickupName, time: pickup.PickupTime, address: pickup.Address ?? null, landmark: pickup.Landmark ?? null, contact: pickup.Contact ?? null } : null,
         dropoffSnapshot: dropoff ? { code: dropoff.DropoffCode, name: dropoff.DropoffName, time: dropoff.DropoffTime, address: dropoff.Address ?? null, landmark: dropoff.Landmark ?? null, contact: dropoff.Contact ?? null } : null,
       };
-      const layout = new Map(chart.Layout.map((seat) => [seat.seat_no, seat]));
+      const layout = new Map(chart.Layout.map((seat) => [String(seat.seat_no).trim().toUpperCase(), seat]));
       const passengers = input.passengers.map((passenger) => {
-        const seat = layout.get(passenger.seatNo);
+        const cleanSeat = String(passenger.seatNo).trim().toUpperCase();
+        const seat = layout.get(cleanSeat) || layout.get(passenger.seatNo);
         if (!seat || !(seat.seat_status === 1 || (passenger.gender === 'M' && seat.seat_status === 2) || (passenger.gender === 'F' && seat.seat_status === 3))) {
           throw new SeatUnavailableError(`Seat ${passenger.seatNo} is no longer available`);
         }

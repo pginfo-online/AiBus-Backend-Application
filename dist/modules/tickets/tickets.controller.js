@@ -30,7 +30,9 @@ class TicketsController {
                 : req.params.ticketNumber;
             const owner = await (0, database_1.getPrismaClient)().booking.findFirst({
                 where: {
-                    userId: req.user.sub,
+                    ...(req.user?.sub
+                        ? { OR: [{ userId: req.user.sub }, { userId: null }] }
+                        : {}),
                     OR: [
                         { providerTicketNo: ticketNumber },
                         { ticket: { ticketNumber } },
@@ -65,7 +67,7 @@ class TicketsController {
                 response_1.ApiResponse.error(res, "PNR and TicketNo are required query parameters", "VALIDATION_ERROR", 400);
                 return;
             }
-            const result = await this.ticketsService.getGdsBookingDetails(pnr, ticketNo, req.user.sub);
+            const result = await this.ticketsService.getGdsBookingDetails(pnr, ticketNo, req.user?.sub);
             response_1.ApiResponse.success(res, result, "Provider booking details retrieved successfully");
         }
         catch (error) {

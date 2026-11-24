@@ -47,6 +47,14 @@ export interface GdsBusSearchResult {
         Pct: number;
         Mins: number;
     }>;
+    FromCityId?: number;
+    ToCityId?: number;
+    FromCityName?: string;
+    ToCityName?: string;
+    FromName?: string;
+    ToName?: string;
+    from?: string;
+    to?: string;
 }
 export interface GdsSeatLayoutItem {
     seq_no: number;
@@ -86,7 +94,7 @@ export interface GdsPassengerHold {
     SeatNo: string;
     SeatTypeId: number;
     Fare: number;
-    Gender: 'M' | 'F' | 'O';
+    Gender: 'M' | 'F';
     Age: number;
     Name: string;
     IsAcSeat: boolean;

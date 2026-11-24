@@ -45,7 +45,9 @@ export class TicketsController {
         : req.params.ticketNumber;
       const owner = await getPrismaClient().booking.findFirst({
         where: {
-          userId: req.user!.sub,
+          ...(req.user?.sub
+            ? { OR: [{ userId: req.user.sub }, { userId: null }] }
+            : {}),
           OR: [
             { providerTicketNo: ticketNumber },
             { ticket: { ticketNumber } },
@@ -96,7 +98,7 @@ export class TicketsController {
       const result = await this.ticketsService.getGdsBookingDetails(
         pnr,
         ticketNo,
-        req.user!.sub,
+        req.user?.sub,
       );
       ApiResponse.success(
         res,
