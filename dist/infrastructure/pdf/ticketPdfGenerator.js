@@ -270,7 +270,7 @@ async function generateTicketPdf(data) {
             doc.font("Helvetica").fontSize(7.5).fillColor("#333333");
             doc.text("• Please reach the boarding point by the reporting time", x + 20, y);
             y += 13;
-            doc.text("• Chat with us https://aibus.com/chat", x + 20, y);
+            doc.text("• Chat with us https://aibus.in", x + 20, y);
             y += 13;
             doc.text("• In case Operator is not reachable please reach out to AiBus Customer Support at 040-61656789", x + 20, y);
             y += 20;
@@ -294,7 +294,7 @@ async function generateTicketPdf(data) {
             doc.text("0%", rightColX + 115, y + 12, { width: 50 });
             doc.text("Rs. 0", rightColX + 175, y + 12, { width: 65, align: "right" });
             doc.font("Helvetica").fontSize(6.5).fillColor("#777777");
-            doc.text("Additional Cancellation Charge of Rs. 15 per seat is applicable", rightColX + 6, y + 30, { width: colW - 12 });
+            doc.text("Additional Cancellation Charge will be applicable", rightColX + 6, y + 30, { width: colW - 12 });
             // ==========================================
             // PAGE 2: TERMS AND LEGAL CONDITIONS
             // ==========================================
@@ -309,7 +309,7 @@ async function generateTicketPdf(data) {
                 "If a bus/service is canceled, for tickets booked through AiBus, the refund money is transferred back to the passenger's Credit/Debit card or Bank Account used for booking.",
                 "Cancellation charges are applicable on Original fare but not on the Discounted Fare.",
                 "Any complaints/grievances related to journey should be reported within a week from date of journey.",
-                "For detailed AiBus Terms and Conditions, Please Click Here https://www.aibus.com/terms.",
+                "For detailed AiBus Terms and Conditions, Please Click Here https://www.aibus.in",
             ];
             for (const bullet of bulletPoints) {
                 doc.font("Helvetica").fontSize(8.5).fillColor("#333333").text(`• ${bullet}`, x + 20, p2Y, {
